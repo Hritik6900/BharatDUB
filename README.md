@@ -52,6 +52,20 @@ curl localhost:8000/api/jobs/<job_id>/outputs
 `GNANI_MAX_CONCURRENCY` defaults to 1 because the Gnani docs show a "1 active request at a time" account limit.
 Raise it only if app.gnani.ai shows a higher limit for your account.
 
+### Quick start without keys (mock mode)
+
+```powershell
+.\dev.ps1 -Mock     # backend (simulated AI, data in backend\data-mock) + frontend, in two windows
+```
+
+Open http://localhost:3000. A banner says the AI is simulated: transcripts come from a few sample
+Hinglish lines, translations from a small hand-written phrasebook, and voices are tones, not speech.
+Demucs, Silero, ffmpeg, the cache, live chunking and all the UI run for real. Mock results use their own
+cache and data folder, so they never mix with real runs. Use `.\dev.ps1` (no flag) once `backend\.env` has keys.
+
+If port 8000 is taken on your machine, run the backend on another port and set
+`NEXT_PUBLIC_API_BASE` / `NEXT_PUBLIC_WS_BASE` in `web\.env.local` to match (they are read at build time).
+
 ### Database
 
 Run `supabase/migrations/0001_init.sql` in the Supabase SQL editor (or `supabase db push`). It creates the tables,
