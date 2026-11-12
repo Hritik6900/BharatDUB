@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     tts_model: str = "timbre-v2.5"
     tts_sample_rate: int = 44100
 
+    live_sample_rate: int = 24000      # Live TTS PCM rate sent to viewers
+    mock_providers: bool = False       # simulate Gnani + LLM for UI work without keys (UI shows a banner)
+
     data_dir: str = ""                 # local working files + cache; default backend/data
     studio_separate: bool = True       # run Demucs (stage 3)
     public_api_base: str = "http://localhost:8000"

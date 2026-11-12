@@ -78,9 +78,27 @@ async def create_job(
     return {"job_id": job["id"]}
 
 
+@router.get("/api/jobs")
+async def list_jobs() -> list[dict[str, Any]]:
+    rows = await runner.store.select("jobs", order="created_at", desc=True, limit=30)
+    return [{k: j.get(k) for k in ("id", "source_path", "duration_s", "target_langs", "status", "stage",
+                                    "created_at")} for j in rows]
+
+
 @router.get("/api/jobs/{job_id}")
 async def get_job(job_id: str) -> dict[str, Any]:
     return await _job_or_404(job_id)
+
+
+@router.get("/api/jobs/{job_id}/source")
+async def job_source(job_id: str) -> FileResponse:
+    """The original upload, for the A/B player (deleted with the job after UPLOAD_TTL_HOURS)."""
+    await _job_or_404(job_id)
+    d = runner.job_dir(job_id)
+    src = next(iter(sorted(d.glob("source.*"))), None) if d.exists() else None
+    if not src:
+        raise HTTPException(404, "source deleted")
+    return FileResponse(src)
 
 
 @router.get("/api/jobs/{job_id}/events")

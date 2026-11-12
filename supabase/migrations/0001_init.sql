@@ -72,6 +72,7 @@ create table if not exists live_sessions (
   voice_profile_id uuid references voice_profiles on delete set null,
   offset_ms int default 0,
   status text default 'idle',
+  ingest_token text,          -- secret the streamer's mic client must present on /ws/ingest
   created_at timestamptz default now()
 );
 

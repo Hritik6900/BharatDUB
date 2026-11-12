@@ -35,8 +35,9 @@ class GnaniTTS:
             h["Content-Type"] = "application/json"
         return h
 
-    def build_body(self, text: str, lang: str, voice: VoiceSpec, *, container: str = "wav") -> dict[str, Any]:
-        audio_config = {"sample_rate": self.s.tts_sample_rate, "num_channels": 1, "sample_width": 2,
+    def build_body(self, text: str, lang: str, voice: VoiceSpec, *, container: str = "wav",
+                   sample_rate: int | None = None) -> dict[str, Any]:
+        audio_config = {"sample_rate": sample_rate or self.s.tts_sample_rate, "num_channels": 1, "sample_width": 2,
                         "encoding": "linear_pcm", "container": container}
         if voice["kind"] == "clone":
             # VC takes no voice/language field (docs 2026-11-13).
@@ -63,9 +64,10 @@ class GnaniTTS:
             raise ProviderError("tts.synth: empty audio")
         return resp.content
 
-    async def synth_stream(self, text: str, lang: str, voice: VoiceSpec) -> AsyncIterator[bytes]:
-        """Raw PCM16 mono chunks at settings.tts_sample_rate, via SSE. Records time to first chunk."""
-        body = self.build_body(text, lang, voice, container="raw")
+    async def synth_stream(self, text: str, lang: str, voice: VoiceSpec, *,
+                           sample_rate: int | None = None) -> AsyncIterator[bytes]:
+        """Raw PCM16 mono chunks (default settings.tts_sample_rate), via SSE. Records time to first chunk."""
+        body = self.build_body(text, lang, voice, container="raw", sample_rate=sample_rate)
         headers = self._headers()
         t0 = time.perf_counter()
         self.last_first_chunk_s = None

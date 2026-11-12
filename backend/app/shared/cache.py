@@ -8,7 +8,9 @@ from app.config import get_settings
 
 
 def cache_dir(stage: str) -> Path:
-    d = get_settings().data_path / "cache" / stage
+    s = get_settings()
+    # Mock-mode results must never be served once real providers are configured.
+    d = s.data_path / ("cache-mock" if s.mock_providers else "cache") / stage
     d.mkdir(parents=True, exist_ok=True)
     return d
 

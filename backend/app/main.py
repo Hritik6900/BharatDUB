@@ -1,4 +1,4 @@
-"""FastAPI entrypoint. Run: uvicorn app.main:app --reload (from backend/)."""
+﻿"""FastAPI entrypoint. Run: uvicorn app.main:app --reload (from backend/)."""
 import asyncio
 import logging
 from collections.abc import AsyncIterator
@@ -10,7 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.db import get_store
-from app.shared import glossary, voices
+from app.live import routes as live_routes
+from app.shared import dashboard, glossary, voices
 from app.studio import routes as studio_routes
 
 log = logging.getLogger("app")
@@ -54,6 +55,8 @@ app.add_middleware(
 app.include_router(studio_routes.router)
 app.include_router(voices.router)
 app.include_router(glossary.router)
+app.include_router(live_routes.router)
+app.include_router(dashboard.router)
 
 
 @app.get("/health")
@@ -66,4 +69,5 @@ async def health() -> dict[str, object]:
             "llm": bool(settings.llm_base_url and settings.llm_model),
             "supabase": settings.use_supabase,
         },
+        "mock_providers": settings.mock_providers,
     }
