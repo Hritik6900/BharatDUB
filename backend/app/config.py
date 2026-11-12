@@ -49,6 +49,20 @@ class Settings(BaseSettings):
     tts_model: str = "timbre-v2.5"
     tts_sample_rate: int = 44100
 
+    data_dir: str = ""                 # local working files + cache; default backend/data
+    studio_separate: bool = True       # run Demucs (stage 3)
+    public_api_base: str = "http://localhost:8000"
+
+    @property
+    def data_path(self) -> Path:
+        p = Path(self.data_dir) if self.data_dir else BACKEND_DIR / "data"
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    @property
+    def use_supabase(self) -> bool:
+        return bool(self.supabase_url and self.supabase_service_key.get_secret_value())
+
     @property
     def gnani_ws_base(self) -> str:
         return self.gnani_base.replace("https://", "wss://").replace("http://", "ws://")

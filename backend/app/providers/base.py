@@ -57,7 +57,8 @@ class TranscriptEvent:
 
 
 class STT(Protocol):
-    async def transcribe(self, wav_path: str, lang: str = "indic-auto") -> STTResult: ...
+    async def transcribe(self, wav_path: str, lang: str = "indic-auto", *, fmt: str | None = None,
+                         keyterms: list[str] | None = None) -> STTResult: ...
 
 
 class StreamingSTT(Protocol):

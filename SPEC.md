@@ -331,6 +331,21 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
 - [ ] Vihaan X rules on code written before the event.
 - [ ] **New:** real concurrency limit for our Gnani account (docs show 1 active request; check app.gnani.ai). It decides whether Live can do 3 languages in parallel.
 - [ ] **New:** measured smoke latencies (needs `GNANI_API_KEY`).
+- [x] Demucs htdemucs on CPU: **40.3 s for 60 s of audio** (Ryzen 7 7435HS, torch 2.15 CPU, measured 2026-11-13). Silero VAD: 3.5 s for a 14 s clip including model load.
+
+## 18. Implementation notes (M2)
+
+- Storage: `db.get_store()` returns `SupabaseStore` when `SUPABASE_*` is set, else `LocalStore` (`data/local_db.json`)
+  so the pipeline runs and is tested without a project. Render outputs go to the `renders` bucket (signed URLs) in
+  Supabase mode, else are served from `/files/{job_id}/{name}`.
+- Audio is numpy + soundfile (pydub needs `audioop`, removed in Python 3.13). Demucs runs in a subprocess
+  (`app/studio/demucs_worker.py`) that avoids torchaudio file I/O.
+- Cache (`data/cache/<stage>/`), content-addressed and shared across jobs: separate (full.wav hash),
+  segment (vocals hash + params), transcribe (clip audio hash + lang + model), translate (lines + lang + glossary +
+  model), voice (text + lang + voice + model + sample rate). Edited lines are never overwritten by re-translation.
+- Usage counters and warnings are stored in `jobs.stage_timings._usage` / `._warnings`; per-language stage times as
+  `"<stage>:<lang>"`; `_total` is the sum of stage times.
+- Run a real job without the server: `python -m scripts.dub_file reel.mp4 --langs ta-IN`.
 
 ## 17. First prompt
 

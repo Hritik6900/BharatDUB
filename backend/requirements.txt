@@ -8,11 +8,11 @@ python-multipart>=0.0.9
 supabase>=2.5
 numpy>=1.26
 soundfile>=0.12
-pydub>=0.25
 
-# Studio audio (M2): heavy, install when starting M2
-# silero-vad>=5.1
-# demucs>=4.0
+# Studio audio. Install CPU torch first:
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+silero-vad>=5.1
+demucs>=4.0
 
 # dev
 pytest>=8.0

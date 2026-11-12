@@ -28,12 +28,25 @@ Requirements: Python 3.11+, Node 20+, ffmpeg on PATH (needed from M2 on), a Supa
 cd backend
 python -m venv .venv
 .venv/Scripts/activate          # Windows; on macOS/Linux: source .venv/bin/activate
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements.txt
 cp .env.example .env            # fill in GNANI_API_KEY, LLM_*, SUPABASE_*
 uvicorn app.main:app --reload   # http://localhost:8000/health
-pytest                          # mocked provider tests, no credits used
+pytest                          # offline tests (fake providers), no credits used
 python -m scripts.smoke         # real API calls, prints latencies
 python -m scripts.smoke --ref my_voice.wav --consent --vc-langs   # voice-clone language check
+python -m scripts.dub_file my_reel.mp4 --langs ta-IN               # full Studio run, prints stage timings
+```
+
+Without `SUPABASE_*` the backend uses a local JSON store and serves outputs from `/files/...`, so you can run
+everything on a laptop. Demucs downloads its model weights (~80 MB) on first use.
+
+Try a job over HTTP:
+
+```bash
+curl -F file=@reel.mp4 -F target_langs=ta-IN,bn-IN -F owns_video=true localhost:8000/api/jobs
+curl -N localhost:8000/api/jobs/<job_id>/events     # live progress (SSE)
+curl localhost:8000/api/jobs/<job_id>/outputs
 ```
 
 `GNANI_MAX_CONCURRENCY` defaults to 1 because the Gnani docs show a "1 active request at a time" account limit.
