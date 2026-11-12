@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+/* Tokens: FRONTEND.md section 1. Language hues appear only where that language is. */
+:root {
+  --ink: #14161f;
+  --porcelain: #f5f6f8;
+  --mist: #e4e7ee;
+  --slate: #5d6475;
+  --hi: #f2a33a;
+  --ta: #0e8f8a;
+  --bn: #d2344a;
+  --te: #7a4fd1;
+  --en: #3a5bd9;
+  --bg: var(--porcelain);
+  --fg: var(--ink);
+}
+
+.theme-dark {
+  --bg: #0e1016;
+  --fg: #eceef3;
+  --mist: #252935;
+  --slate: #9aa1b2;
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-porcelain: var(--porcelain);
+  --color-mist: var(--mist);
+  --color-slate: var(--slate);
+  --color-bg: var(--bg);
+  --color-fg: var(--fg);
+  --color-lang-hi: var(--hi);
+  --color-lang-ta: var(--ta);
+  --color-lang-bn: var(--bn);
+  --color-lang-te: var(--te);
+  --color-lang-en: var(--en);
+  --font-display: var(--font-anek), "Noto Sans", sans-serif;
+  --font-body: var(--font-noto), "Noto Sans Devanagari", "Noto Sans Tamil", "Noto Sans Bengali", "Noto Sans Telugu", sans-serif;
+  --radius-chip: 999px;
+  --radius-media: 20px;
+  --radius-panel: 12px;
+}
+
+html {
+  background: var(--bg);
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  line-height: 1.6;
+}
+
+:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+}
+
+.voice-ribbon {
+  background: linear-gradient(90deg, var(--hi), var(--to, var(--ta)));
+}

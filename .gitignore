@@ -1,0 +1,16 @@
+.env
+.env.local
+*.env
+!*.env.example
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+backend/scripts/out/
+out/
+node_modules/
+web/.next/
+*.wav
+*.mp4
+*.mp3
+!backend/eval/**/*.wav
