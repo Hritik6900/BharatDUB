@@ -48,7 +48,7 @@ SEC_PER_CHAR = 0.065
 def _translate(text: str, target: str) -> str:
     if text in LINES and target in PHRASEBOOK:
         return PHRASEBOOK[target][LINES.index(text)]
-    return f"[{target}] {text}"
+    return text  # outside the phrasebook the mock passes text through untranslated
 
 
 def _tone(text: str, sr: int) -> np.ndarray:

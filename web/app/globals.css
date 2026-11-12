@@ -1,11 +1,11 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.theme-dark, .theme-dark *));
+
 /* Tokens: FRONTEND.md section 1. Language hues appear only where that language is. */
 :root {
   --ink: #14161f;
   --porcelain: #f5f6f8;
-  --mist: #e4e7ee;
-  --slate: #5d6475;
   --hi: #f2a33a;
   --ta: #0e8f8a;
   --bn: #d2344a;
@@ -13,13 +13,27 @@
   --en: #3a5bd9;
   --bg: var(--porcelain);
   --fg: var(--ink);
+  --mist: #e4e7ee;
+  --slate: #5d6475;
+  --surface: #ffffff;
+  --on-fg: var(--porcelain);
+  color-scheme: light;
 }
 
 .theme-dark {
   --bg: #0e1016;
   --fg: #eceef3;
-  --mist: #252935;
-  --slate: #9aa1b2;
+  --mist: #262a36;
+  --slate: #a1a8b8;
+  --surface: #151821;
+  --on-fg: #0e1016;
+  /* hues raised ~8% lightness for dark surfaces */
+  --hi: #f5b55f;
+  --ta: #14b0aa;
+  --bn: #e05468;
+  --te: #9271dc;
+  --en: #5c78e2;
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -29,13 +43,17 @@
   --color-slate: var(--slate);
   --color-bg: var(--bg);
   --color-fg: var(--fg);
+  --color-surface: var(--surface);
+  --color-on-fg: var(--on-fg);
   --color-lang-hi: var(--hi);
   --color-lang-ta: var(--ta);
   --color-lang-bn: var(--bn);
   --color-lang-te: var(--te);
   --color-lang-en: var(--en);
-  --font-display: var(--font-anek), "Noto Sans", sans-serif;
-  --font-body: var(--font-noto), "Noto Sans Devanagari", "Noto Sans Tamil", "Noto Sans Bengali", "Noto Sans Telugu", sans-serif;
+  --font-display: var(--font-anek), var(--font-anek-deva), var(--font-anek-tamil), var(--font-anek-bangla),
+    var(--font-anek-telugu), "Noto Sans", sans-serif;
+  --font-body: var(--font-noto), var(--font-noto-deva), var(--font-noto-tamil), var(--font-noto-bengali),
+    var(--font-noto-telugu), sans-serif;
   --radius-chip: 999px;
   --radius-media: 20px;
   --radius-panel: 12px;
@@ -50,6 +68,15 @@ body {
   color: var(--fg);
   font-family: var(--font-body);
   line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
 }
 
 :focus-visible {
@@ -59,4 +86,17 @@ body {
 
 .voice-ribbon {
   background: linear-gradient(90deg, var(--hi), var(--to, var(--ta)));
+}
+
+.wdth {
+  font-variation-settings: "wdth" var(--wdth, 100);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
 }

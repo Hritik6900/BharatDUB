@@ -8,6 +8,8 @@ __pycache__/
 .pytest_cache/
 backend/scripts/out/
 backend/data/
+backend/data-mock/
+design/screens/*.png
 out/
 node_modules/
 web/.next/
