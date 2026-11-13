@@ -91,9 +91,9 @@ export default function StudioPage() {
       <div className="mx-auto max-w-6xl px-5 pb-24 pt-12 sm:px-8 sm:pt-16">
         <PageHeader icon={Clapperboard} eyebrow="Studio" title={<>Dub a <em>video</em></>} lede="A reel, short or clip up to 3 minutes. You get it back dubbed, with subtitles, one video per language." />
 
-        <div className="mt-12 grid gap-8 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+        <div className="mt-12 grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
           <div className="card card-lift rise space-y-10 p-5 sm:p-8">
-            <fieldset>
+            <fieldset className="min-w-0">
               <StepLabel n={1}>Your video</StepLabel>
               <div
                 role="button"
@@ -134,7 +134,7 @@ export default function StudioPage() {
               </div>
             </fieldset>
 
-            <fieldset>
+            <fieldset className="min-w-0">
               <StepLabel n={2}>Dub into</StepLabel>
               <div className="mt-4 flex flex-wrap gap-2.5">
                 {TARGET_LANGS.map((l) => (
@@ -143,7 +143,7 @@ export default function StudioPage() {
               </div>
             </fieldset>
 
-            <fieldset>
+            <fieldset className="min-w-0">
               <StepLabel n={3}>Voice</StepLabel>
               <div className="mt-4 grid grid-cols-1 gap-3">
                 <label className={radio(voiceMode === "video")}>
