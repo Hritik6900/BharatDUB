@@ -351,6 +351,17 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
 - [x] All ten languages are selectable (2026-11-13): Studio offers all ten (Hindi included, for non-Hindi videos), Live the nine
   non-Hindi ones. Kannada, Malayalam, Marathi, Gujarati and Punjabi were checked once each on the real API: Gemini translation in
   native script, Timbre stock voice (1.2-3.7 s), and Prisma heard the line back with at most one word different.
+- [x] **Account concurrency is 1** (2026-11-13: three TTS calls at once, two got 429 "Only 1 active request is allowed at a time").
+- [x] Live end to end on the real APIs (2026-11-13, full numbers in LIVE_TEST_REPORT.md; source = a dense 24.9 s Hindi reel
+  replayed at real-time speed): stock voices, 3 languages: first audio p50 3.6 s / p95 4.7 s; cloned voice, 1 language: 4.6 s / 5.4 s.
+  Clone TTS is not streamed and takes 1.9-3.5 s per line (stock: ~0.5 s to first chunk), so with concurrency 1 only the first
+  `live_clone_langs` languages (default = `GNANI_MAX_CONCURRENCY`) use the cloned voice in Live; a chunk already more than
+  `live_clone_max_lag_ms` (5 s) late falls back to stock. Stock voices run at `speed` 1.15 in Live (VC ignores `speed`).
+- Live can learn the voice **from the stream** (`voice_from_stream=true` + `voice_consent=true` on `POST /api/live/sessions`, 403
+  without consent): 12 s of speech frames are collected, cloned, saved as a normal profile ("Voice from live <time>") and used from
+  then on; stock voices until then. Measured: ready 33-37 s after the stream starts.
+- Live fan-out: every chunk is translated immediately for all languages (captions in order per language); only TTS is queued.
+  The viewer plays 1.1x when more than 2 s of audio is waiting and skips a chunk more than 10 s late.
 - [x] Demucs htdemucs on CPU: **40.3 s for 60 s of audio** (Ryzen 7 7435HS, torch 2.15 CPU, measured 2026-11-13). Silero VAD: 3.5 s for a 14 s clip including model load.
 
 ## 18. Implementation notes (M2)

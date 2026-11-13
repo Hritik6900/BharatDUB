@@ -18,6 +18,10 @@ import { useLiveFeed } from "@/lib/useLiveFeed";
 import { TARGET_LANGS, lang } from "@/lib/langs";
 
 const KEY = "bd-live-session";
+const STREAM = "__stream__";
+// Same sentence the backend stores on the voice profile it creates from the stream.
+const STREAM_VOICE_CONSENT =
+  "The voice on this stream is mine, or I have the speaker's permission, and I agree that Bharat Dub may make a copy of it to dub this stream.";
 
 interface Saved {
   sid: string;
@@ -62,7 +66,8 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
   const [yt, setYt] = useState("");
   const [langs, setLangs] = useState<string[]>(["ta-IN", "bn-IN", "en-IN"]);
   const [voices, setVoices] = useState<VoiceProfile[]>([]);
-  const [voice, setVoice] = useState("");
+  const [voice, setVoice] = useState(STREAM);
+  const [voiceConsent, setVoiceConsent] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -75,7 +80,13 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
     try {
       const r = await api<{ session_id: string; ingest_token: string }>("/api/live/sessions", {
         method: "POST",
-        body: JSON.stringify({ youtube_video_id: yt, target_langs: langs, voice_profile_id: voice || null }),
+        body: JSON.stringify({
+          youtube_video_id: yt,
+          target_langs: langs,
+          voice_profile_id: voice && voice !== STREAM ? voice : null,
+          voice_from_stream: voice === STREAM,
+          voice_consent: voice === STREAM && voiceConsent,
+        }),
       });
       onCreated({ sid: r.session_id, token: r.ingest_token });
     } catch (e) {
@@ -102,13 +113,32 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
           <label className="block">
             <span className="text-lg font-medium tracking-[-0.01em]">Voice</span>
             <select value={voice} onChange={(e) => setVoice(e.target.value)} className="input mt-3">
+              <option value={STREAM}>The voice on this stream (learned while you speak)</option>
               <option value="">Stock voice per language</option>
-              {voices.map((v) => <option key={v.id} value={v.id}>{v.display_name} (my cloned voice)</option>)}
+              {voices.map((v) => <option key={v.id} value={v.id}>{v.display_name} (saved voice)</option>)}
             </select>
           </label>
+          {voice === STREAM && (
+            <div className="tex-tint rounded-[14px] border border-line p-4">
+              <label className="flex cursor-pointer items-start gap-3">
+                <input type="checkbox" checked={voiceConsent} onChange={(e) => setVoiceConsent(e.target.checked)} className="mt-1 size-4" />
+                <span className="text-[0.95rem]">{STREAM_VOICE_CONSENT}</span>
+              </label>
+              <p className="mt-2 pl-7 text-sm text-muted">
+                The first 12 seconds of speech are dubbed in a stock voice while the copy is made. Works best with one speaker and no loud
+                music. The copy is saved under Your voice, where you can delete it.
+              </p>
+            </div>
+          )}
+          {voice !== "" && langs.length > 1 && (
+            <p className="text-sm text-muted">
+              For now your own voice plays in the first language you picked ({lang(langs[0]).name}); the others use stock voices. A copied
+              voice takes 2 to 4 seconds per line and our speech account runs one request at a time, so more would fall behind.
+            </p>
+          )}
           {err && <Notice tone="error" role="alert">{err}</Notice>}
           <div className="flex flex-wrap items-center gap-5">
-            <Button size="lg" disabled={!langs.length || busy} onClick={create}>
+            <Button size="lg" disabled={!langs.length || busy || (voice === STREAM && !voiceConsent)} onClick={create}>
               {busy ? "Creating…" : "Create session"}
               <ArrowRight aria-hidden className="size-4 transition-transform group-hover:translate-x-0.5" />
             </Button>
@@ -227,6 +257,14 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
                 {lang(c).name}
               </li>
             ))}
+            <li className="inline-flex items-center gap-2 rounded-chip border border-line bg-surface px-3 py-1.5">
+              <Mic aria-hidden className="size-4" />
+              {session?.voice_profile_id
+                ? `Speaker's own voice${session.clone_langs?.length && session.clone_langs.length < langs.length ? ` in ${session.clone_langs.map((c) => lang(c).name).join(", ")}` : ""}`
+                : session?.voice_from_stream
+                  ? "Learning the voice (stock until then)"
+                  : "Stock voices"}
+            </li>
             <li className="inline-flex items-center gap-2 px-2 text-muted">
               <Users aria-hidden className="size-4" />
               <span className="tnum">{session?.viewers ?? 0}</span> listening

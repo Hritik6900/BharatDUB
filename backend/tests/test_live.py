@@ -82,11 +82,13 @@ async def test_pipeline_captions_audio_order_and_metrics(tmp_path, monkeypatch):
 
     captions = [m for m in msgs if m["type"] == "caption"]
     assert [c["text"] for c in captions] == PHRASEBOOK["ta-IN"][:2]
-    seqs = [m["seq"] for m in msgs if m["type"] in ("caption", "audio")]
-    assert seqs == sorted(seqs)  # in order per language
-    first_audio = next(i for i, m in enumerate(msgs) if m["type"] == "audio")
-    first_caption = next(i for i, m in enumerate(msgs) if m["type"] == "caption")
-    assert first_caption < first_audio  # caption before audio
+    for kind in ("caption", "audio"):
+        seqs = [m["seq"] for m in msgs if m["type"] == kind]
+        assert seqs == sorted(seqs)  # captions in order, audio in order (a later caption may pass earlier audio)
+    for seq in (1, 2):
+        cap = next(i for i, m in enumerate(msgs) if m["type"] == "caption" and m["seq"] == seq)
+        aud = next(i for i, m in enumerate(msgs) if m["type"] == "audio" and m["seq"] == seq)
+        assert cap < aud  # a chunk's caption comes before its audio
     pcm = base64.b64decode(next(m for m in msgs if m["type"] == "audio" and m["pcm_b64"])["pcm_b64"])
     assert len(pcm) % 2 == 0
     stats = p.stats()
@@ -138,3 +140,64 @@ def test_live_rest_and_ws_flow():
 def test_dashboard_nulls_when_unmeasured():
     d = TestClient(app).get("/api/dashboard").json()
     assert d["live"]["p50_ms"] is None and d["languages_supported"] == 10
+
+
+class TalkingSTT:
+    """Says speech has started on the first frame and never finishes the utterance."""
+
+    async def stream(self, frames, lang, **kw):
+        first = True
+        async for _ in frames:
+            if first:
+                first = False
+                yield TranscriptEvent(kind="speech_start")
+
+
+async def test_voice_from_stream_clones_only_with_consent(tmp_path, monkeypatch):
+    import numpy as np
+
+    store = LocalStore(tmp_path / "db.json")
+    monkeypatch.setattr("app.live.pipeline.get_store", lambda: store)
+    monkeypatch.setattr("app.live.pipeline.ENROL_SPEECH_S", 0.5)
+    loud = (np.sin(np.arange(512) / 5) * 8000).astype("<i2").tobytes()
+    quiet = b"\x00" * 1024
+
+    async def run(row_extra: dict, frame: bytes) -> tuple[LivePipeline, list[dict]]:
+        row = await store.insert("live_sessions", {"target_langs": ["ta-IN"], "src_lang": "indic-auto", **row_extra})
+        sess = LiveSession(row)
+        tts = MockTTS()
+        calls: list[str | None] = []
+
+        async def clone(wav_path, *, consent_at):
+            calls.append(consent_at)
+            return {"embedding": "e", "shape": [1, 768], "dtype": "torch.bfloat16"}
+
+        tts.clone_embedding = clone  # type: ignore[method-assign]
+        p = LivePipeline(sess, stt=TalkingSTT(), llm=MockLLM(), tts=tts)
+        await p.start()
+        for _ in range(40):
+            p.feed(frame)
+            await asyncio.sleep(0.005)
+        await asyncio.sleep(0.1)
+        await p.stop()
+        return p, calls  # type: ignore[return-value]
+
+    consent = {"voice_from_stream": {"consent_at": "2026-11-13T00:00:00+00:00", "consent_text": "ok"}}
+    p, calls = await run(consent, loud)
+    assert calls == ["2026-11-13T00:00:00+00:00"] and p.voice and p.voice["kind"] == "clone"
+    profiles = await store.select("voice_profiles")
+    assert len(profiles) == 1 and profiles[0]["consent_at"] and p.sess.row["voice_profile_id"] == profiles[0]["id"]
+
+    p, calls = await run({}, loud)            # no consent: never collected, never cloned
+    assert calls == [] and p.voice is None
+    p, calls = await run(consent, quiet)      # consent but only silence: nothing to copy
+    assert calls == [] and p.voice is None
+    assert len(await store.select("voice_profiles")) == 1
+
+
+def test_voice_from_stream_needs_consent_flag():
+    c = TestClient(app)
+    r = c.post("/api/live/sessions", json={"target_langs": ["ta-IN"], "voice_from_stream": True})
+    assert r.status_code == 403
+    r = c.post("/api/live/sessions", json={"target_langs": ["ta-IN"], "voice_from_stream": True, "voice_consent": True})
+    assert r.status_code == 201 and r.json()["voice_from_stream"] is True and "consent" not in json.dumps(r.json())

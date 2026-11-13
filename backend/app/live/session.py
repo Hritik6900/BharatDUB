@@ -50,7 +50,9 @@ class LiveSession:
         return {"id": self.id, "youtube_video_id": r.get("youtube_video_id"), "target_langs": self.langs,
                 "src_lang": r.get("src_lang") or "indic-auto", "offset_ms": r.get("offset_ms") or 0,
                 "status": r.get("status") or "idle", "created_at": r.get("created_at"),
-                "voice_profile_id": r.get("voice_profile_id"), "viewers": self.bus.viewer_count()}
+                "voice_profile_id": r.get("voice_profile_id"), "viewers": self.bus.viewer_count(),
+                "voice_from_stream": bool((r.get("voice_from_stream") or {}).get("consent_at")),
+                "clone_langs": list(self.pipeline.clone_langs) if self.pipeline else None}
 
 
 class SessionManager:
@@ -59,12 +61,13 @@ class SessionManager:
         self._lock = asyncio.Lock()
 
     async def create(self, youtube_video_id: str | None, target_langs: list[str], voice_profile_id: str | None,
-                     offset_ms: int = 0) -> tuple[LiveSession, str]:
+                     offset_ms: int = 0, voice_from_stream: dict[str, str] | None = None,
+                     ) -> tuple[LiveSession, str]:
         token = secrets.token_urlsafe(18)
         row = await get_store().insert("live_sessions", {
             "youtube_video_id": youtube_video_id, "target_langs": target_langs,
             "voice_profile_id": voice_profile_id, "offset_ms": offset_ms, "status": "idle",
-            "ingest_token": token,
+            "ingest_token": token, "voice_from_stream": voice_from_stream,
         })
         sess = LiveSession(row)
         self._sessions[sess.id] = sess

@@ -95,6 +95,8 @@ export interface LiveSession {
   status: "idle" | "live" | "ended";
   viewers: number;
   voice_profile_id?: string | null;
+  voice_from_stream?: boolean;
+  clone_langs?: string[] | null;
   stats?: { p50_ms: number | null; p95_ms: number | null; n: number } | null;
 }
 

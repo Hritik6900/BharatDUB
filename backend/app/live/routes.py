@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconn
 from pydantic import BaseModel, Field
 
 from app.config import LANG_NAMES
-from app.db import get_store
+from app.db import get_store, now_iso
 from app.live.bus import ALL
 from app.live.chat import chat
 from app.live.pipeline import LivePipeline
@@ -18,12 +18,17 @@ from app.live.session import LiveSession, parse_youtube_id, sessions
 from app.shared.metrics import percentile
 
 router = APIRouter()
+# Shown next to the checkbox on /live; stored on the voice profile the stream creates.
+STREAM_VOICE_CONSENT = ("The voice on this stream is mine, or I have the speaker's permission, and I agree that "
+                        "Bharat Dub may make a copy of it to dub this stream.")
 
 
 class CreateSession(BaseModel):
     youtube_video_id: str = ""
     target_langs: list[str] = Field(min_length=1, max_length=4)
     voice_profile_id: str | None = None
+    voice_from_stream: bool = False   # learn the speaker's voice from the first seconds of the stream
+    voice_consent: bool = False
     offset_ms: int = 0
 
 
@@ -51,8 +56,13 @@ async def create_session(body: CreateSession) -> dict[str, Any]:
         p = await get_store().get("voice_profiles", body.voice_profile_id)
         if not p or not p.get("consent_at") or p.get("deleted_at"):
             raise HTTPException(403, "This voice profile has no recorded consent.")
+    if body.voice_from_stream and not body.voice_consent:
+        raise HTTPException(403, "Copying the voice on this stream needs the speaker's consent.")
+    from_stream = None
+    if body.voice_from_stream and not body.voice_profile_id:
+        from_stream = {"consent_at": now_iso(), "consent_text": STREAM_VOICE_CONSENT}
     sess, token = await sessions.create(yt, list(dict.fromkeys(body.target_langs)), body.voice_profile_id,
-                                        max(-5000, min(10000, body.offset_ms)))
+                                        max(-5000, min(10000, body.offset_ms)), from_stream)
     return {"session_id": sess.id, "ingest_token": token, **sess.public()}
 
 

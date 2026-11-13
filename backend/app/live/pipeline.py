@@ -2,8 +2,12 @@
 import asyncio
 import base64
 import logging
+import tempfile
 from collections import deque
+from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 from app.config import DEFAULT_GLOSSARY, VOICE_BY_LANG, get_settings
 from app.db import get_store
@@ -12,11 +16,14 @@ from app.live.bus import ALL
 from app.live.session import LiveSession
 from app.providers import get_llm, get_stt, get_tts
 from app.providers.base import ProviderError, VoiceSpec
+from app.shared import audio_utils as au
 from app.shared.metrics import percentile
 
 log = logging.getLogger("live")
 TRANSLATE_TIMEOUT_S = 8.0
 TTS_TIMEOUT_S = 20.0
+ENROL_SPEECH_S = 12.0   # speech collected from the stream before the voice is copied (clone endpoint: 5-30 s)
+ENROL_MIN_RMS = 300     # PCM16 units; frames quieter than this are pauses, not voice
 MAX_QUEUED_AUDIO = 400  # ~13 s of 1024-byte frames; beyond that we drop (the streamer's network is ahead)
 
 
@@ -28,15 +35,21 @@ class LivePipeline:
         self.audio: asyncio.Queue[bytes | None] = asyncio.Queue()
         self.assembler = Assembler()
         self.context: deque[str] = deque(maxlen=3)
-        self.queues: dict[str, asyncio.Queue[tuple[Chunk, list[str]] | None]] = {
+        self.queues: dict[str, asyncio.Queue[tuple[Chunk, asyncio.Task[tuple[str, bool]]] | None]] = {
             lg: asyncio.Queue() for lg in sess.langs}
+        self._last_caption: dict[str, asyncio.Task[tuple[str, bool]]] = {}
         self.tasks: list[asyncio.Task[Any]] = []
         self.running = False
         self._t_start: int | None = None
         self._t_end: int | None = None
         self._pending: dict[int, dict[str, Any]] = {}
+        self.voice_ready_ms: int | None = None
+        self._speaking = False
+        self._enrol: list[bytes] | None = None   # speech frames being collected for voice-from-stream
+        self._enrol_bytes = 0
         self.glossary: list[str] = list(DEFAULT_GLOSSARY)
         self.voice: VoiceSpec | None = None
+        self.clone_langs = sess.langs[: self.s.live_clone_langs or self.s.gnani_max_concurrency]
 
     # ---------- lifecycle ----------
     async def start(self) -> None:
@@ -46,6 +59,9 @@ class LivePipeline:
         terms = [t["term"] for t in await get_store().select("glossary_terms")]
         self.glossary = list(dict.fromkeys(DEFAULT_GLOSSARY + terms))
         self.voice = await self._clone_voice()
+        consent = self.sess.row.get("voice_from_stream") or {}
+        if self.voice is None and consent.get("consent_at"):
+            self._enrol = []
         self.tasks = [asyncio.create_task(self._stt_loop()), asyncio.create_task(self._poll_loop())]
         self.tasks += [asyncio.create_task(self._worker(lg)) for lg in self.sess.langs]
 
@@ -67,6 +83,55 @@ class LivePipeline:
     def feed(self, pcm: bytes) -> None:
         if self.running and self.audio.qsize() < MAX_QUEUED_AUDIO:
             self.audio.put_nowait(pcm)
+        if self._enrol is not None and self._speaking and self.running:
+            self._collect(pcm)
+
+    # ---------- voice from the stream ----------
+    def _collect(self, pcm: bytes) -> None:
+        """Keep frames that hold speech; once there is enough, copy the voice in the background."""
+        samples = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype="<i2")
+        if not len(samples) or float(np.sqrt(np.mean(samples.astype(np.float64) ** 2))) < ENROL_MIN_RMS:
+            return
+        assert self._enrol is not None
+        self._enrol.append(pcm)
+        self._enrol_bytes += len(pcm)
+        if self._enrol_bytes >= ENROL_SPEECH_S * 16000 * 2:
+            frames, self._enrol = self._enrol, None
+            self.tasks.append(asyncio.create_task(self._enrol_voice(b"".join(frames))))
+
+    async def _enrol_voice(self, pcm: bytes) -> None:
+        """Clone from the collected speech, only with the consent recorded at session creation (golden rule 4).
+
+        Until this finishes (and if it fails) the stream is dubbed in stock voices.
+        """
+        consent = self.sess.row.get("voice_from_stream") or {}
+        if not consent.get("consent_at"):
+            return
+        bus = self.sess.bus
+        wav = Path(tempfile.gettempdir()) / f"bd_live_voice_{self.sess.id}.wav"
+        try:
+            audio = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype="<i2").astype(np.float32) / 32768.0
+            await asyncio.to_thread(au.write_wav, wav, audio, 16000)
+            emb = await self.tts.clone_embedding(str(wav), consent_at=consent["consent_at"])
+            store = get_store()
+            profile = await store.insert("voice_profiles", {
+                "display_name": f"Voice from live {consent['consent_at'][:16].replace('T', ' ')}"[:60],
+                "embedding": emb, "consent_text": consent.get("consent_text", ""),
+                "consent_at": consent["consent_at"]})
+            self.sess.row["voice_profile_id"] = profile["id"]
+            await store.update("live_sessions", self.sess.id, {"voice_profile_id": profile["id"]})
+            self.voice = {"kind": "clone", "embedding": emb}
+            self.voice_ready_ms = self.sess.now_ms()
+            bus.broadcast({"type": "voice", "cloned": True, "t_ms": self.voice_ready_ms})
+            bus.broadcast({"type": "session", **self.sess.public()})
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 - fail soft: keep dubbing in stock voices
+            log.warning("live voice-from-stream failed: %s", e)
+            bus.publish(ALL, {"type": "error", "message": "Could not copy the voice from this stream; "
+                                                          f"using stock voices ({str(e)[:120]})"}, to_all=False)
+        finally:
+            wav.unlink(missing_ok=True)
 
     async def _clone_voice(self) -> VoiceSpec | None:
         pid = self.sess.row.get("voice_profile_id")
@@ -77,8 +142,16 @@ class LivePipeline:
             return {"kind": "clone", "embedding": p["embedding"]}
         return None
 
-    def _voice_for(self, lang: str) -> VoiceSpec:
-        return self.voice or {"kind": "stock", "voice": VOICE_BY_LANG.get(lang, VOICE_BY_LANG["hi-IN"])}
+    def _voice_for(self, lang: str, lag_ms: int = 0) -> VoiceSpec:
+        """The speaker's cloned voice, unless this chunk is already late: then the stock voice, to catch up.
+
+        Measured 2026-11-13: a cloned line takes 2-4 s to make (stock: ~0.5 s to first audio) and the account runs
+        one request at a time, so several languages in the cloned voice fall further behind with every chunk
+        (3 languages: 37 s behind after 55 s). So only the first `live_clone_langs` languages get the cloned voice.
+        """
+        if self.voice and lang in self.clone_langs and lag_ms <= self.s.live_clone_max_lag_ms:
+            return self.voice
+        return {"kind": "stock", "voice": VOICE_BY_LANG.get(lang, VOICE_BY_LANG["hi-IN"])}
 
     # ---------- STT ----------
     async def _frames(self):  # type: ignore[no-untyped-def]
@@ -110,15 +183,18 @@ class LivePipeline:
         now = self.sess.now_ms()
         if ev.kind == "speech_start":
             self._t_start = now
+            self._speaking = True
             self.assembler.speech_started()
             self.sess.bus.publish(ALL, {"type": "vad", "speaking": True}, to_all=False)
         elif ev.kind == "processing":
             self._t_end = now - STT_SILENCE_MS
+            self._speaking = False
             self.sess.bus.publish(ALL, {"type": "vad", "speaking": False}, to_all=False)
         elif ev.kind == "final" and ev.text:
             t_end = self._t_end if self._t_end is not None else now - STT_SILENCE_MS
             t_start = self._t_start if self._t_start is not None else t_end - (ev.audio_duration_ms or 0)
             self._t_start = self._t_end = None
+            self._speaking = False
             # Observed 2026-11-13: the real API sends no `processing` event, so the final also ends the "speaking" state.
             self.sess.bus.publish(ALL, {"type": "vad", "speaking": False}, to_all=False)
             self.sess.bus.publish(ALL, {"type": "transcript", "text": ev.text, "t_ms": now}, to_all=False)
@@ -146,8 +222,33 @@ class LivePipeline:
                                                 "t_stt_final": chunk.t_stt_final_ms}}
         self.sess.bus.publish("src", {"type": "caption", "seq": chunk.seq, "lang": "src", "text": chunk.text,
                                       "t_speech_ms": chunk.t_speech_ms})
-        for q in self.queues.values():
-            q.put_nowait((chunk, ctx))
+        for lang, q in self.queues.items():
+            # Translation starts now for every language (the LLM is not rate-limited like Gnani); only the
+            # speaking is queued. A slow voice therefore never holds back the next caption's translation.
+            prev = self._last_caption.get(lang)
+            task = asyncio.create_task(self._translate(lang, chunk, ctx, prev))
+            self._last_caption[lang] = task
+            q.put_nowait((chunk, task))
+
+    async def _translate(self, lang: str, chunk: Chunk, ctx: list[str],
+                         prev: "asyncio.Task[tuple[str, bool]] | None") -> tuple[str, bool]:
+        """Translate one chunk and publish its caption (captions stay in order per language)."""
+        bus = self.sess.bus
+        try:
+            text = await asyncio.wait_for(self.llm.translate_chunk(chunk.text, lang, self.glossary, ctx),
+                                          TRANSLATE_TIMEOUT_S)
+            untranslated = False
+        except (ProviderError, TimeoutError) as e:
+            text, untranslated = chunk.text, True
+            bus.publish(ALL, {"type": "error", "message": f"{lang} translation failed: {str(e)[:120]}"},
+                        to_all=False)
+        timings = self._pending[chunk.seq]["timings"] if chunk.seq in self._pending else {}
+        timings[f"t_translated:{lang}"] = self.sess.now_ms()
+        if prev is not None and not prev.done():
+            await asyncio.wait({prev})
+        bus.publish(lang, {"type": "caption", "seq": chunk.seq, "lang": lang, "text": text,
+                           "t_speech_ms": chunk.t_speech_ms, "untranslated": untranslated})
+        return text, untranslated
 
     async def _worker(self, lang: str) -> None:
         q = self.queues[lang]
@@ -155,9 +256,10 @@ class LivePipeline:
             item = await q.get()
             if item is None:
                 return
-            chunk, ctx = item
+            chunk, task = item
             try:
-                await self._process(lang, chunk, ctx)
+                text, untranslated = await task
+                await self._speak(lang, chunk, text, untranslated)
             except asyncio.CancelledError:
                 raise
             except Exception as e:  # noqa: BLE001 - one bad chunk must not stop the stream
@@ -167,30 +269,21 @@ class LivePipeline:
             finally:
                 await self._chunk_done(chunk.seq)
 
-    async def _process(self, lang: str, chunk: Chunk, ctx: list[str]) -> None:
+    async def _speak(self, lang: str, chunk: Chunk, text: str, untranslated: bool) -> None:
         bus, sr = self.sess.bus, self.s.live_sample_rate
         timings = self._pending[chunk.seq]["timings"]
-        try:
-            text = await asyncio.wait_for(self.llm.translate_chunk(chunk.text, lang, self.glossary, ctx),
-                                          TRANSLATE_TIMEOUT_S)
-            untranslated = False
-        except (ProviderError, TimeoutError) as e:
-            text, untranslated = chunk.text, True
-            bus.publish(ALL, {"type": "error", "message": f"{lang} translation failed: {str(e)[:120]}"},
-                        to_all=False)
-        t_tr = self.sess.now_ms()
-        timings[f"t_translated:{lang}"] = t_tr
-        bus.publish(lang, {"type": "caption", "seq": chunk.seq, "lang": lang, "text": text,
-                           "t_speech_ms": chunk.t_speech_ms, "untranslated": untranslated})
         if untranslated:
             bus.publish(lang, {"type": "audio", "seq": chunk.seq, "lang": lang, "sample_rate": sr,
                                "pcm_b64": "", "last": True})
             return
+        # Decided when this chunk's turn to speak comes, so the lag includes any queue behind earlier chunks.
+        voice = self._voice_for(lang, self.sess.now_ms() - chunk.t_speech_end_ms)
+        timings[f"clone:{lang}"] = int(voice["kind"] == "clone")
         first, carry = True, b""
 
         async def stream() -> None:
             nonlocal first, carry
-            async for pcm in self.tts.synth_stream(text, lang, self._voice_for(lang), sample_rate=sr):
+            async for pcm in self.tts.synth_stream(text, lang, voice, sample_rate=sr, speed=self.s.live_tts_speed):
                 pcm = carry + pcm
                 cut = len(pcm) // 2 * 2
                 pcm, carry = pcm[:cut], pcm[cut:]

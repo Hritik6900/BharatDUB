@@ -36,7 +36,7 @@ class GnaniTTS:
         return h
 
     def build_body(self, text: str, lang: str, voice: VoiceSpec, *, container: str = "wav",
-                   sample_rate: int | None = None) -> dict[str, Any]:
+                   sample_rate: int | None = None, speed: float = 1.0) -> dict[str, Any]:
         audio_config = {"sample_rate": sample_rate or self.s.tts_sample_rate, "num_channels": 1, "sample_width": 2,
                         "encoding": "linear_pcm", "container": container}
         if voice["kind"] == "clone":
@@ -44,7 +44,7 @@ class GnaniTTS:
             return {"text": text, "model": VC_MODEL, "speaker_embedding": dict(voice["embedding"]),
                     "audio_config": audio_config}
         return {"text": text, "voice": voice["voice"], "model": self.s.tts_model, "language": lang,
-                "speed": 1.0, "audio_config": audio_config}
+                "speed": min(1.15, max(0.85, speed)), "audio_config": audio_config}
 
     async def synth(self, text: str, lang: str, voice: VoiceSpec) -> bytes:
         """Full WAV bytes."""
@@ -65,9 +65,9 @@ class GnaniTTS:
         return resp.content
 
     async def synth_stream(self, text: str, lang: str, voice: VoiceSpec, *,
-                           sample_rate: int | None = None) -> AsyncIterator[bytes]:
+                           sample_rate: int | None = None, speed: float = 1.0) -> AsyncIterator[bytes]:
         """Raw PCM16 mono chunks (default settings.tts_sample_rate), via SSE. Records time to first chunk."""
-        body = self.build_body(text, lang, voice, container="raw", sample_rate=sample_rate)
+        body = self.build_body(text, lang, voice, container="raw", sample_rate=sample_rate, speed=speed)
         headers = self._headers()
         t0 = time.perf_counter()
         self.last_first_chunk_s = None

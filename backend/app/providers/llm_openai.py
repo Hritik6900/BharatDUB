@@ -80,7 +80,8 @@ class OpenAILLM:
         lang = LANG_NAMES.get(target, target)
         system = (
             f"You are a live interpreter for an Indian streamer. Translate the CURRENT line into natural spoken {lang}, "
-            "the way a streamer talks, short and punchy. "
+            "the way a streamer talks, short and punchy. It is spoken aloud in real time, so it must take no longer to say "
+            "than the original: keep every point, drop filler words and repetition. "
             + script_rule(target) +
             f"Keep these words in English exactly: {', '.join(glossary) or 'none'}. Keep brand and game names in English. "
             "Use the previous lines only for context; do not translate them. Reply with the translation only."

@@ -16,6 +16,11 @@ export interface Stats {
 }
 
 const JITTER_S = 0.3;
+// Dubbed speech can run longer than the original. When more than CATCHUP_AFTER_S of audio is waiting, play a little
+// faster; a chunk that would start more than MAX_BACKLOG_S late is skipped (its caption still shows).
+const CATCHUP_AFTER_S = 2;
+const CATCHUP_RATE = 1.1;
+const MAX_BACKLOG_S = 10;
 
 /**
  * Subscribes to /ws/watch/{sid}?lang=. Captions always; audio is decoded and scheduled back-to-back
@@ -28,6 +33,7 @@ export function useLiveFeed(sid: string, langCode: string, opts: { audioOn: bool
   const [connected, setConnected] = useState(false);
   const ctxRef = useRef<AudioContext | null>(null);
   const nextAt = useRef(0);
+  const cur = useRef({ seq: -1, drop: false, rate: 1 });
   const optsRef = useRef(opts);
   optsRef.current = opts;
 
@@ -86,14 +92,20 @@ export function useLiveFeed(sid: string, langCode: string, opts: { audioOn: bool
           if (delay) setTimeout(add, delay);
           else add();
         } else if (m.type === "audio" && m.pcm_b64 && optsRef.current.audioOn) {
-          schedule(m.pcm_b64, m.sample_rate);
+          schedule(m.pcm_b64, m.sample_rate, m.seq);
         }
       };
     };
 
-    const schedule = (b64: string, rate: number) => {
+    const schedule = (b64: string, rate: number, seq: number) => {
       const ctx = ctxRef.current;
       if (!ctx || ctx.state !== "running") return;
+      if (seq !== cur.current.seq) {
+        // Decide once per chunk, so a sentence is never cut or sped up halfway.
+        const backlog = Math.max(0, nextAt.current - ctx.currentTime);
+        cur.current = { seq, drop: backlog > MAX_BACKLOG_S, rate: backlog > CATCHUP_AFTER_S ? CATCHUP_RATE : 1 };
+      }
+      if (cur.current.drop) return;
       const bin = atob(b64);
       const n = bin.length >> 1;
       const buf = ctx.createBuffer(1, n, rate);
@@ -110,8 +122,9 @@ export function useLiveFeed(sid: string, langCode: string, opts: { audioOn: bool
       const src = ctx.createBufferSource();
       src.buffer = buf;
       src.connect(outRef.current ?? ctx.destination);
+      src.playbackRate.value = cur.current.rate;
       src.start(at);
-      nextAt.current = at + buf.duration;
+      nextAt.current = at + buf.duration / cur.current.rate;
     };
 
     connect();

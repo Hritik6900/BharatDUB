@@ -127,7 +127,7 @@ class MockTTS:
         return buf.getvalue()
 
     async def synth_stream(self, text: str, lang: str, voice: VoiceSpec, *,
-                           sample_rate: int | None = None) -> AsyncIterator[bytes]:
+                           sample_rate: int | None = None, speed: float = 1.0) -> AsyncIterator[bytes]:
         sr = sample_rate or self.sr
         t0 = time.perf_counter()
         await asyncio.sleep(0.25)
