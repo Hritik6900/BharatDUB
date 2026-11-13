@@ -30,12 +30,14 @@ async function tabAudio(): Promise<MediaStream> {
     // so the streamer hears only the dub (Chromium; ignored elsewhere).
     audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, suppressLocalAudioPlayback: true } as MediaTrackConstraints,
   });
-  s.getVideoTracks().forEach((t) => t.stop());
   if (!s.getAudioTracks().length) {
     s.getTracks().forEach((t) => t.stop());
     throw new Error("No sound was shared. Pick a tab and tick \"Also share tab audio\".");
   }
-  return new MediaStream(s.getAudioTracks());
+  // The picture is not used, but the video track stays open: ending it can end the capture session's
+  // local mute. It is turned down to almost nothing instead.
+  s.getVideoTracks().forEach((t) => void t.applyConstraints({ frameRate: 1, width: 160 }).catch(() => {}));
+  return s;
 }
 
 export async function startMicIngest(
