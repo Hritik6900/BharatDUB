@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     llm_api_key: SecretStr = SecretStr("")
     llm_model: str = ""
     llm_model_fast: str = ""
+    # Optional `reasoning_effort` for reasoning models (e.g. "none" on Gemini Flash). Left unset, hidden
+    # thinking can eat the max_tokens budget and truncate short translations.
+    llm_reasoning_effort: str = ""
 
     supabase_url: str = ""
     supabase_service_key: SecretStr = SecretStr("")

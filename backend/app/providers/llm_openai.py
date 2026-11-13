@@ -11,6 +11,21 @@ from app.config import LANG_NAMES, Settings, get_settings
 from app.providers.base import ProviderError
 from app.providers.http import request_with_retry
 
+SCRIPTS = {
+    "hi-IN": "Devanagari", "mr-IN": "Devanagari", "ta-IN": "Tamil", "bn-IN": "Bengali", "te-IN": "Telugu",
+    "kn-IN": "Kannada", "ml-IN": "Malayalam", "gu-IN": "Gujarati", "pa-IN": "Gurmukhi",
+}
+
+
+def script_rule(target: str) -> str:
+    """Hinglish input in Latin letters tempts models to answer in romanised Tamil/Bengali; the voice needs native script."""
+    script = SCRIPTS.get(target)
+    if not script:
+        return "The source may be Hindi or Hinglish in any script; translate all of it. "
+    return (f"Write in {script} script, never romanised; only the kept English words stay in Latin letters. "
+            "The source may be Hindi or Hinglish in any script; translate all of it and leave no Hindi words. ")
+
+
 THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
 
@@ -29,6 +44,8 @@ class OpenAILLM:
                                              {"role": "user", "content": user}]}
         if max_tokens:
             body["max_tokens"] = max_tokens
+        if self.s.llm_reasoning_effort:
+            body["reasoning_effort"] = self.s.llm_reasoning_effort
         headers = {"Authorization": f"Bearer {self.s.llm_api_key.get_secret_value()}"}
         url = f"{self.s.llm_base_url.rstrip('/')}/chat/completions"
 
@@ -64,6 +81,7 @@ class OpenAILLM:
         system = (
             f"You are a live interpreter for an Indian streamer. Translate the CURRENT line into natural spoken {lang}, "
             "the way a streamer talks, short and punchy. "
+            + script_rule(target) +
             f"Keep these words in English exactly: {', '.join(glossary) or 'none'}. Keep brand and game names in English. "
             "Use the previous lines only for context; do not translate them. Reply with the translation only."
         )
@@ -78,7 +96,7 @@ class OpenAILLM:
         lang = LANG_NAMES.get(target, target)
         system = (
             f"Rewrite this {lang} line so it can be spoken naturally in at most {max_seconds:.1f} seconds. "
-            "Keep the meaning, the tone and any English words. Reply with the rewritten line only."
+            "Keep the meaning, the tone and any English words. " + script_rule(target) + "Reply with the rewritten line only."
         )
         return clean_line(await self._chat(system, text, max_tokens=300))
 
@@ -88,6 +106,7 @@ def batch_system_prompt(target: str, glossary: list[str]) -> str:
     return (
         f"You dub short Indian social-media videos. Translate each line into natural, spoken {lang}, "
         "the way a creator talks on camera, not textbook style. "
+        + script_rule(target) +
         f"Keep these words in English as-is: {', '.join(glossary) or 'none'}. Keep brand names in English. "
         "Keep each line about the same spoken length as the source so it fits the same time slot. "
         "Return ONLY a JSON array of strings, same length and order as the input. No commentary."

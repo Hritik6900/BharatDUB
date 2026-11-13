@@ -57,6 +57,7 @@ LLM_BASE_URL=            # OpenAI-compatible, ends with /v1 (Evon endpoint, or b
 LLM_API_KEY=
 LLM_MODEL=               # e.g. gnani/gnani-evon-v3.3-30B-A3B
 LLM_MODEL_FAST=          # optional low-latency model for Live; defaults to LLM_MODEL
+LLM_REASONING_EFFORT=    # optional; `none` for Gemini Flash (hidden thinking otherwise truncates short replies)
 SUPABASE_URL=
 SUPABASE_SERVICE_KEY=
 UPLOAD_TTL_HOURS=24
@@ -327,7 +328,7 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
 - [x] Timbre voice names per language → section 6.3 (`VOICE_BY_LANG`). Tamil and Telugu have female voices only on v2.5.
 - [x] Prisma realtime partial vs final → **no partials**; each `transcript` event is final (`is_final: true`); `processing` marks end of speech.
 - [x] Supported TTS `sample_rate` → 8000, 16000, 22050, 24000, 44100, 48000 (VC: 8000–44100). We use 44100.
-- [ ] Hosted Evon endpoint available? If not, which backup LLM. (Needs `LLM_BASE_URL`; not configured yet.)
+- [x] Hosted Evon endpoint available? Not on the dashboard; backup LLM is Gemini Flash (see below).
 - [ ] Vihaan X rules on code written before the event.
 - [ ] **New:** real concurrency limit for our Gnani account (docs show 1 active request; check app.gnani.ai). It decides whether Live can do 3 languages in parallel.
 - [x] Measured smoke latencies (2026-11-13, real Gnani key, one run each, ~5 s Hindi clip): TTS REST 1.2 s; TTS SSE first chunk
@@ -335,7 +336,12 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
 - [x] Realtime STT in practice: **no `processing` event is sent** (only `connected`, `speech_start`, `transcript`). The pipeline
   falls back to `t_speech_end = final arrival - 500 ms`. The `connected` config shows `partials_enabled: false`,
   `partial_interval_ms: 450`: partials may exist behind an undocumented switch; not explored.
-- [ ] LLM not configured yet (planned: Gemini via its OpenAI-compatible endpoint). VC language check still open.
+- [x] LLM: no hosted Evon endpoint on the Gnani dashboard (it lists STT and TTS only), so translation runs on Gemini through its
+  OpenAI-compatible endpoint (`LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai`, `gemini-3.5-flash`,
+  `LLM_REASONING_EFFORT=none`). Measured 2026-11-13: 1.4-2.2 s for a 3-line batch, ~1.5 s for a live chunk. With thinking on
+  it took 4-5 s and truncated the reply; `gemini-3.5-flash-lite` returned the Hinglish untranslated. Prompts now demand
+  native script (models answered Hinglish input in romanised Tamil otherwise).
+- [ ] VC language check still open. Evon bonus: ask on the Gnani Discord whether an endpoint exists.
 - [x] Demucs htdemucs on CPU: **40.3 s for 60 s of audio** (Ryzen 7 7435HS, torch 2.15 CPU, measured 2026-11-13). Silero VAD: 3.5 s for a 14 s clip including model load.
 
 ## 18. Implementation notes (M2)
