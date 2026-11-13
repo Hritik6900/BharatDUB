@@ -37,6 +37,7 @@ class LivePipeline:
         self.audio: asyncio.Queue[bytes | None] = asyncio.Queue()
         self.assembler = Assembler()
         self.phraser = Phraser(self.s.live_phrase_min_words, self.s.live_phrase_max_words)
+        self._voice_turn = asyncio.Semaphore(max(1, self.s.gnani_max_concurrency))
         self._playhead: dict[str, int] = {}  # per language: session time at which a viewer's queued dub ends
         self._stt_t0: int | None = None   # session clock at the start of the current STT stream
         self.context: deque[str] = deque(maxlen=3)
@@ -293,26 +294,55 @@ class LivePipeline:
             item = await q.get()
             if item is None:
                 return
-            chunk, task = item
+            batch = [item]
+            # The voice is one Gnani request at a time, shared by every language. Waiting for the turn here
+            # (not inside the provider) means that whatever piled up meanwhile and is already translated is
+            # spoken together: one call instead of several, so the queue drains.
+            await asyncio.wait({item[1]})  # translated first, so the turn is never held while waiting on the LLM
+            await self._voice_turn.acquire()
+            while len(batch) < self.s.live_merge_max and not q.empty():
+                nxt = q._queue[0]  # type: ignore[attr-defined] - peek; only this worker takes from the queue
+                if nxt is None or not nxt[1].done():
+                    break
+                batch.append(q.get_nowait())
             try:
-                text, untranslated = await task
-                await self._speak(lang, chunk, text, untranslated)
+                spoken: list[tuple[Chunk, str]] = []
+                for chunk, task in batch:
+                    text, untranslated = await task
+                    if untranslated:
+                        self.sess.bus.publish(lang, {"type": "audio", "seq": chunk.seq, "lang": lang,
+                                                     "sample_rate": self.s.live_sample_rate, "pcm_b64": "",
+                                                     "last": True})
+                    else:
+                        spoken.append((chunk, text))
+                if spoken:
+                    await self._speak(lang, spoken[0][0], " ".join(t for _, t in spoken), False,
+                                      also=[c for c, _ in spoken[1:]])
             except asyncio.CancelledError:
                 raise
             except Exception as e:  # noqa: BLE001 - one bad chunk must not stop the stream
-                log.warning("live %s chunk %s failed: %s", lang, chunk.seq, e)
-                self.sess.bus.publish(lang, {"type": "audio", "seq": chunk.seq, "lang": lang,
-                                             "sample_rate": self.s.live_sample_rate, "pcm_b64": "", "last": True})
+                log.warning("live %s chunk %s failed: %s", lang, batch[0][0].seq, e)
+                for chunk, _ in batch:
+                    self.sess.bus.publish(lang, {"type": "audio", "seq": chunk.seq, "lang": lang,
+                                                 "sample_rate": self.s.live_sample_rate, "pcm_b64": "",
+                                                 "last": True})
             finally:
-                await self._chunk_done(chunk.seq)
+                self._voice_turn.release()
+                for chunk, _ in batch:
+                    await self._chunk_done(chunk.seq)
 
-    async def _speak(self, lang: str, chunk: Chunk, text: str, untranslated: bool) -> None:
+    async def _speak(self, lang: str, chunk: Chunk, text: str, untranslated: bool,
+                     also: "list[Chunk] | None" = None) -> None:
+        """Speak `text` for `chunk`. `also` are later chunks whose text is included (merged into this call):
+        their audio travels under this chunk's seq and they get the same timing marks."""
         bus, sr = self.sess.bus, self.s.live_sample_rate
         timings = self._pending[chunk.seq]["timings"]
+        rest = [(c, self._pending[c.seq]["timings"]) for c in (also or []) if c.seq in self._pending]
 
         def end_of_audio() -> None:
-            bus.publish(lang, {"type": "audio", "seq": chunk.seq, "lang": lang, "sample_rate": sr,
-                               "pcm_b64": "", "last": True})
+            for c in [chunk, *[c for c, _ in rest]]:
+                bus.publish(lang, {"type": "audio", "seq": c.seq, "lang": lang, "sample_rate": sr,
+                                   "pcm_b64": "", "last": True})
 
         if untranslated:
             end_of_audio()
@@ -326,7 +356,8 @@ class LivePipeline:
         # or that would be heard too late to feel live, is not made; its caption has already gone out.
         unheard = self.s.live_tts_only_heard and not bus.listeners(lang)
         if unheard or lag_ms > self.s.live_skip_after_ms:
-            timings[f"skipped:{lang}"] = "unheard" if unheard else "late"
+            for t in [timings, *[t for _, t in rest]]:
+                t[f"skipped:{lang}"] = "unheard" if unheard else "late"
             end_of_audio()
             return
         voice = self._voice_for(lang, lag_ms)
@@ -346,6 +377,10 @@ class LivePipeline:
                 t_first = self.sess.now_ms()
                 timings[f"t_first_audio:{lang}"] = t_first
                 self.sess.record_latency(lang, t_first - chunk.t_speech_end_ms)
+                for c, t in rest:
+                    t[f"t_first_audio:{lang}"] = t_first
+                    t[f"merged:{lang}"] = chunk.seq
+                    self.sess.record_latency(lang, t_first - c.t_speech_end_ms)
             sent += len(pcm)
             for k in range(0, len(pcm), LIVE_FRAME_BYTES):
                 bus.publish(lang, {"type": "audio", "seq": chunk.seq, "lang": lang, "sample_rate": sr,
@@ -377,7 +412,8 @@ class LivePipeline:
             # The viewer is still playing earlier phrases, so holding this one back costs nothing; it is
             # shortened (tempo only, pitch kept) by as much as it takes to catch up, within a limit.
             dur_ms = len(held) / 2 / sr * 1000
-            tempo = min(self.s.live_fit_max_tempo, 1 + waiting / max(dur_ms, 500))
+            still = max(0, self._playhead.get(lang, 0) - self.sess.now_ms())  # the backlog now, not when we began
+            tempo = min(self.s.live_fit_max_tempo, 1 + still / max(dur_ms, 500))
             if tempo > 1.03:
                 try:
                     held = await asyncio.to_thread(au.tempo_pcm, held, sr, tempo)
@@ -389,8 +425,10 @@ class LivePipeline:
             # Same rule as the web player: back to back with what is queued, else a jitter buffer after arrival.
             start = max(self._playhead.get(lang, 0), timings[f"t_first_audio:{lang}"] + PLAYER_JITTER_MS)
             self._playhead[lang] = start + int(sent / 2 / sr * 1000)
-            timings[f"t_heard:{lang}"] = start
-            self.sess.record_heard(lang, start - chunk.t_speech_end_ms)
+            for c, t in [(chunk, timings), *rest]:
+                t[f"t_heard:{lang}"] = start
+                t[f"clone:{lang}"] = timings[f"clone:{lang}"]
+                self.sess.record_heard(lang, start - c.t_speech_end_ms)
         end_of_audio()
         timings[f"t_audio_done:{lang}"] = self.sess.now_ms()
         self.sess.bus.broadcast({"type": "stats", **self.stats()})

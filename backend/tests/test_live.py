@@ -204,3 +204,51 @@ def test_voice_from_stream_needs_consent_flag():
     assert r.status_code == 403
     r = c.post("/api/live/sessions", json={"target_langs": ["ta-IN"], "voice_from_stream": True, "voice_consent": True})
     assert r.status_code == 201 and r.json()["voice_from_stream"] is True and "consent" not in json.dumps(r.json())
+
+
+class SilentSTT:
+    """Keeps the stream open without events, so the test can dispatch chunks itself."""
+
+    async def stream(self, frames, lang, *, sample_rate=16000, pace=False, extra_headers=None):
+        async for _ in frames:
+            pass
+        return
+        yield  # pragma: no cover
+
+
+async def test_phrases_waiting_behind_the_voice_are_spoken_in_one_call(tmp_path, monkeypatch):
+    store = LocalStore(tmp_path / "db.json")
+    monkeypatch.setattr("app.live.pipeline.get_store", lambda: store)
+    sess = LiveSession({"id": "m1", "target_langs": ["ta-IN"], "src_lang": "hi-IN"})
+    tts = MockTTS()
+    calls: list[str] = []
+    plain = tts.synth_stream
+
+    def counting(text, lang, voice, **kw):
+        calls.append(text)
+        return plain(text, lang, voice, **kw)
+
+    monkeypatch.setattr(tts, "synth_stream", counting)
+    p = LivePipeline(sess, stt=SilentSTT(), llm=MockLLM(), tts=tts)
+    ta = sess.bus.subscribe("ta-IN")
+    await p.start()
+    for i in range(4):  # four phrases arrive faster than one can be spoken
+        now = sess.now_ms()
+        p._dispatch(p.assembler.make(f"line {i}", t_start_ms=now, t_end_ms=now, t_final_ms=now))
+        await asyncio.sleep(0.02)
+    ended: set[int] = set()
+    with_audio: set[int] = set()
+    while len(ended) < 4:
+        m = await asyncio.wait_for(ta.get(), 10)
+        if m["type"] == "audio":
+            if m["last"]:
+                ended.add(m["seq"])
+            elif m["pcm_b64"]:
+                with_audio.add(m["seq"])
+    await p.stop()
+    assert ended == {1, 2, 3, 4}            # every phrase is closed for the viewer
+    assert len(calls) < 4                    # ... with fewer voice calls than phrases
+    rows = {r["seq"]: r["timings"] for r in await store.select("live_chunks", session_id="m1")}
+    merged = [seq for seq, t in rows.items() if "merged:ta-IN" in t]
+    assert merged and all(rows[s]["merged:ta-IN"] in with_audio for s in merged)
+    assert all("t_first_audio:ta-IN" in t and "t_heard:ta-IN" in t for t in rows.values())

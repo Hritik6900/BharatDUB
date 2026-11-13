@@ -66,6 +66,7 @@ class Settings(BaseSettings):
     live_phrase_max_words: int = 12    # ... and at this many words with or without a boundary
     live_tts_only_heard: bool = True   # no TTS for a language nobody is tuned to (captions still go out)
     live_skip_after_ms: int = 8000     # a line already this late is not spoken at all (caption only)
+    live_merge_max: int = 3            # phrases waiting behind the voice are spoken in one call, up to this many (1 = off)
     live_trim_silence: bool = True     # cut the silence Timbre puts before and after every phrase
     live_fit: bool = True              # when dubbed audio is piling up for viewers, shorten the next phrase (tempo, pitch kept)
     live_fit_after_ms: int = 600       # ... once more than this much audio is still waiting to be played
