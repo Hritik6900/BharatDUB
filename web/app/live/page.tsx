@@ -12,7 +12,7 @@ import { ChatList, useChat } from "@/components/live/ChatFeed";
 import { VoiceBars } from "@/components/voice/VoiceBars";
 import { VoiceOrb } from "@/components/voice/VoiceOrb";
 import { API_BASE, api, type LiveSession, type VoiceProfile } from "@/lib/api";
-import { startMicIngest, type MicIngest } from "@/lib/micIngest";
+import { startMicIngest, type IngestSource, type MicIngest } from "@/lib/micIngest";
 import { useAnalyser } from "@/lib/useMic";
 import { useLiveFeed } from "@/lib/useLiveFeed";
 import { TARGET_LANGS, lang } from "@/lib/langs";
@@ -180,6 +180,7 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
   const [errors, setErrors] = useState<string[]>([]);
   const [mic, setMic] = useState<MicIngest | null>(null);
   const [micState, setMicState] = useState<string>("off");
+  const [from, setFrom] = useState<IngestSource>("mic");
   const [recent, setRecent] = useState<number[]>([]);
   const [copied, setCopied] = useState("");
   const onEvent = useCallback((m: Record<string, unknown>) => {
@@ -214,11 +215,11 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
       const m = await startMicIngest(sid, token, (s, d) => {
         setMicState(s);
         if (d) setErrors((e) => [d, ...e].slice(0, 3));
-      });
+      }, from);
       setMic(m);
     } catch (e) {
       setMicState("error");
-      setErrors((x) => [`Microphone: ${(e as Error).message}`, ...x].slice(0, 3));
+      setErrors((x) => [`${from === "tab" ? "Tab sound" : "Microphone"}: ${(e as Error).message}`, ...x].slice(0, 3));
     }
   };
   const stop = async () => {
@@ -280,10 +281,19 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
               Stop
             </Button>
           ) : (
+            <>
+            <label className="flex items-center gap-2 text-sm">
+              <span className="text-muted">Sound from</span>
+              <select value={from} onChange={(e) => setFrom(e.target.value as IngestSource)} className="h-10 rounded-chip border border-line bg-surface px-3">
+                <option value="mic">My microphone</option>
+                <option value="tab">A browser tab (stream playing on this PC)</option>
+              </select>
+            </label>
             <Button variant="danger" size="lg" onClick={goLive} disabled={micState === "connecting"}>
               <Radio aria-hidden className="size-5" />
               {micState === "connecting" ? "Connecting…" : "Go live"}
             </Button>
+            </>
           )}
         </div>
       </header>
@@ -325,7 +335,7 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
             {transcript.length ? (
               transcript.slice().reverse().map((t, i) => <li key={`${t.t}-${i}`} className={i ? "text-base text-muted" : "font-medium"}>{t.text}</li>)
             ) : (
-              <li className="font-sans text-sm text-muted">Press Go live and speak. Or stream from the desktop mic client, below.</li>
+              <li className="font-sans text-sm text-muted">Press Go live and speak. To dub a stream playing on this PC, set Sound from to a browser tab and tick Also share tab audio.</li>
             )}
           </ul>
         </section>

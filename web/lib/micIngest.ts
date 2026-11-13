@@ -19,15 +19,34 @@ export interface MicIngest {
   source: MediaStreamAudioSourceNode;
 }
 
+export type IngestSource = "mic" | "tab";
+
+/** Sound of a browser tab (or the whole PC), untouched: the mic's echo canceller removes speaker sound, so a
+ *  stream playing on this computer has to be captured this way. The video track is not needed and is dropped. */
+async function tabAudio(): Promise<MediaStream> {
+  const s = await navigator.mediaDevices.getDisplayMedia({
+    video: true,
+    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+  });
+  s.getVideoTracks().forEach((t) => t.stop());
+  if (!s.getAudioTracks().length) {
+    s.getTracks().forEach((t) => t.stop());
+    throw new Error("No sound was shared. Pick a tab and tick \"Also share tab audio\".");
+  }
+  return new MediaStream(s.getAudioTracks());
+}
+
 export async function startMicIngest(
   sid: string,
   token: string,
   onStatus: (s: "connecting" | "live" | "closed" | "error", detail?: string) => void,
+  from: IngestSource = "mic",
 ): Promise<MicIngest> {
   onStatus("connecting");
-  const stream = await navigator.mediaDevices.getUserMedia({
+  const stream = from === "tab" ? await tabAudio() : await navigator.mediaDevices.getUserMedia({
     audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
   });
+  stream.getAudioTracks()[0]?.addEventListener("ended", () => onStatus("closed", from === "tab" ? "Sharing stopped." : undefined));
   const ctx = new AudioContext({ sampleRate: 16000 }); // browser resamples the mic for us
   const url = URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" }));
   await ctx.audioWorklet.addModule(url);
