@@ -62,12 +62,12 @@ class SessionManager:
 
     async def create(self, youtube_video_id: str | None, target_langs: list[str], voice_profile_id: str | None,
                      offset_ms: int = 0, voice_from_stream: dict[str, str] | None = None,
-                     ) -> tuple[LiveSession, str]:
+                     src_lang: str = "indic-auto") -> tuple[LiveSession, str]:
         token = secrets.token_urlsafe(18)
         row = await get_store().insert("live_sessions", {
             "youtube_video_id": youtube_video_id, "target_langs": target_langs,
             "voice_profile_id": voice_profile_id, "offset_ms": offset_ms, "status": "idle",
-            "ingest_token": token, "voice_from_stream": voice_from_stream,
+            "ingest_token": token, "voice_from_stream": voice_from_stream, "src_lang": src_lang,
         })
         sess = LiveSession(row)
         self._sessions[sess.id] = sess

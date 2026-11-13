@@ -68,6 +68,7 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
   const [voices, setVoices] = useState<VoiceProfile[]>([]);
   const [voice, setVoice] = useState(STREAM);
   const [voiceConsent, setVoiceConsent] = useState(false);
+  const [src, setSrc] = useState("hi-IN");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -83,6 +84,7 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
         body: JSON.stringify({
           youtube_video_id: yt,
           target_langs: langs,
+          src_lang: src,
           voice_profile_id: voice && voice !== STREAM ? voice : null,
           voice_from_stream: voice === STREAM,
           voice_consent: voice === STREAM && voiceConsent,
@@ -103,6 +105,13 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
             <span className="text-lg font-medium tracking-[-0.01em]">YouTube live link or video id</span>
             <input value={yt} onChange={(e) => setYt(e.target.value)} placeholder="https://youtube.com/live/…" className="input mt-3" />
             <span className="mt-2 block text-sm text-muted">Optional. Without it, viewers get audio and captions only.</span>
+          </label>
+          <label className="block">
+            <span className="text-lg font-medium tracking-[-0.01em]">The streamer speaks</span>
+            <select value={src} onChange={(e) => setSrc(e.target.value)} className="input mt-3">
+              <option value="hi-IN">Hindi or Hinglish</option>
+              <option value="indic-auto">Detect the language (less reliable over game sound)</option>
+            </select>
           </label>
           <fieldset>
             <legend className="text-lg font-medium tracking-[-0.01em]">Languages for viewers <span className="text-sm font-normal text-muted">up to 4</span></legend>

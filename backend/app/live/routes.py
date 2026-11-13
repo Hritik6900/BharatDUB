@@ -29,6 +29,7 @@ class CreateSession(BaseModel):
     voice_profile_id: str | None = None
     voice_from_stream: bool = False   # learn the speaker's voice from the first seconds of the stream
     voice_consent: bool = False
+    src_lang: str = "hi-IN"            # language the streamer speaks; `indic-auto` to detect
     offset_ms: int = 0
 
 
@@ -49,6 +50,8 @@ async def create_session(body: CreateSession) -> dict[str, Any]:
     bad = [lg for lg in body.target_langs if lg not in LANG_NAMES or lg == "hi-IN"]
     if bad:
         raise HTTPException(400, f"unsupported target languages: {bad}")
+    if body.src_lang != "indic-auto" and body.src_lang not in LANG_NAMES:
+        raise HTTPException(400, f"unsupported source language: {body.src_lang}")
     yt = parse_youtube_id(body.youtube_video_id) if body.youtube_video_id else None
     if body.youtube_video_id and not yt:
         raise HTTPException(400, "Could not read a YouTube video id from that link.")
@@ -62,7 +65,7 @@ async def create_session(body: CreateSession) -> dict[str, Any]:
     if body.voice_from_stream and not body.voice_profile_id:
         from_stream = {"consent_at": now_iso(), "consent_text": STREAM_VOICE_CONSENT}
     sess, token = await sessions.create(yt, list(dict.fromkeys(body.target_langs)), body.voice_profile_id,
-                                        max(-5000, min(10000, body.offset_ms)), from_stream)
+                                        max(-5000, min(10000, body.offset_ms)), from_stream, body.src_lang)
     return {"session_id": sess.id, "ingest_token": token, **sess.public()}
 
 

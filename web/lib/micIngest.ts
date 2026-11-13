@@ -25,11 +25,18 @@ export type IngestSource = "mic" | "tab";
  *  stream playing on this computer has to be captured this way. The video track is not needed and is dropped. */
 async function tabAudio(): Promise<MediaStream> {
   const s = await navigator.mediaDevices.getDisplayMedia({
-    video: true,
+    video: { displaySurface: "browser" },
+    monitorTypeSurfaces: "exclude",
+    systemAudio: "exclude",
+    selfBrowserSurface: "exclude",
     // suppressLocalAudioPlayback: the shared tab goes silent on the speakers but is still captured,
     // so the streamer hears only the dub (Chromium; ignored elsewhere).
     audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, suppressLocalAudioPlayback: true } as MediaTrackConstraints,
-  });
+  } as DisplayMediaStreamOptions);
+  if (s.getVideoTracks()[0]?.getSettings().displaySurface !== "browser") {
+    s.getTracks().forEach((t) => t.stop());
+    throw new Error("Pick a browser tab, not a window or the whole screen. Those carry every sound on this PC, so the dub would be heard and dubbed again.");
+  }
   if (!s.getAudioTracks().length) {
     s.getTracks().forEach((t) => t.stop());
     throw new Error("No sound was shared. Pick a tab and tick \"Also share tab audio\".");
