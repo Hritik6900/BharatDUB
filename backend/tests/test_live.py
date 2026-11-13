@@ -92,9 +92,12 @@ async def test_pipeline_captions_audio_order_and_metrics(tmp_path, monkeypatch):
     pcm = base64.b64decode(next(m for m in msgs if m["type"] == "audio" and m["pcm_b64"])["pcm_b64"])
     assert len(pcm) % 2 == 0
     stats = p.stats()
-    assert stats["n"] == 4 and stats["p50_ms"] is not None
+    assert stats["n"] == 2 and stats["p50_ms"] is not None
     rows = await store.select("live_chunks", session_id="s1")
-    assert len(rows) == 2 and "t_first_audio:bn-IN" in rows[0]["timings"]
+    # Tamil has a viewer; nobody is tuned to Bengali, so its audio is not made (the caption still goes out).
+    t0 = rows[0]["timings"]
+    assert len(rows) == 2 and "t_first_audio:ta-IN" in t0 and t0["skipped:bn-IN"] == "unheard"
+    assert "t_translated:bn-IN" in t0 and "t_first_audio:bn-IN" not in t0
     seen = []
     while not console.empty():
         seen.append(console.get_nowait()["type"])

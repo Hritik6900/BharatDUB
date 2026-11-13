@@ -39,5 +39,9 @@ class Bus:
                 except asyncio.QueueFull:
                     pass
 
+    def listeners(self, lang: str) -> int:
+        """Viewers tuned to this language (the console's `*` feed does not play audio)."""
+        return len(self._subs.get(lang, ()))
+
     def viewer_count(self) -> int:
         return sum(len(s) for k, s in self._subs.items() if k != ALL)

@@ -277,7 +277,16 @@ class LivePipeline:
                                "pcm_b64": "", "last": True})
             return
         # Decided when this chunk's turn to speak comes, so the lag includes any queue behind earlier chunks.
-        voice = self._voice_for(lang, self.sess.now_ms() - chunk.t_speech_end_ms)
+        lag_ms = self.sess.now_ms() - chunk.t_speech_end_ms
+        # With one Gnani request at a time, every line spoken delays the next one. Audio nobody is tuned to,
+        # or that is already too late to feel live, is not made; its caption has already gone out.
+        unheard = self.s.live_tts_only_heard and not bus.listeners(lang)
+        if unheard or lag_ms > self.s.live_skip_after_ms:
+            timings[f"skipped:{lang}"] = "unheard" if unheard else "late"
+            bus.publish(lang, {"type": "audio", "seq": chunk.seq, "lang": lang, "sample_rate": sr,
+                               "pcm_b64": "", "last": True})
+            return
+        voice = self._voice_for(lang, lag_ms)
         timings[f"clone:{lang}"] = int(voice["kind"] == "clone")
         first, carry = True, b""
 

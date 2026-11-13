@@ -42,6 +42,7 @@ async def main() -> None:
     ap.add_argument("--name", required=True)
     ap.add_argument("--langs", default="ta-IN,bn-IN,en-IN")
     ap.add_argument("--voice", default="stock")
+    ap.add_argument("--listen", default="", help="languages a viewer is tuned to (default: all of --langs)")
     ap.add_argument("--loops", type=int, default=2)
     ap.add_argument("--yt", default="")
     ap.add_argument("--api", default="http://localhost:8010")
@@ -50,6 +51,7 @@ async def main() -> None:
     out = Path(a.outdir) / a.name
     out.mkdir(parents=True, exist_ok=True)
     langs = a.langs.split(",")
+    heard = a.listen.split(",") if a.listen else langs
     ws_base = a.api.replace("http", "ws", 1)
 
     pcm = decode(a.src)
@@ -102,7 +104,7 @@ async def main() -> None:
                 except TimeoutError:
                     chat_seen.append({"error": "no chat reply in 20 s"})
 
-        tasks = [asyncio.create_task(watch(lg)) for lg in [*langs, "all"]]
+        tasks = [asyncio.create_task(watch(lg)) for lg in [*heard, "all"]]
         await asyncio.sleep(0.5)
         tasks.append(asyncio.create_task(chat()))
 
@@ -124,7 +126,7 @@ async def main() -> None:
                 seqs = {m["seq"] for m in events if m.get("type") == "caption" and m["_ch"] == "all" and m.get("lang") == "src"}
                 done = {(m["lang"], m["seq"]) for m in events if m.get("type") == "audio" and m.get("last") and m["_ch"] != "all"}
                 quiet_for = time.monotonic() - t0 - max((m["_t"] for m in events), default=0)
-                if seqs and all((lg, q) in done for lg in langs for q in seqs) and quiet_for > 4:
+                if seqs and all((lg, q) in done for lg in heard for q in seqs) and quiet_for > 4:
                     break
                 await ws.send(silence)
                 await asyncio.sleep(FRAME_S)

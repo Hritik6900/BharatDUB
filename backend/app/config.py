@@ -58,6 +58,8 @@ class Settings(BaseSettings):
     live_sample_rate: int = 24000      # Live TTS PCM rate sent to viewers
     live_clone_max_lag_ms: int = 5000  # a Live chunk already this late is spoken in the stock voice (catch-up)
     live_clone_langs: int = 0          # languages (in session order) dubbed in the cloned voice; 0 = GNANI_MAX_CONCURRENCY
+    live_tts_only_heard: bool = True   # no TTS for a language nobody is tuned to (captions still go out)
+    live_skip_after_ms: int = 8000     # a line already this late is not spoken at all (caption only)
     live_tts_speed: float = 1.15       # stock voices speak a little faster in Live so the dub keeps pace
     mock_providers: bool = False       # simulate Gnani + LLM for UI work without keys (UI shows a banner)
 
