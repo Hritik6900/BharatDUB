@@ -66,6 +66,10 @@ async def chunks(pcm: bytes, size: int = 4096) -> AsyncIterator[bytes]:
 
 
 async def main() -> None:
+    # Windows consoles default to cp1252, which cannot print Indic transcripts.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser()
     ap.add_argument("--ref", help="5-30 s WAV of a consenting speaker, for the voice-clone check")
     ap.add_argument("--consent", action="store_true", help="the speaker in --ref consented to cloning")
@@ -108,6 +112,8 @@ async def main() -> None:
                         if t_proc:
                             rows.append(("  stream: processing -> final",
                                          f"{(time.perf_counter() - t_proc) * 1000:7.0f} ms", ev.text[:60]))
+                        else:  # the real API sends no `processing` event (observed 2026-11-13)
+                            rows.append(("  stream: final transcript", "", ev.text[:70]))
                         finals.append(ev.text)
                     elif ev.kind == "error":
                         raise ProviderError(f"stt.stream: {ev.message}")

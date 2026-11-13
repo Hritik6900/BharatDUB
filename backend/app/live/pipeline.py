@@ -118,6 +118,8 @@ class LivePipeline:
             t_end = self._t_end if self._t_end is not None else now - STT_SILENCE_MS
             t_start = self._t_start if self._t_start is not None else t_end - (ev.audio_duration_ms or 0)
             self._t_start = self._t_end = None
+            # Observed 2026-11-13: the real API sends no `processing` event, so the final also ends the "speaking" state.
+            self.sess.bus.publish(ALL, {"type": "vad", "speaking": False}, to_all=False)
             self.sess.bus.publish(ALL, {"type": "transcript", "text": ev.text, "t_ms": now}, to_all=False)
             chunk = self.assembler.add(ev.text, t_start_ms=t_start, t_end_ms=t_end, t_final_ms=now)
             if chunk:

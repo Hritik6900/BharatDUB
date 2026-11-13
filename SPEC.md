@@ -330,7 +330,12 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
 - [ ] Hosted Evon endpoint available? If not, which backup LLM. (Needs `LLM_BASE_URL`; not configured yet.)
 - [ ] Vihaan X rules on code written before the event.
 - [ ] **New:** real concurrency limit for our Gnani account (docs show 1 active request; check app.gnani.ai). It decides whether Live can do 3 languages in parallel.
-- [ ] **New:** measured smoke latencies (needs `GNANI_API_KEY`).
+- [x] Measured smoke latencies (2026-11-13, real Gnani key, one run each, ~5 s Hindi clip): TTS REST 1.2 s; TTS SSE first chunk
+  0.18-0.24 s; STT REST 0.59 s; STT realtime final arrives ~0.76 s after the audio ends (server `latency` field ~170 ms).
+- [x] Realtime STT in practice: **no `processing` event is sent** (only `connected`, `speech_start`, `transcript`). The pipeline
+  falls back to `t_speech_end = final arrival - 500 ms`. The `connected` config shows `partials_enabled: false`,
+  `partial_interval_ms: 450`: partials may exist behind an undocumented switch; not explored.
+- [ ] LLM not configured yet (planned: Gemini via its OpenAI-compatible endpoint). VC language check still open.
 - [x] Demucs htdemucs on CPU: **40.3 s for 60 s of audio** (Ryzen 7 7435HS, torch 2.15 CPU, measured 2026-11-13). Silero VAD: 3.5 s for a 14 s clip including model load.
 
 ## 18. Implementation notes (M2)
