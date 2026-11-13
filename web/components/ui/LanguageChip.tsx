@@ -1,5 +1,6 @@
 "use client";
 import type { ReactNode } from "react";
+import { Check } from "lucide-react";
 import { lang } from "@/lib/langs";
 
 interface Props {
@@ -7,16 +8,14 @@ interface Props {
   selected?: boolean;
   onClick?: () => void;
   size?: "md" | "lg";
-  showNative?: boolean;
   role?: "checkbox" | "radio" | "tab";
   children?: ReactNode;
-  onHover?: () => void;
 }
 
-/** A language, in its own hue and its own script. */
-export function LanguageChip({ code, selected = false, onClick, size = "md", showNative = true, role = "checkbox", children, onHover }: Props) {
+/** A language in its own script, marked with its hue. Selected = ink fill, so text contrast never depends on the hue. */
+export function LanguageChip({ code, selected = false, onClick, size = "md", role = "checkbox", children }: Props) {
   const l = lang(code);
-  const pad = size === "lg" ? "h-14 px-6 text-[1.15rem]" : "h-10 px-4 text-[0.95rem]";
+  const pad = size === "lg" ? "h-14 px-6 text-lg" : "h-11 px-4 text-[0.95rem]";
   return (
     <button
       type="button"
@@ -24,16 +23,15 @@ export function LanguageChip({ code, selected = false, onClick, size = "md", sho
       aria-checked={role !== "tab" ? selected : undefined}
       aria-selected={role === "tab" ? selected : undefined}
       onClick={onClick}
-      onMouseEnter={onHover}
-      onFocus={onHover}
-      style={{ ["--hue" as string]: l.hue }}
-      className={`inline-flex items-center gap-2.5 rounded-chip border font-display transition-colors ${pad} ${
-        selected ? "border-[var(--hue)] bg-[var(--hue)] text-white" : "border-mist bg-surface text-fg hover:border-[var(--hue)]"
+      className={`inline-flex items-center gap-2.5 rounded-chip border transition-colors ${pad} ${
+        selected ? "border-fg bg-fg text-on-fg" : "border-line bg-surface text-fg hover:border-fg"
       }`}
     >
-      <span aria-hidden className={`size-2.5 rounded-full ${selected ? "bg-white" : "bg-[var(--hue)]"}`} />
-      <span>{showNative && l.native !== l.name ? `${l.native}` : l.name}</span>
-      {showNative && l.native !== l.name && <span className={selected ? "text-white/80" : "text-slate"}>{l.name}</span>}
+      <span aria-hidden className="size-2.5 rounded-full" style={{ background: l.hue }} />
+      {/* Anek sits high on its line box next to Latin text; nudge it onto the shared baseline. */}
+      <span className={`font-indic font-medium leading-none ${l.native !== l.name ? "translate-y-[0.12em]" : ""}`}>{l.native}</span>
+      {l.native !== l.name && <span className={`leading-none ${selected ? "opacity-70" : "text-muted"}`}>{l.name}</span>}
+      {selected && role === "checkbox" && <Check aria-hidden className="size-4" />}
       {children}
     </button>
   );

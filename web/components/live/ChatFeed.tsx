@@ -43,29 +43,29 @@ export function useChat(sid: string, viewerLang: string) {
 }
 
 export function ChatList({ msgs, showOriginal = true, large = false }: { msgs: ChatMsg[]; showOriginal?: boolean; large?: boolean }) {
-  const end = useRef<HTMLLIElement>(null);
+  const box = useRef<HTMLUListElement>(null);
   useEffect(() => {
-    // Newer browsers return a Promise from scrollIntoView; never return it from an effect.
-    end.current?.scrollIntoView({ block: "nearest" });
+    // Scroll only the list's own scroll container, never the page.
+    const parent = box.current?.parentElement;
+    if (parent) parent.scrollTop = parent.scrollHeight;
   }, [msgs.length]);
-  if (!msgs.length) return <p className="text-sm text-slate">No messages yet.</p>;
+  if (!msgs.length) return <p className="text-sm text-muted">No messages yet.</p>;
   return (
-    <ul className={`space-y-3 ${large ? "text-2xl" : ""}`}>
+    <ul ref={box} className={`space-y-3 ${large ? "text-2xl" : ""}`}>
       {msgs.map((m) => (
-        <li key={m.id}>
+        <li key={m.id} className="rounded-[14px] bg-sunken px-3.5 py-2.5">
           <p>
-            {m.name && <span className="mr-2 font-display font-semibold">{m.name}</span>}
+            {m.name && <span className="mr-2 font-semibold">{m.name}</span>}
             <span lang="hi">{m.translated}</span>
           </p>
           {showOriginal && m.translated !== m.text && (
-            <p className="text-sm text-slate">
+            <p className="mt-0.5 text-sm text-muted">
               <span className="mr-1.5 inline-block size-2 rounded-full align-middle" style={{ background: lang(m.viewer_lang).hue }} />
               {lang(m.viewer_lang).name}: {m.text}
             </p>
           )}
         </li>
       ))}
-      <li ref={end} aria-hidden />
     </ul>
   );
 }

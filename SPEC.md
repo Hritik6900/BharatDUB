@@ -350,15 +350,15 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
 ## 19. Status (2026-11-13 night)
 
 - Built: M0-M2 backend, M3 Live backend (assembler, bus, pipeline, WS ingest/watch/chat, metrics), every page in
-  section 12 (FRONTEND.md design system, GSAP + Lenis landing), browser-mic ingest on `/live`, OBS overlay.
+  section 12 (FRONTEND.md design system v2, GSAP + Lenis), browser-mic ingest on `/live`, OBS overlay.
 - Verified offline: 42 backend tests; full site in `MOCK_PROVIDERS` mode with real Demucs/Silero/ffmpeg;
   Playwright screenshots of every page at 390 and 1440 px with no console errors and no horizontal overflow.
 - **Not yet verified against real Gnani/LLM** (no keys yet): smoke latencies, Prisma realtime event timing,
   TTS SSE `raw` container format, VC language quality, real Live latency. Run `scripts/smoke.py` first.
 - Live latency is `t_first_audio - t_speech_end`, where `t_speech_end` = arrival of Prisma's `processing` event
   minus `x-min-silence-ms` (500). Revisit once real event timing is observed.
-- Hero headline animates per word, not per character: splitting Indic scripts per character breaks conjuncts.
-- Hero Play button renders only when `NEXT_PUBLIC_HERO_CLIP` points at a real, consented clip.
+- Frontend redesigned (design system v2, see FRONTEND.md): serif headings, voice orb and live bars, floating header, dark footer, lucide icons. Indic text is never split per character.
+- Voice visuals with real audio: mic on `/live`, `/voices` and the landing "try your mic"; dubbed audio on `/watch`. Other bars are labelled illustrations.
 - Language hues fail CVD checks as a chart palette (te/en too close), so charts use ink bars with a hue dot +
   name label; colour never carries meaning alone.
 

@@ -8,7 +8,7 @@ export interface Lang {
   hue: string; // CSS var name with the language colour
 }
 
-// Hues only for the five languages the design system colours (FRONTEND.md section 1).
+// Hues only for the five languages the design system colours.
 export const LANGS: Lang[] = [
   { code: "hi-IN", short: "hi", name: "Hindi", native: "हिन्दी", hue: "var(--hi)" },
   { code: "ta-IN", short: "ta", name: "Tamil", native: "தமிழ்", hue: "var(--ta)" },
@@ -18,18 +18,18 @@ export const LANGS: Lang[] = [
 ];
 
 export const EXTRA_LANGS: Lang[] = [
-  { code: "kn-IN", short: "kn", name: "Kannada", native: "ಕನ್ನಡ", hue: "var(--slate)" },
-  { code: "ml-IN", short: "ml", name: "Malayalam", native: "മലയാളം", hue: "var(--slate)" },
-  { code: "mr-IN", short: "mr", name: "Marathi", native: "मराठी", hue: "var(--slate)" },
-  { code: "gu-IN", short: "gu", name: "Gujarati", native: "ગુજરાતી", hue: "var(--slate)" },
-  { code: "pa-IN", short: "pa", name: "Punjabi", native: "ਪੰਜਾਬੀ", hue: "var(--slate)" },
+  { code: "kn-IN", short: "kn", name: "Kannada", native: "ಕನ್ನಡ", hue: "var(--muted)" },
+  { code: "ml-IN", short: "ml", name: "Malayalam", native: "മലയാളം", hue: "var(--muted)" },
+  { code: "mr-IN", short: "mr", name: "Marathi", native: "मराठी", hue: "var(--muted)" },
+  { code: "gu-IN", short: "gu", name: "Gujarati", native: "ગુજરાતી", hue: "var(--muted)" },
+  { code: "pa-IN", short: "pa", name: "Punjabi", native: "ਪੰਜਾਬੀ", hue: "var(--muted)" },
 ];
 
 export const TARGET_LANGS = LANGS.filter((l) => l.code !== "hi-IN");
 const ALL = [...LANGS, ...EXTRA_LANGS];
 
 export function lang(code: string): Lang {
-  return ALL.find((l) => l.code === code) ?? { code: code as LangCode, short: code, name: code, native: code, hue: "var(--slate)" };
+  return ALL.find((l) => l.code === code) ?? { code: code as LangCode, short: code, name: code, native: code, hue: "var(--muted)" };
 }
 
 /** One line, five scripts: the hero headline. */

@@ -43,9 +43,9 @@ export function MeasuredNumbers() {
         const o = { v: 0 };
         gsap.to(o, {
           v: end,
-          duration: 0.8,
+          duration: 1,
           ease: "power3.out",
-          scrollTrigger: { trigger: el, start: "top 85%", once: true },
+          scrollTrigger: { trigger: el, start: "top 88%", once: true },
           onUpdate: () => {
             el.textContent = o.v.toFixed(dec);
           },
@@ -57,15 +57,16 @@ export function MeasuredNumbers() {
 
   if (!stats) return null;
   return (
-    <section ref={root} aria-label="Measured results" className="border-y border-mist">
-      <dl className="mx-auto grid max-w-6xl gap-10 px-4 py-16 sm:grid-cols-3 sm:px-8">
+    <section ref={root} aria-label="Measured results" className="mx-auto max-w-6xl px-5 sm:px-8">
+      <p className="eyebrow">Measured, not promised</p>
+      <dl className="mt-6 grid gap-5 sm:grid-cols-3">
         {stats.map((s) => (
-          <div key={s.label}>
-            <dt className="text-slate">{s.label}</dt>
-            <dd className="tnum font-display text-[3.815rem] font-semibold leading-none">
+          <div key={s.label} className="card p-7">
+            <dd className="tnum h-display text-[4.5rem]">
               <span data-count={s.value} data-dec={s.decimals}>{s.value.toFixed(s.decimals)}</span>
-              <span className="ml-1 text-[1.563rem] text-slate">{s.unit}</span>
+              <span className="ml-1 text-[1.75rem] text-muted">{s.unit}</span>
             </dd>
+            <dt className="mt-2 text-muted">{s.label}</dt>
           </div>
         ))}
       </dl>

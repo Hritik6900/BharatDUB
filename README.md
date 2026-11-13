@@ -86,5 +86,6 @@ No numbers yet. This section only ever holds measured results from `backend/eval
 
 ## Credits
 
-FastAPI, Next.js, Tailwind CSS, httpx, websockets, pydub, Demucs (Meta), Silero VAD, Supabase.
+FastAPI, Next.js, Tailwind CSS, GSAP, Lenis, Lucide icons, httpx, websockets, Demucs (Meta), Silero VAD, Supabase.
+Typefaces: Instrument Serif, Geist, Anek, Noto.
 Speech models by Gnani AI. AI-dubbed output is labelled "AI-dubbed by Bharat Dub".

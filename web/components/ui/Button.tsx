@@ -1,16 +1,17 @@
 import Link from "next/link";
 import type { ComponentProps, ReactNode } from "react";
 
-type Variant = "primary" | "secondary" | "quiet";
+type Variant = "primary" | "secondary" | "ghost" | "danger";
 
 const base =
-  "inline-flex items-center justify-center gap-2 rounded-chip font-display font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45 select-none";
+  "group inline-flex shrink-0 items-center justify-center gap-2 rounded-chip font-medium tracking-[-0.01em] transition-[background,border-color,opacity,transform] duration-200 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 select-none";
 const variants: Record<Variant, string> = {
-  primary: "bg-fg text-on-fg hover:opacity-90",
-  secondary: "border border-mist bg-surface text-fg hover:border-fg",
-  quiet: "text-fg underline-offset-4 hover:underline",
+  primary: "bg-fg text-on-fg hover:opacity-90 shadow-[0_8px_24px_-12px_color-mix(in_oklab,var(--fg)_70%,transparent)]",
+  secondary: "border border-line bg-surface text-fg hover:border-fg",
+  ghost: "text-fg hover:bg-sunken",
+  danger: "bg-danger text-white hover:opacity-90",
 };
-const sizes = { md: "h-11 px-5 text-[1rem]", lg: "h-14 px-7 text-[1.15rem]", sm: "h-9 px-4 text-[0.9rem]" };
+const sizes = { sm: "h-9 px-4 text-sm", md: "h-11 px-5 text-[0.95rem]", lg: "h-[3.25rem] px-7 text-base" };
 
 interface Common {
   variant?: Variant;
@@ -23,15 +24,9 @@ export function Button({ variant = "primary", size = "md", className = "", ...re
   return <button className={`${base} ${variants[variant]} ${sizes[size]} ${className}`} {...rest} />;
 }
 
-export function LinkButton({
-  variant = "primary",
-  size = "md",
-  className = "",
-  href,
-  children,
-}: Common & { href: string }) {
+export function LinkButton({ variant = "primary", size = "md", className = "", href, children, ...rest }: Common & { href: string; target?: string }) {
   return (
-    <Link href={href} className={`${base} ${variants[variant]} ${sizes[size]} ${className}`}>
+    <Link href={href} className={`${base} ${variants[variant]} ${sizes[size]} ${className}`} {...rest}>
       {children}
     </Link>
   );

@@ -31,8 +31,21 @@ export function useLiveFeed(sid: string, langCode: string, opts: { audioOn: bool
   const optsRef = useRef(opts);
   optsRef.current = opts;
 
+  // The dubbed audio passes through this analyser on its way out, so the page can draw what is really playing.
+  const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
+  const outRef = useRef<AudioNode | null>(null);
+
   const ensureAudio = useCallback(async () => {
-    if (!ctxRef.current) ctxRef.current = new AudioContext();
+    if (!ctxRef.current) {
+      const ctx = new AudioContext();
+      const an = ctx.createAnalyser();
+      an.fftSize = 1024;
+      an.smoothingTimeConstant = 0.8;
+      an.connect(ctx.destination);
+      ctxRef.current = ctx;
+      outRef.current = an;
+      setAnalyser(an);
+    }
     if (ctxRef.current.state === "suspended") await ctxRef.current.resume();
     return ctxRef.current;
   }, []);
@@ -96,7 +109,7 @@ export function useLiveFeed(sid: string, langCode: string, opts: { audioOn: bool
       const at = nextAt.current > ctx.currentTime ? Math.max(nextAt.current, ctx.currentTime + 0.02) : earliest;
       const src = ctx.createBufferSource();
       src.buffer = buf;
-      src.connect(ctx.destination);
+      src.connect(outRef.current ?? ctx.destination);
       src.start(at);
       nextAt.current = at + buf.duration;
     };
@@ -109,5 +122,5 @@ export function useLiveFeed(sid: string, langCode: string, opts: { audioOn: bool
     };
   }, [sid, langCode]);
 
-  return { captions, stats, session, connected, ensureAudio };
+  return { captions, stats, session, connected, ensureAudio, analyser };
 }

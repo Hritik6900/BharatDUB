@@ -1,7 +1,10 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Nav } from "@/components/layout/Nav";
+import { BookA, Lock, Plus, X } from "lucide-react";
+import { Shell } from "@/components/layout/Shell";
 import { Button } from "@/components/ui/Button";
+import { Notice } from "@/components/ui/Notice";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { api } from "@/lib/api";
 
 interface Term {
@@ -39,40 +42,65 @@ export default function GlossaryPage() {
     }
   };
   return (
-    <>
-      <Nav />
-      <main className="mx-auto max-w-3xl px-4 py-12 sm:px-8 sm:py-16">
-        <h1 className="font-display text-[clamp(2rem,5vw,3rem)] font-semibold leading-tight">Glossary</h1>
-        <p className="mt-3 max-w-[60ch] text-slate">Words that are never translated: your name, game titles, brand names, catchphrases. They also help speech recognition spell them right.</p>
-        <form onSubmit={add} className="mt-10 grid gap-3 sm:grid-cols-[1fr_1.4fr_auto]">
-          <input required value={term} onChange={(e) => setTerm(e.target.value)} placeholder="Word, e.g. Valorant" aria-label="Word" className="h-12 rounded-panel border border-mist bg-surface px-4" />
-          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" aria-label="Note" className="h-12 rounded-panel border border-mist bg-surface px-4" />
-          <Button type="submit" disabled={!term.trim()}>Add</Button>
+    <Shell>
+      <div className="mx-auto max-w-4xl px-5 pb-24 pt-12 sm:px-8 sm:pt-16">
+        <PageHeader
+          icon={BookA}
+          eyebrow="Glossary"
+          title={<>Words that <em>stay</em></>}
+          lede="Words that are never translated: your name, game titles, brand names, catchphrases. They also help speech recognition spell them right."
+        />
+
+        <form onSubmit={add} className="card card-lift rise mt-12 grid gap-3 p-4 sm:grid-cols-[1fr_1.4fr_auto] sm:p-5">
+          <input required value={term} onChange={(e) => setTerm(e.target.value)} placeholder="Word, e.g. Valorant" aria-label="Word" className="input" />
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" aria-label="Note" className="input" />
+          <Button type="submit" size="lg" className="h-12" disabled={!term.trim()}>
+            <Plus aria-hidden className="size-4" />
+            Add
+          </Button>
         </form>
-        {err && <p role="alert" className="mt-4 text-sm">{err}</p>}
-        <ul className="mt-8 divide-y divide-mist border-y border-mist">
-          {terms.map((t) => (
-            <li key={t.id} className="flex items-center justify-between gap-4 py-3">
-              <span>
-                <span className="font-display font-semibold">{t.term}</span>
-                {t.note && <span className="ml-3 text-sm text-slate">{t.note}</span>}
-              </span>
-              <button
-                onClick={async () => {
-                  await api(`/api/glossary/${t.id}`, { method: "DELETE" });
-                  load();
-                }}
-                className="text-sm text-slate underline-offset-4 hover:text-fg hover:underline"
-                aria-label={`Remove ${t.term}`}
-              >
-                Remove
-              </button>
-            </li>
-          ))}
-          {!terms.length && <li className="py-3 text-sm text-slate">No words of your own yet.</li>}
-        </ul>
-        <p className="mt-6 text-sm text-slate">Always kept: {defaults.join(", ")}</p>
-      </main>
-    </>
+        {err && <div className="mt-4"><Notice tone="error" role="alert">{err}</Notice></div>}
+
+        <section className="rise mt-12" aria-labelledby="mine-h" style={{ animationDelay: "0.08s" }}>
+          <h2 id="mine-h" className="eyebrow">Your words <span className="tnum ml-1">{terms.length}</span></h2>
+          {terms.length ? (
+            <ul className="mt-4 flex flex-wrap gap-2.5">
+              {terms.map((t) => (
+                <li key={t.id} className="inline-flex items-center gap-2 rounded-chip border border-line bg-surface py-1.5 pl-4 pr-1.5">
+                  <span className="font-medium">{t.term}</span>
+                  {t.note && <span className="text-sm text-muted">{t.note}</span>}
+                  <button
+                    onClick={async () => {
+                      await api(`/api/glossary/${t.id}`, { method: "DELETE" });
+                      load();
+                    }}
+                    className="grid size-7 place-items-center rounded-full text-muted transition-colors hover:bg-sunken hover:text-danger"
+                    aria-label={`Remove ${t.term}`}
+                  >
+                    <X aria-hidden className="size-4" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-4 text-muted">No words of your own yet. Add the first one above.</p>
+          )}
+        </section>
+
+        {defaults.length > 0 && (
+          <section className="rise mt-12" aria-labelledby="def-h" style={{ animationDelay: "0.14s" }}>
+            <h2 id="def-h" className="eyebrow flex items-center gap-2">
+              <Lock aria-hidden className="size-3.5" />
+              Always kept
+            </h2>
+            <ul className="mt-4 flex flex-wrap gap-2">
+              {defaults.map((d) => (
+                <li key={d} className="rounded-chip bg-sunken px-3.5 py-1.5 text-sm">{d}</li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </div>
+    </Shell>
   );
 }

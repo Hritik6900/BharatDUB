@@ -1,31 +1,80 @@
 import Link from "next/link";
-import { Wordmark } from "./Nav";
+import { ArrowUpRight, ShieldCheck, Tag, Trash2 } from "lucide-react";
+import { Wordmark } from "./Logo";
+
+const COLS = [
+  {
+    title: "Products",
+    links: [
+      { href: "/studio", label: "Studio" },
+      { href: "/live", label: "Live" },
+      { href: "/#how", label: "How it works" },
+    ],
+  },
+  {
+    title: "Your account",
+    links: [
+      { href: "/voices", label: "Your voice" },
+      { href: "/glossary", label: "Glossary" },
+      { href: "/dashboard", label: "Dashboard" },
+    ],
+  },
+];
+const PROMISES = [
+  { icon: ShieldCheck, text: "Voices cloned only with recorded consent" },
+  { icon: Tag, text: "Every dub labelled as AI-dubbed" },
+  { icon: Trash2, text: "Uploads deleted after 24 hours" },
+];
 
 export function Footer() {
   return (
-    <footer className="border-t border-mist">
-      <div className="mx-auto grid max-w-6xl gap-10 px-4 py-14 sm:px-8 md:grid-cols-[1.2fr_1fr_1fr]">
-        <div>
-          <Wordmark />
-          <p className="mt-5 max-w-[42ch] text-sm text-slate">
-            AI-dubbed content is labelled, in the video and in the subtitles. Uploads are deleted after 24 hours.
-          </p>
+    <footer className="theme-dark relative z-10 overflow-hidden rounded-t-[32px] border-t border-line bg-bg text-fg">
+      <div className="mx-auto max-w-6xl px-5 pt-16 sm:px-8 sm:pt-20">
+        <div className="grid gap-12 md:grid-cols-[1.5fr_1fr_1fr_1.4fr]">
+          <div>
+            <Wordmark />
+            <p className="mt-5 max-w-[34ch] text-muted">One voice, every Indian language. For creators and streamers.</p>
+            <ul className="mt-7 space-y-2.5 text-sm">
+              {PROMISES.map((p) => (
+                <li key={p.text} className="flex items-center gap-2.5">
+                  <p.icon aria-hidden className="size-4 text-muted" />
+                  {p.text}
+                </li>
+              ))}
+            </ul>
+          </div>
+          {COLS.map((c) => (
+            <nav key={c.title} aria-label={c.title}>
+              <h2 className="eyebrow">{c.title}</h2>
+              <ul className="mt-5 space-y-3">
+                {c.links.map((l) => (
+                  <li key={l.href}>
+                    <Link href={l.href} className="group inline-flex items-center gap-1 text-fg/90 hover:text-fg">
+                      {l.label}
+                      <ArrowUpRight aria-hidden className="size-3.5 opacity-0 transition-opacity group-hover:opacity-100" />
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          ))}
+          <div>
+            <h2 className="eyebrow">Built with</h2>
+            <p className="mt-5 text-sm leading-relaxed text-muted">
+              Speech models by Gnani AI: Prisma, Timbre and Vachana voice cloning. Open source: Demucs, Silero VAD, FastAPI, Next.js, GSAP, Lenis,
+              Lucide, and the Instrument Serif, Geist, Anek and Noto typefaces.
+            </p>
+          </div>
         </div>
-        <div>
-          <h2 className="font-display text-base font-semibold">Product</h2>
-          <ul className="mt-3 space-y-1.5 text-sm text-slate">
-            <li><Link className="hover:text-fg" href="/studio">Studio</Link></li>
-            <li><Link className="hover:text-fg" href="/live">Live</Link></li>
-            <li><Link className="hover:text-fg" href="/voices">Your voice</Link></li>
-            <li><Link className="hover:text-fg" href="/dashboard">Dashboard</Link></li>
-          </ul>
-        </div>
-        <div>
-          <h2 className="font-display text-base font-semibold">Built with</h2>
-          <p className="mt-3 text-sm text-slate">
-            Speech models by Gnani AI (Prisma, Timbre, Vachana voice cloning). Open source: Demucs, Silero VAD, FastAPI,
-            Next.js, GSAP, Lenis, Anek and Noto fonts.
-          </p>
+
+        <p aria-hidden className="text-spectrum mt-16 select-none whitespace-nowrap text-center font-display text-[clamp(4.5rem,19vw,17rem)] leading-[0.82] tracking-[-0.03em] opacity-90">
+          Bharat Dub
+        </p>
+      </div>
+      <div className="border-t border-line">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-5 py-5 text-sm text-muted sm:px-8">
+          <p>© 2026 Bharat Dub. Built for the Gnani AI challenge and Vihaan X.</p>
+          <p className="font-indic">हिन्दी · தமிழ் · বাংলা · తెలుగు · English</p>
         </div>
       </div>
     </footer>

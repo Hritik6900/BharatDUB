@@ -1,14 +1,20 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Nav } from "@/components/layout/Nav";
+import { Check, Mic, Quote, ShieldCheck, Square, Trash2, Upload } from "lucide-react";
+import { Shell } from "@/components/layout/Shell";
 import { Button } from "@/components/ui/Button";
-import { useAudioLevel } from "@/components/voice/useAudioLevel";
+import { Notice } from "@/components/ui/Notice";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { VoiceBars } from "@/components/voice/VoiceBars";
+import { VoiceOrb } from "@/components/voice/VoiceOrb";
 import { api, type VoiceProfile } from "@/lib/api";
+import { useAnalyser } from "@/lib/useMic";
 
 const consentSentence = (name: string) =>
   `I, ${name || "[your name]"}, agree that Bharat Dub may create a copy of my voice to dub my own videos and live streams. I can delete it at any time.`;
 const MIN_S = 5;
 const MAX_S = 30;
+const TIPS = ["A quiet room, no music or fan noise", "Phone or headset mic close to your mouth", "Talk the way you do on camera, not like reading"];
 
 export default function VoicesPage() {
   const [voices, setVoices] = useState<VoiceProfile[]>([]);
@@ -23,7 +29,8 @@ export default function VoicesPage() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const timer = useRef<ReturnType<typeof setInterval>>(undefined);
-  const level = useAudioLevel(src, ctx);
+  const upload = useRef<HTMLInputElement>(null);
+  const analyser = useAnalyser(src, ctx);
   const load = () => api<VoiceProfile[]>("/api/voices").then(setVoices).catch(() => {});
   useEffect(() => {
     load();
@@ -100,72 +107,120 @@ export default function VoicesPage() {
 
   const recording = !!rec;
   return (
-    <>
-      <Nav />
-      <main className="mx-auto max-w-3xl px-4 py-12 sm:px-8 sm:py-16">
-        <h1 className="font-display text-[clamp(2rem,5vw,3rem)] font-semibold leading-tight">Your voice</h1>
-        <p className="mt-3 max-w-[60ch] text-slate">
-          Record 20 to 30 seconds in a quiet room. Read the sentence below aloud first, then keep talking naturally, the way you do on camera.
-        </p>
+    <Shell>
+      <div className="mx-auto max-w-6xl px-5 pb-24 pt-12 sm:px-8 sm:pt-16">
+        <PageHeader
+          icon={Mic}
+          eyebrow="Your voice"
+          title={<>Record it <em>once</em></>}
+          lede="20 to 30 seconds in a quiet room. Read the consent sentence aloud first, then keep talking naturally, the way you do on camera."
+        />
 
-        <label className="mt-10 block max-w-sm">
-          <span className="font-display font-semibold">Your name</span>
-          <input value={name} onChange={(e) => setName(e.target.value)} className="mt-2 h-12 w-full rounded-panel border border-mist bg-surface px-4" />
-        </label>
+        <div className="mt-12 grid gap-8 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+          <div className="card card-lift rise space-y-9 p-5 sm:p-8">
+            <label className="block max-w-sm">
+              <span className="text-lg font-medium tracking-[-0.01em]">Your name</span>
+              <input value={name} onChange={(e) => setName(e.target.value)} className="input mt-3" autoComplete="name" />
+            </label>
 
-        <blockquote className="mt-8 border-l-4 border-[var(--hi)] pl-5 font-display text-[clamp(1.3rem,3vw,1.9rem)] leading-snug">
-          {consentSentence(name.trim())}
-        </blockquote>
+            <figure className="rounded-panel bg-sunken p-6 sm:p-7">
+              <figcaption className="eyebrow flex items-center gap-2">
+                <Quote aria-hidden className="size-3.5" />
+                Read this aloud first
+              </figcaption>
+              <blockquote className="mt-4 font-display text-[clamp(1.5rem,3.2vw,2.1rem)] leading-[1.18]">{consentSentence(name.trim())}</blockquote>
+            </figure>
 
-        <div className="mt-10 flex flex-wrap items-center gap-6">
-          <button
-            onClick={() => (recording ? rec?.stop() : start())}
-            aria-label={recording ? "Stop recording" : "Start recording"}
-            className="relative grid size-24 place-items-center rounded-chip bg-[var(--bn)] text-white"
-          >
-            <span aria-hidden className="absolute inset-0 rounded-chip bg-[var(--bn)] opacity-30" style={{ transform: `scale(${1 + level * 0.6})` }} />
-            <span className="relative font-display font-semibold">{recording ? "Stop" : "Record"}</span>
-          </button>
-          <div>
-            <p className="tnum font-display text-3xl">{secs.toFixed(0)} s</p>
-            <p className="text-sm text-slate">{recording ? `Recording… stops at ${MAX_S} s` : blob ? "Recorded. Listen back below." : `At least ${MIN_S} s, best 20-30 s`}</p>
+            <div className="flex flex-col items-center gap-6 rounded-panel border border-line p-6 sm:flex-row sm:gap-8">
+              <button onClick={() => (recording ? rec?.stop() : start())} aria-label={recording ? "Stop recording" : "Start recording"} className="relative grid shrink-0 place-items-center rounded-full">
+                <VoiceOrb size={132} analyser={analyser} />
+                <span className={`absolute grid size-16 place-items-center rounded-full text-white shadow-card transition-colors ${recording ? "bg-fg text-on-fg" : "bg-danger"}`}>
+                  {recording ? <Square aria-hidden className="size-5 fill-current" /> : <Mic aria-hidden className="size-6" />}
+                </span>
+              </button>
+              <div className="min-w-0 flex-1 text-center sm:text-left">
+                <p className="tnum h-display text-5xl">
+                  {secs.toFixed(0)}
+                  <span className="ml-1 text-2xl text-muted">s</span>
+                </p>
+                <p className="mt-1 text-sm text-muted" role="status">
+                  {recording ? `Recording… stops at ${MAX_S} s` : blob ? "Recorded. Listen back below." : `At least ${MIN_S} s, best 20 to 30 s`}
+                </p>
+                <VoiceBars analyser={analyser} active={false} bars={40} height={36} colors={["--hi", "--bn", "--te"]} className="mt-3" />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 text-sm text-muted">
+              <span>Already have a recording?</span>
+              <Button variant="secondary" size="sm" onClick={() => upload.current?.click()}>
+                <Upload aria-hidden className="size-4" />
+                Upload a file
+              </Button>
+              <input ref={upload} type="file" accept="audio/*" className="sr-only" aria-label="Upload a voice sample" onChange={(e) => e.target.files?.[0] && setSample(e.target.files[0], 0)} />
+            </div>
+
+            {blobUrl && <audio controls src={blobUrl} className="w-full" />}
+
+            <div>
+              <label className="flex cursor-pointer items-start gap-3">
+                <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} className="mt-1 size-4" />
+                <span>This is my voice, and I read the consent sentence aloud in the recording.</span>
+              </label>
+              {msg && <div className="mt-5"><Notice>{msg}</Notice></div>}
+              <Button size="lg" className="mt-6" disabled={!blob || !agree || !name.trim() || busy || (secs > 0 && secs < MIN_S)} onClick={saveVoice}>
+                <ShieldCheck aria-hidden className="size-4" />
+                {busy ? "Creating your voice…" : "Save voice"}
+              </Button>
+            </div>
           </div>
-          <label className="text-sm">
-            <span className="text-slate">or upload a file </span>
-            <input type="file" accept="audio/*" onChange={(e) => e.target.files?.[0] && setSample(e.target.files[0], 0)} className="text-sm" />
-          </label>
+
+          <aside className="rise space-y-6" style={{ animationDelay: "0.08s" }}>
+            <section className="card p-6" aria-labelledby="saved-h">
+              <h2 id="saved-h" className="eyebrow">Saved voices</h2>
+              {voices.length ? (
+                <ul className="mt-3 divide-y divide-line">
+                  {voices.map((v) => (
+                    <li key={v.id} className="flex items-center gap-3 py-3.5">
+                      <span className="grid size-10 shrink-0 place-items-center rounded-full border border-line bg-bg">
+                        <Mic aria-hidden className="size-[18px]" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-medium">{v.display_name}</span>
+                        <span className="block text-xs text-muted">Consent recorded {new Date(v.consent_at).toLocaleString()}</span>
+                      </span>
+                      <button onClick={() => remove(v)} aria-label={`Delete ${v.display_name}`} className="grid size-9 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-sunken hover:text-danger">
+                        <Trash2 aria-hidden className="size-4" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-4 text-sm text-muted">None yet. Your saved voice appears here, with a delete button.</p>
+              )}
+            </section>
+
+            <section className="card p-6" aria-labelledby="tips-h">
+              <h2 id="tips-h" className="eyebrow">For a good copy</h2>
+              <ul className="mt-4 space-y-3">
+                {TIPS.map((t) => (
+                  <li key={t} className="flex items-start gap-2.5">
+                    <Check aria-hidden className="mt-1 size-4 shrink-0 text-ok" />
+                    {t}
+                  </li>
+                ))}
+              </ul>
+            </section>
+
+            <section className="card p-6">
+              <h2 className="eyebrow flex items-center gap-2">
+                <ShieldCheck aria-hidden className="size-3.5" />
+                Consent
+              </h2>
+              <p className="mt-3 text-sm text-muted">Without the consent sentence and the checkbox, no copy of a voice is made. Deleting a voice removes the sample and the copy.</p>
+            </section>
+          </aside>
         </div>
-
-        {blobUrl && <audio controls src={blobUrl} className="mt-6 w-full" />}
-
-        <label className="mt-8 flex cursor-pointer items-start gap-3">
-          <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} className="mt-1.5 size-4" />
-          <span>This is my voice, and I read the consent sentence aloud in the recording.</span>
-        </label>
-        {msg && <p role="status" className="mt-5 rounded-panel border border-mist px-4 py-3 text-sm">{msg}</p>}
-        <Button size="lg" className="mt-6" disabled={!blob || !agree || !name.trim() || busy || (secs > 0 && secs < MIN_S)} onClick={saveVoice}>
-          {busy ? "Creating your voice…" : "Save voice"}
-        </Button>
-
-        <section className="mt-16" aria-labelledby="saved-h">
-          <h2 id="saved-h" className="font-display text-lg font-semibold">Saved voices</h2>
-          {voices.length ? (
-            <ul className="mt-3 divide-y divide-mist border-y border-mist">
-              {voices.map((v) => (
-                <li key={v.id} className="flex items-center justify-between gap-4 py-3">
-                  <span>
-                    <span className="font-display font-semibold">{v.display_name}</span>
-                    <span className="block text-sm text-slate">Consent recorded {new Date(v.consent_at).toLocaleString()}</span>
-                  </span>
-                  <Button variant="secondary" size="sm" onClick={() => remove(v)}>Delete voice</Button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-2 text-sm text-slate">None yet.</p>
-          )}
-        </section>
-      </main>
-    </>
+      </div>
+    </Shell>
   );
 }

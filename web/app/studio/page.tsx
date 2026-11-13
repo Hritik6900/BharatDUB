@@ -2,13 +2,32 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Nav } from "@/components/layout/Nav";
+import { ArrowRight, AudioLines, Captions, Check, ChevronRight, Clapperboard, FileVideo, Mic, Music2, PencilLine, Upload } from "lucide-react";
+import { Shell } from "@/components/layout/Shell";
 import { Button } from "@/components/ui/Button";
 import { LanguageChip } from "@/components/ui/LanguageChip";
-import { API_BASE, api, type Job, type VoiceProfile } from "@/lib/api";
+import { Notice } from "@/components/ui/Notice";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { api, type Job, type VoiceProfile } from "@/lib/api";
 import { TARGET_LANGS, lang } from "@/lib/langs";
 
 const MAX_MB = 500;
+const GET = [
+  { icon: FileVideo, text: "A dubbed MP4 for each language" },
+  { icon: Captions, text: "A subtitle file for each language" },
+  { icon: Music2, text: "Your background music and sound kept" },
+  { icon: PencilLine, text: "A line editor to fix any translation" },
+];
+const STATUS: Record<Job["status"], string> = { queued: "Queued", running: "Dubbing", done: "Ready", failed: "Stopped", expired: "Expired" };
+
+function StepLabel({ n, children }: { n: number; children: React.ReactNode }) {
+  return (
+    <legend className="flex items-center gap-3 text-lg font-medium tracking-[-0.01em]">
+      <span className="tnum grid size-7 place-items-center rounded-full bg-fg font-mono text-xs text-on-fg">{n}</span>
+      {children}
+    </legend>
+  );
+}
 
 export default function StudioPage() {
   const router = useRouter();
@@ -55,119 +74,156 @@ export default function StudioPage() {
     }
   };
 
+  const radio = (on: boolean, enabled = true) =>
+    `flex items-start gap-3.5 rounded-panel border p-4 transition-colors ${enabled ? "cursor-pointer" : "opacity-60"} ${on ? "border-fg bg-surface" : "border-line bg-surface/60 hover:border-fg/40"}`;
+
   return (
-    <>
-      <Nav />
-      <main className="mx-auto max-w-3xl px-4 py-12 sm:px-8 sm:py-16">
-        <h1 className="font-display text-[clamp(2rem,5vw,3rem)] font-semibold leading-tight">Dub a video</h1>
-        <p className="mt-3 text-slate">A reel, short or clip up to 3 minutes. You get an MP4 and subtitles for each language.</p>
+    <Shell>
+      <div className="mx-auto max-w-6xl px-5 pb-24 pt-12 sm:px-8 sm:pt-16">
+        <PageHeader icon={Clapperboard} eyebrow="Studio" title={<>Dub a <em>video</em></>} lede="A reel, short or clip up to 3 minutes. You get it back dubbed, with subtitles, one video per language." />
 
-        <div
-          role="button"
-          tabIndex={0}
-          aria-label={file ? `Selected ${file.name}. Choose a different video` : "Choose a video, or drop it here"}
-          onClick={() => input.current?.click()}
-          onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && input.current?.click()}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDrag(true);
-          }}
-          onDragLeave={() => setDrag(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDrag(false);
-            pick(e.dataTransfer.files[0]);
-          }}
-          className={`relative mt-10 grid min-h-56 cursor-pointer place-items-center rounded-media border-2 border-dashed p-8 text-center transition-colors ${
-            drag ? "border-transparent" : "border-mist hover:border-slate"
-          }`}
-        >
-          {drag && <span aria-hidden className="voice-ribbon absolute -inset-[2px] -z-10 rounded-media" style={{ ["--to" as string]: lang(langs[0] ?? "ta-IN").hue }} />}
-          {drag && <span aria-hidden className="absolute inset-0 -z-10 rounded-[18px] bg-bg" />}
-          <div>
-            {file ? (
-              <>
-                <p className="font-display text-xl font-semibold">{file.name}</p>
-                <p className="mt-1 text-sm text-slate">{(file.size / 1024 / 1024).toFixed(1)} MB · click to change</p>
-              </>
-            ) : (
-              <>
-                <p className="font-display text-xl font-semibold">Drop your video here</p>
-                <p className="mt-1 text-sm text-slate">or click to choose · MP4, MOV, WebM · up to 3 minutes</p>
-              </>
-            )}
-          </div>
-          <input ref={input} type="file" accept="video/*" className="sr-only" onChange={(e) => pick(e.target.files?.[0])} />
-        </div>
-
-        <fieldset className="mt-10">
-          <legend className="font-display text-lg font-semibold">Dub into</legend>
-          <div className="mt-3 flex flex-wrap gap-2.5">
-            {TARGET_LANGS.map((l) => (
-              <LanguageChip key={l.code} code={l.code} selected={langs.includes(l.code)} onClick={() => toggle(l.code)} />
-            ))}
-          </div>
-        </fieldset>
-
-        <fieldset className="mt-10">
-          <legend className="font-display text-lg font-semibold">Voice</legend>
-          <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
-            <label className={`flex cursor-pointer items-start gap-3 rounded-panel border p-4 ${voiceId ? "border-mist" : "border-fg"}`}>
-              <input type="radio" name="voice" checked={!voiceId} onChange={() => setVoiceId("")} className="mt-1.5" />
-              <span>
-                <span className="block font-display font-semibold">Stock voice</span>
-                <span className="text-sm text-slate">A natural studio voice for each language.</span>
-              </span>
-            </label>
-            <label className={`flex items-start gap-3 rounded-panel border p-4 ${voices.length ? "cursor-pointer" : "opacity-60"} ${voiceId ? "border-fg" : "border-mist"}`}>
-              <input type="radio" name="voice" disabled={!voices.length} checked={!!voiceId} onChange={() => setVoiceId(voices[0]?.id ?? "")} className="mt-1.5" />
-              <span>
-                <span className="block font-display font-semibold">My voice</span>
-                {voices.length ? (
-                  <select value={voiceId || voices[0].id} onChange={(e) => setVoiceId(e.target.value)} className="mt-1 rounded-panel border border-mist bg-surface px-2 py-1 text-sm" aria-label="Voice profile">
-                    {voices.map((v) => <option key={v.id} value={v.id}>{v.display_name}</option>)}
-                  </select>
-                ) : (
-                  <span className="text-sm text-slate">
-                    <Link href="/voices" className="underline underline-offset-2">Record your voice</Link> first, with consent.
+        <div className="mt-12 grid gap-8 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+          <div className="card card-lift rise space-y-10 p-5 sm:p-8">
+            <fieldset>
+              <StepLabel n={1}>Your video</StepLabel>
+              <div
+                role="button"
+                tabIndex={0}
+                aria-label={file ? `Selected ${file.name}. Choose a different video` : "Choose a video, or drop it here"}
+                onClick={() => input.current?.click()}
+                onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && input.current?.click()}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDrag(true);
+                }}
+                onDragLeave={() => setDrag(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDrag(false);
+                  pick(e.dataTransfer.files[0]);
+                }}
+                className={`relative mt-4 grid min-h-56 cursor-pointer place-items-center rounded-panel p-8 text-center transition-colors ${drag ? "bg-sunken" : "bg-bg hover:bg-sunken"}`}
+              >
+                <span aria-hidden className={`pointer-events-none absolute inset-0 rounded-panel border-2 border-dashed transition-colors ${drag ? "border-fg" : file ? "border-ok" : "border-line"}`} />
+                <div className="flex flex-col items-center">
+                  <span className={`grid size-14 place-items-center rounded-full border border-line bg-surface ${file ? "text-ok" : ""}`}>
+                    {file ? <Check aria-hidden className="size-6" /> : <Upload aria-hidden className="size-6" />}
                   </span>
-                )}
-              </span>
-            </label>
-          </div>
-        </fieldset>
+                  {file ? (
+                    <>
+                      <p className="mt-4 max-w-full break-all text-lg font-medium">{file.name}</p>
+                      <p className="mt-1 text-sm text-muted">{(file.size / 1024 / 1024).toFixed(1)} MB · click to change</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="mt-4 text-lg font-medium">Drop your video here</p>
+                      <p className="mt-1 text-sm text-muted">or click to choose · MP4, MOV, WebM · up to 3 minutes</p>
+                    </>
+                  )}
+                </div>
+                <input ref={input} type="file" accept="video/*" className="sr-only" onChange={(e) => pick(e.target.files?.[0])} />
+              </div>
+            </fieldset>
 
-        <label className="mt-10 flex cursor-pointer items-start gap-3">
-          <input type="checkbox" checked={owns} onChange={(e) => setOwns(e.target.checked)} className="mt-1.5 size-4" />
-          <span>I own this video or have permission to dub it.</span>
-        </label>
+            <fieldset>
+              <StepLabel n={2}>Dub into</StepLabel>
+              <div className="mt-4 flex flex-wrap gap-2.5">
+                {TARGET_LANGS.map((l) => (
+                  <LanguageChip key={l.code} code={l.code} selected={langs.includes(l.code)} onClick={() => toggle(l.code)} />
+                ))}
+              </div>
+            </fieldset>
 
-        {error && <p role="alert" className="mt-6 rounded-panel border border-[var(--bn)] px-4 py-3 text-sm">{error}</p>}
-
-        <Button size="lg" className="mt-8 w-full sm:w-auto" disabled={!file || !langs.length || !owns || busy} onClick={submit}>
-          {busy ? "Uploading…" : "Start dubbing"}
-        </Button>
-
-        {jobs.length > 0 && (
-          <section className="mt-20" aria-labelledby="recent-h">
-            <h2 id="recent-h" className="font-display text-lg font-semibold">Recent videos</h2>
-            <ul className="mt-3 divide-y divide-mist border-y border-mist">
-              {jobs.slice(0, 8).map((j) => (
-                <li key={j.id}>
-                  <Link href={`/studio/${j.id}`} className="flex items-center justify-between gap-4 py-3 hover:bg-surface">
-                    <span className="truncate">{j.source_path}</span>
-                    <span className="flex shrink-0 items-center gap-3 text-sm text-slate">
-                      {j.target_langs.map((c) => <span key={c} className="size-2 rounded-full" style={{ background: lang(c).hue }} title={lang(c).name} />)}
-                      <span>{j.status}</span>
+            <fieldset>
+              <StepLabel n={3}>Voice</StepLabel>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <label className={radio(!voiceId)}>
+                  <input type="radio" name="voice" checked={!voiceId} onChange={() => setVoiceId("")} className="mt-1 size-4" />
+                  <span>
+                    <span className="flex items-center gap-2 font-medium">
+                      <AudioLines aria-hidden className="size-4" />
+                      Stock voice
                     </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-        <p className="sr-only">API: {API_BASE}</p>
-      </main>
-    </>
+                    <span className="text-sm text-muted">A natural studio voice for each language.</span>
+                  </span>
+                </label>
+                <label className={radio(!!voiceId, voices.length > 0)}>
+                  <input type="radio" name="voice" disabled={!voices.length} checked={!!voiceId} onChange={() => setVoiceId(voices[0]?.id ?? "")} className="mt-1 size-4" />
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-2 font-medium">
+                      <Mic aria-hidden className="size-4" />
+                      My voice
+                    </span>
+                    {voices.length ? (
+                      <select value={voiceId || voices[0].id} onChange={(e) => setVoiceId(e.target.value)} className="input mt-2 h-9 px-2 text-sm" aria-label="Voice profile">
+                        {voices.map((v) => <option key={v.id} value={v.id}>{v.display_name}</option>)}
+                      </select>
+                    ) : (
+                      <span className="text-sm text-muted">
+                        <Link href="/voices" className="text-fg underline underline-offset-2">Record your voice</Link> first, with consent.
+                      </span>
+                    )}
+                  </span>
+                </label>
+              </div>
+            </fieldset>
+
+            <div>
+              <label className="flex cursor-pointer items-start gap-3">
+                <input type="checkbox" checked={owns} onChange={(e) => setOwns(e.target.checked)} className="mt-1 size-4" />
+                <span>I own this video or have permission to dub it.</span>
+              </label>
+              {error && <div className="mt-5"><Notice tone="error" role="alert">{error}</Notice></div>}
+              <Button size="lg" className="mt-6 w-full sm:w-auto" disabled={!file || !langs.length || !owns || busy} onClick={submit}>
+                {busy ? "Uploading…" : "Start dubbing"}
+                <ArrowRight aria-hidden className="size-4 transition-transform group-hover:translate-x-0.5" />
+              </Button>
+            </div>
+          </div>
+
+          <aside className="rise space-y-6" style={{ animationDelay: "0.08s" }}>
+            <section className="card p-6" aria-labelledby="get-h">
+              <h2 id="get-h" className="eyebrow">What you get</h2>
+              <ul className="mt-5 space-y-4">
+                {GET.map((g) => (
+                  <li key={g.text} className="flex items-center gap-3.5">
+                    <span className="grid size-10 shrink-0 place-items-center rounded-[12px] border border-line bg-bg">
+                      <g.icon aria-hidden className="size-[18px]" />
+                    </span>
+                    {g.text}
+                  </li>
+                ))}
+              </ul>
+            </section>
+
+            <section className="card p-6" aria-labelledby="recent-h">
+              <h2 id="recent-h" className="eyebrow">Recent videos</h2>
+              {jobs.length ? (
+                <ul className="mt-3 divide-y divide-line">
+                  {jobs.slice(0, 6).map((j) => (
+                    <li key={j.id}>
+                      <Link href={`/studio/${j.id}`} className="group flex items-center gap-3 py-3">
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-medium">{j.source_path}</span>
+                          <span className="mt-0.5 flex items-center gap-2 text-sm text-muted">
+                            {STATUS[j.status]}
+                            <span className="flex gap-1">
+                              {j.target_langs.map((c) => <span key={c} className="size-2 rounded-full" style={{ background: lang(c).hue }} title={lang(c).name} />)}
+                            </span>
+                          </span>
+                        </span>
+                        <ChevronRight aria-hidden className="size-4 shrink-0 text-muted transition-transform group-hover:translate-x-0.5" />
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-4 text-sm text-muted">Videos you dub appear here.</p>
+              )}
+            </section>
+          </aside>
+        </div>
+      </div>
+    </Shell>
   );
 }

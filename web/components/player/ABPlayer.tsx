@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { Tag } from "lucide-react";
 import type { Segment } from "@/lib/api";
 import { lang } from "@/lib/langs";
 
@@ -48,13 +49,13 @@ export function ABPlayer({ tracks, active, onActive, segments, seekTo }: Props) 
   const hue = active === "src" ? "var(--hi)" : lang(active).hue;
 
   return (
-    <div>
-      <div className="overflow-hidden rounded-media bg-black shadow-[0_20px_60px_-30px_rgba(20,22,31,.35)]">
+    <div className="card card-lift p-2">
+      <div className="overflow-hidden rounded-[18px] bg-black">
         <video
           ref={v}
           controls
           playsInline
-          className="mx-auto block max-h-[70vh] w-full"
+          className="mx-auto block max-h-[66vh] w-full"
           onTimeUpdate={(e) => setT(e.currentTarget.currentTime)}
           onLoadedMetadata={(e) => {
             const p = pending.current;
@@ -66,32 +67,37 @@ export function ABPlayer({ tracks, active, onActive, segments, seekTo }: Props) 
           }}
         />
       </div>
-      <div className="mt-3 h-1 overflow-hidden rounded-chip bg-mist" aria-hidden>
-        <div className="voice-ribbon h-full" style={{ ["--to" as string]: hue, width: `${v.current?.duration ? (t / v.current.duration) * 100 : 0}%` }} />
+      <div className="px-3 pb-3 pt-4 sm:px-4">
+        <div className="h-1 overflow-hidden rounded-chip bg-line" aria-hidden>
+          <div className="h-full rounded-chip transition-colors duration-500" style={{ background: hue, width: `${v.current?.duration ? (t / v.current.duration) * 100 : 0}%` }} />
+        </div>
+        <p lang={caption ? lang(caption.code).short : undefined} className="mt-5 min-h-[3.2em] text-center font-indic text-xl font-medium leading-snug" aria-live="off">
+          {caption?.text}
+        </p>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <div role="tablist" aria-label="Audio" className="flex flex-wrap gap-2">
+            {tracks.map((tr) => {
+              const sel = tr.key === active;
+              return (
+                <button
+                  key={tr.key}
+                  role="tab"
+                  aria-selected={sel}
+                  onClick={() => onActive(tr.key)}
+                  className={`inline-flex h-10 items-center gap-2 rounded-chip border px-4 text-[0.95rem] transition-colors ${sel ? "border-fg bg-fg text-on-fg" : "border-line bg-surface hover:border-fg"}`}
+                >
+                  <span className="size-2.5 rounded-full" style={{ background: tr.key === "src" ? "var(--hi)" : lang(tr.key).hue }} />
+                  {tr.label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="flex items-center gap-1.5 text-xs text-muted">
+            <Tag aria-hidden className="size-3.5" />
+            AI-dubbed by Bharat Dub
+          </p>
+        </div>
       </div>
-      <p lang={caption ? lang(caption.code).short : undefined} className="mt-4 min-h-[3.2em] text-center font-display text-xl leading-snug" aria-live="off">
-        {caption && <span className="border-b-2 pb-0.5" style={{ borderColor: hue }}>{caption.text}</span>}
-      </p>
-      <div role="tablist" aria-label="Audio" className="mt-4 flex flex-wrap justify-center gap-2">
-        {tracks.map((tr) => {
-          const sel = tr.key === active;
-          const h = tr.key === "src" ? "var(--hi)" : lang(tr.key).hue;
-          return (
-            <button
-              key={tr.key}
-              role="tab"
-              aria-selected={sel}
-              onClick={() => onActive(tr.key)}
-              style={{ ["--hue" as string]: h }}
-              className={`inline-flex h-11 items-center gap-2 rounded-chip border px-5 font-display ${sel ? "border-[var(--hue)] bg-[var(--hue)] text-white" : "border-mist bg-surface hover:border-[var(--hue)]"}`}
-            >
-              <span className={`size-2.5 rounded-full ${sel ? "bg-white" : "bg-[var(--hue)]"}`} />
-              {tr.label}
-            </button>
-          );
-        })}
-      </div>
-      <p className="mt-3 text-center text-xs text-slate">AI-dubbed by Bharat Dub</p>
     </div>
   );
 }
