@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
+from app.config import get_settings
 from app.providers.base import STT, ProviderError
 from app.shared import audio_utils as au
 from app.shared import cache
@@ -23,7 +24,8 @@ def cut_clips(vocals16k: np.ndarray, segs: list[tuple[float, float]], clip_dir: 
 
 async def transcribe_clip(stt: STT, clip: Path, lang: str, keyterms: list[str],
                           usage: dict, warnings: list[str]) -> dict:
-    key = au.cache_key(au.sha256_file(clip), lang, STT_MODEL)
+    fmt = get_settings().stt_format
+    key = au.cache_key(au.sha256_file(clip), lang, STT_MODEL, fmt)
     hit = cache.get_json("transcribe", key)
     if hit is not None:
         usage["stt_cache_hits"] = usage.get("stt_cache_hits", 0) + 1
@@ -31,7 +33,7 @@ async def transcribe_clip(stt: STT, clip: Path, lang: str, keyterms: list[str],
     result: dict = {"text": "", "lang": None}
     for try_lang in dict.fromkeys([lang, "hi-IN"]):  # spec: 1 retry (in provider), then hi-IN
         try:
-            r = await stt.transcribe(str(clip), try_lang, keyterms=keyterms)
+            r = await stt.transcribe(str(clip), try_lang, fmt=fmt, keyterms=keyterms)
             result = {"text": r.text, "lang": r.detected_lang or (try_lang if try_lang != "indic-auto" else None)}
             usage["stt_calls"] = usage.get("stt_calls", 0) + 1
             usage["stt_audio_s"] = round(usage.get("stt_audio_s", 0.0) + au.duration_s(clip), 2)

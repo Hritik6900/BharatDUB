@@ -89,7 +89,8 @@ class LivePipeline:
             yield pcm
 
     async def _stt_loop(self) -> None:
-        headers = {"x-min-silence-ms": str(STT_SILENCE_MS), "x-max-speech-s": "6", "x-idle-timeout-sec": "300"}
+        headers = {"x-min-silence-ms": str(STT_SILENCE_MS), "x-max-speech-s": "6", "x-idle-timeout-sec": "300",
+                   "format": get_settings().stt_format}
         while self.running:
             try:
                 async for ev in self.stt.stream(self._frames(), self.sess.row.get("src_lang") or "indic-auto",

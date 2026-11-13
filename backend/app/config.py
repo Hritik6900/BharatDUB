@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     max_video_seconds: int = 180
     cors_origins: str = "http://localhost:3000"
 
+    # Prisma output format. `codemix` keeps English words in Latin letters (game, chat, map), which is how
+    # creators write and what the glossary matches; `verbatim` transliterates them into Devanagari.
+    stt_format: str = "codemix"
     tts_model: str = "timbre-v2.5"
     tts_sample_rate: int = 44100
 
