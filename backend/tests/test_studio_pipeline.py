@@ -125,3 +125,34 @@ async def test_clone_requires_consent(rig):
     assert (await r.voice_spec(ctx, "ta-IN")) == {"kind": "stock", "voice": "Asmita"}
     await r.store.update("voice_profiles", p["id"], {"consent_at": "2026-11-13T00:00:00Z"})
     assert (await r.voice_spec(ctx, "ta-IN"))["kind"] == "clone"
+
+
+async def test_voice_from_video_creates_profile_only_with_consent(rig):
+    r, _, _, tts, tmp = rig
+    calls = []
+    orig = tts.clone_embedding
+
+    async def spy(wav_path, *, consent_at):
+        calls.append(consent_at)
+        return await orig(wav_path, consent_at=consent_at)
+
+    tts.clone_embedding = spy
+    # No consent recorded at upload: nothing is cloned, the stock voice is used.
+    plain = await r.create_job(make_video(tmp / "a.mp4"), "a.mp4", ["ta-IN"])
+    await r.run(plain["id"])
+    assert not calls and not (await r.store.get("jobs", plain["id"])).get("voice_profile_id")
+
+    consent = {"consent_at": "2026-11-13T10:00:00Z", "consent_text": "mine"}
+    job = await r.create_job(make_video(tmp / "b.mp4"), "b.mp4", ["ta-IN"], None, consent)
+    await r.run(job["id"])
+    done = await r.store.get("jobs", job["id"])
+    assert done["status"] == "done", done.get("error")
+    speech = sum(e - s for s, e in SEGS)
+    if speech >= 5:
+        assert calls == ["2026-11-13T10:00:00Z"]
+        profile = await r.store.get("voice_profiles", done["voice_profile_id"])
+        assert profile["consent_at"] == consent["consent_at"] and profile["display_name"] == "Voice from b"
+        from app.studio.runner import Ctx
+        assert (await r.voice_spec(Ctx(job["id"], r.job_dir(job["id"])), "ta-IN"))["kind"] == "clone"
+    else:
+        assert not calls and any("too little" in w for w in done["stage_timings"]["_warnings"])

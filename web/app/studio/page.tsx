@@ -12,6 +12,9 @@ import { api, type Job, type VoiceProfile } from "@/lib/api";
 import { TARGET_LANGS, lang } from "@/lib/langs";
 
 const MAX_MB = 500;
+// Same sentence the backend stores on the voice profile it creates from the video.
+const VIDEO_VOICE_CONSENT =
+  "The voice in this video is mine, or I have the speaker's permission, and I agree that Bharat Dub may make a copy of it to dub this video.";
 const GET = [
   { icon: FileVideo, text: "A dubbed MP4 for each language" },
   { icon: Captions, text: "A subtitle file for each language" },
@@ -36,6 +39,8 @@ export default function StudioPage() {
   const [langs, setLangs] = useState<string[]>(["ta-IN"]);
   const [voices, setVoices] = useState<VoiceProfile[]>([]);
   const [voiceId, setVoiceId] = useState<string>("");
+  const [voiceMode, setVoiceMode] = useState<"video" | "stock" | "saved">("video");
+  const [voiceConsent, setVoiceConsent] = useState(false);
   const [owns, setOwns] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -64,7 +69,11 @@ export default function StudioPage() {
     fd.append("file", file);
     fd.append("target_langs", langs.join(","));
     fd.append("owns_video", String(owns));
-    if (voiceId) fd.append("voice_profile_id", voiceId);
+    if (voiceMode === "saved" && voiceId) fd.append("voice_profile_id", voiceId);
+    if (voiceMode === "video") {
+      fd.append("voice_from_video", "true");
+      fd.append("voice_consent", String(voiceConsent));
+    }
     try {
       const { job_id } = await api<{ job_id: string }>("/api/jobs", { method: "POST", body: fd });
       router.push(`/studio/${job_id}`);
@@ -136,9 +145,19 @@ export default function StudioPage() {
 
             <fieldset>
               <StepLabel n={3}>Voice</StepLabel>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <label className={radio(!voiceId)}>
-                  <input type="radio" name="voice" checked={!voiceId} onChange={() => setVoiceId("")} className="mt-1 size-4" />
+              <div className="mt-4 grid gap-3">
+                <label className={radio(voiceMode === "video")}>
+                  <input type="radio" name="voice" checked={voiceMode === "video"} onChange={() => setVoiceMode("video")} className="mt-1 size-4" />
+                  <span>
+                    <span className="flex items-center gap-2 font-medium">
+                      <FileVideo aria-hidden className="size-4" />
+                      Voice in this video
+                    </span>
+                    <span className="text-sm text-muted">Copied from the speech in the video itself. Nothing to record.</span>
+                  </span>
+                </label>
+                <label className={radio(voiceMode === "stock")}>
+                  <input type="radio" name="voice" checked={voiceMode === "stock"} onChange={() => setVoiceMode("stock")} className="mt-1 size-4" />
                   <span>
                     <span className="flex items-center gap-2 font-medium">
                       <AudioLines aria-hidden className="size-4" />
@@ -147,25 +166,55 @@ export default function StudioPage() {
                     <span className="text-sm text-muted">A natural studio voice for each language.</span>
                   </span>
                 </label>
-                <label className={radio(!!voiceId, voices.length > 0)}>
-                  <input type="radio" name="voice" disabled={!voices.length} checked={!!voiceId} onChange={() => setVoiceId(voices[0]?.id ?? "")} className="mt-1 size-4" />
+                <label className={radio(voiceMode === "saved", voices.length > 0)}>
+                  <input
+                    type="radio"
+                    name="voice"
+                    disabled={!voices.length}
+                    checked={voiceMode === "saved"}
+                    onChange={() => {
+                      setVoiceMode("saved");
+                      setVoiceId((id) => id || voices[0]?.id || "");
+                    }}
+                    className="mt-1 size-4"
+                  />
                   <span className="min-w-0">
                     <span className="flex items-center gap-2 font-medium">
                       <Mic aria-hidden className="size-4" />
-                      My voice
+                      Saved voice
                     </span>
                     {voices.length ? (
-                      <select value={voiceId || voices[0].id} onChange={(e) => setVoiceId(e.target.value)} className="input mt-2 h-9 px-2 text-sm" aria-label="Voice profile">
+                      <select
+                        value={voiceId || voices[0].id}
+                        onChange={(e) => {
+                          setVoiceId(e.target.value);
+                          setVoiceMode("saved");
+                        }}
+                        className="input mt-2 h-9 px-2 text-sm"
+                        aria-label="Voice profile"
+                      >
                         {voices.map((v) => <option key={v.id} value={v.id}>{v.display_name}</option>)}
                       </select>
                     ) : (
                       <span className="text-sm text-muted">
-                        <Link href="/voices" className="text-fg underline underline-offset-2">Record your voice</Link> first, with consent.
+                        None yet. <Link href="/voices" className="text-fg underline underline-offset-2">Record one</Link>.
                       </span>
                     )}
                   </span>
                 </label>
               </div>
+              {voiceMode === "video" && (
+                <div className="mt-4 rounded-panel bg-sunken p-4">
+                  <label className="flex cursor-pointer items-start gap-3">
+                    <input type="checkbox" checked={voiceConsent} onChange={(e) => setVoiceConsent(e.target.checked)} className="mt-1 size-4" />
+                    <span>{VIDEO_VOICE_CONSENT}</span>
+                  </label>
+                  <p className="mt-2 pl-7 text-sm text-muted">
+                    Needs at least 5 seconds of clear speech; with less, a stock voice is used. Works best with one speaker. The copy is saved under
+                    Your voice, where you can delete it or reuse it for Live.
+                  </p>
+                </div>
+              )}
             </fieldset>
 
             <div>
@@ -174,7 +223,7 @@ export default function StudioPage() {
                 <span>I own this video or have permission to dub it.</span>
               </label>
               {error && <div className="mt-5"><Notice tone="error" role="alert">{error}</Notice></div>}
-              <Button size="lg" className="mt-6 w-full sm:w-auto" disabled={!file || !langs.length || !owns || busy} onClick={submit}>
+              <Button size="lg" className="mt-6 w-full sm:w-auto" disabled={!file || !langs.length || !owns || busy || (voiceMode === "video" && !voiceConsent)} onClick={submit}>
                 {busy ? "Uploading…" : "Start dubbing"}
                 <ArrowRight aria-hidden className="size-4 transition-transform group-hover:translate-x-0.5" />
               </Button>

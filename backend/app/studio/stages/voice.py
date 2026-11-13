@@ -2,6 +2,8 @@
 import hashlib
 from pathlib import Path
 
+import numpy as np
+
 from app.config import VOICE_BY_LANG
 from app.providers.base import TTS, ProviderError, VoiceSpec
 from app.shared import audio_utils as au
@@ -36,3 +38,23 @@ async def synth_line(tts: TTS, text: str, lang: str, voice: VoiceSpec, tts_model
     usage["tts_calls"] = usage.get("tts_calls", 0) + 1
     usage["tts_chars"] = usage.get("tts_chars", 0) + len(text)
     return cache.put_file("voice", key, "wav", audio)
+
+
+SAMPLE_MIN_S, SAMPLE_MAX_S = 5.0, 28.0  # the clone endpoint takes 5-30 s of clean speech
+
+
+def build_sample(vocals: Path, segs: list[tuple[float, float]], out: Path, sr: int = 44100) -> float:
+    """Join the video's speech segments (in order, short gaps) into one voice sample. Returns seconds of speech."""
+    audio = au.load_mono(vocals, sr)
+    gap = np.zeros(int(0.15 * sr), dtype=audio.dtype)
+    parts: list[np.ndarray] = []
+    total = 0.0
+    for start, end in segs:
+        take = min(end - start, SAMPLE_MAX_S - total)
+        if take <= 0.2:
+            break
+        parts += [audio[int(start * sr): int((start + take) * sr)], gap]
+        total += take
+    if parts:
+        au.write_wav(out, np.concatenate(parts[:-1]), sr)
+    return total

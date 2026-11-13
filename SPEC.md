@@ -341,7 +341,13 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
   `LLM_REASONING_EFFORT=none`). Measured 2026-11-13: 1.4-2.2 s for a 3-line batch, ~1.5 s for a live chunk. With thinking on
   it took 4-5 s and truncated the reply; `gemini-3.5-flash-lite` returned the Hinglish untranslated. Prompts now demand
   native script (models answered Hinglish input in romanised Tamil otherwise).
-- [ ] VC language check still open. Evon bonus: ask on the Gnani Discord whether an endpoint exists.
+- [x] VC on the real API (2026-11-13): embedding from a 9.8 s sample in 1.4 s; cloned lines in Tamil, Hindi and English were
+  transcribed back by Prisma with the same words (intelligibility check, one line each, synthetic source voice). How close it
+  sounds to a real person's voice still needs a human listening test. Evon bonus: ask on the Gnani Discord for an endpoint.
+- Studio can copy the voice **from the uploaded video itself** (`voice_from_video=true` + `voice_consent=true` on `POST /api/jobs`,
+  403 without consent). The consent sentence is a checkbox at upload, not read aloud. The runner builds a 5-28 s sample from the
+  separated vocals, creates a normal voice profile with `consent_at` ("Voice from <file>") and attaches it to the job; under 5 s
+  of speech or a clone error falls back to stock with a warning. The profile is reusable for Live and deletable on `/voices`.
 - [x] Demucs htdemucs on CPU: **40.3 s for 60 s of audio** (Ryzen 7 7435HS, torch 2.15 CPU, measured 2026-11-13). Silero VAD: 3.5 s for a 14 s clip including model load.
 
 ## 18. Implementation notes (M2)

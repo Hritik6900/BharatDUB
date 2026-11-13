@@ -64,7 +64,8 @@ class StudioRunner:
 
     # ---------- create ----------
     async def create_job(self, upload: Path, source_name: str, target_langs: list[str],
-                         voice_profile_id: str | None = None) -> dict[str, Any]:
+                         voice_profile_id: str | None = None,
+                         voice_from_video: dict[str, str] | None = None) -> dict[str, Any]:
         """Stage 1 (ingest). Raises extract.IngestError with a user-facing message."""
         duration = await asyncio.to_thread(extract.ingest, upload, self.s.max_video_seconds)
         expires = datetime.now(timezone.utc) + timedelta(hours=self.s.upload_ttl_hours)
@@ -77,7 +78,8 @@ class StudioRunner:
         d.mkdir(parents=True, exist_ok=True)
         shutil.move(str(upload), d / f"source{upload.suffix.lower() or '.mp4'}")
         self._write_meta(d, {"source": f"source{upload.suffix.lower() or '.mp4'}",
-                             "name": Path(source_name).stem[:60] or "video", "duration": duration})
+                             "name": Path(source_name).stem[:60] or "video", "duration": duration,
+                             "voice_from_video": voice_from_video})
         return job
 
     def start(self, job_id: str) -> asyncio.Task[Any]:
@@ -140,6 +142,7 @@ class StudioRunner:
             segs = [tuple(s) for s in segs]
             if not segs:
                 raise PipelineError("No speech found in this video.")
+        await self._voice_from_video(ctx, meta, Path(vocals), segs)
 
         async with self._stage(ctx, "transcribe"):
             audio16 = await asyncio.to_thread(au.load_mono, v16, 16000)
@@ -160,6 +163,41 @@ class StudioRunner:
             ])
             await self.store.update("jobs", ctx.job_id, {"src_lang": src_lang})
         self._write_meta(d, meta)
+
+    async def _voice_from_video(self, ctx: Ctx, meta: dict[str, Any], vocals: Path,
+                                segs: list[tuple[float, float]]) -> None:
+        """Copy the voice heard in the video itself, if the uploader consented at upload (golden rule 4).
+
+        Creates a normal voice profile (with consent_at) and attaches it to the job, so every later stage,
+        added languages and Live sessions use it like any other profile. Fails soft to a stock voice.
+        """
+        consent = meta.get("voice_from_video") or {}
+        if not consent.get("consent_at"):
+            return
+        job = await self.store.get("jobs", ctx.job_id) or {}
+        if job.get("voice_profile_id"):
+            return
+        async with self._stage(ctx, "clone"):
+            try:
+                sample = ctx.dir / "voice_sample.wav"
+                secs = await asyncio.to_thread(voice.build_sample, vocals, segs, sample)
+                if secs < voice.SAMPLE_MIN_S:
+                    self._warn(ctx, f"Only {secs:.0f} s of speech in this video, too little to copy the voice. "
+                                    "Using a stock voice.")
+                    return
+                key = au.cache_key(await asyncio.to_thread(au.sha256_file, sample))
+                emb = cache.get_json("clone", key)
+                if emb is None:
+                    emb = await self.tts.clone_embedding(str(sample), consent_at=consent["consent_at"])
+                    cache.put_json("clone", key, emb)
+                    ctx.usage["clone_calls"] = ctx.usage.get("clone_calls", 0) + 1
+                profile = await self.store.insert("voice_profiles", {
+                    "display_name": f"Voice from {meta['name']}"[:60], "embedding": emb,
+                    "consent_text": consent.get("consent_text", ""), "consent_at": consent["consent_at"],
+                })
+                await self.store.update("jobs", ctx.job_id, {"voice_profile_id": profile["id"]})
+            except (ProviderError, au.FFmpegError, OSError, ValueError) as e:
+                self._warn(ctx, f"Could not copy the voice from this video; using a stock voice ({e})"[:300])
 
     # ---------- per language ----------
     async def _process_lang(self, ctx: Ctx, meta: dict[str, Any], lang: str) -> None:

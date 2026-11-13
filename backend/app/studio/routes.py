@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from app.config import LANG_NAMES, get_settings
+from app.db import now_iso
 from app.providers.base import ProviderError
 from app.shared.storage import output_url
 from app.studio.events import events
@@ -19,6 +20,9 @@ from app.studio.runner import runner
 from app.studio.stages.extract import IngestError
 
 router = APIRouter()
+# Shown next to the checkbox on /studio; stored on the voice profile created from the video.
+VIDEO_VOICE_CONSENT = ("The voice in this video is mine, or I have the speaker's permission, and I agree that "
+                       "Bharat Dub may make a copy of it to dub this video.")
 ALLOWED_EXT = {".mp4", ".mov", ".webm", ".mkv", ".m4v"}
 MAX_UPLOAD_BYTES = 500 * 1024 * 1024
 
@@ -44,9 +48,13 @@ async def create_job(
     target_langs: Annotated[str, Form()],
     owns_video: Annotated[bool, Form()] = False,
     voice_profile_id: Annotated[str | None, Form()] = None,
+    voice_from_video: Annotated[bool, Form()] = False,
+    voice_consent: Annotated[bool, Form()] = False,
 ) -> dict[str, str]:
     if not owns_video:
         raise HTTPException(400, "Confirm you own this video or have permission to dub it.")
+    if voice_from_video and not voice_consent:
+        raise HTTPException(403, "Copying the voice in this video needs the speaker's consent.")
     langs = parse_langs(target_langs)
     ext = Path(file.filename or "").suffix.lower()
     if ext not in ALLOWED_EXT:
@@ -70,7 +78,10 @@ async def create_job(
                 raise HTTPException(413, "File too large (max 500 MB).")
             f.write(chunk)
     try:
-        job = await runner.create_job(tmp, file.filename or "video", langs, voice_profile_id)
+        from_video = None
+        if voice_from_video and not voice_profile_id:
+            from_video = {"consent_at": now_iso(), "consent_text": VIDEO_VOICE_CONSENT}
+        job = await runner.create_job(tmp, file.filename or "video", langs, voice_profile_id, from_video)
     except IngestError as e:
         tmp.unlink(missing_ok=True)
         raise HTTPException(400, str(e)) from e
