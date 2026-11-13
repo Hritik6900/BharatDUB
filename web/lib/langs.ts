@@ -8,7 +8,7 @@ export interface Lang {
   hue: string; // CSS var name with the language colour
 }
 
-// Hues only for the five languages the design system colours.
+// The five languages the landing page tells its story with.
 export const LANGS: Lang[] = [
   { code: "hi-IN", short: "hi", name: "Hindi", native: "हिन्दी", hue: "var(--hi)" },
   { code: "ta-IN", short: "ta", name: "Tamil", native: "தமிழ்", hue: "var(--ta)" },
@@ -17,16 +17,22 @@ export const LANGS: Lang[] = [
   { code: "en-IN", short: "en", name: "English", native: "English", hue: "var(--en)" },
 ];
 
+// Also live in Studio and Live (checked on the real API, 2026-11-13).
 export const EXTRA_LANGS: Lang[] = [
-  { code: "kn-IN", short: "kn", name: "Kannada", native: "ಕನ್ನಡ", hue: "var(--muted)" },
-  { code: "ml-IN", short: "ml", name: "Malayalam", native: "മലയാളം", hue: "var(--muted)" },
-  { code: "mr-IN", short: "mr", name: "Marathi", native: "मराठी", hue: "var(--muted)" },
-  { code: "gu-IN", short: "gu", name: "Gujarati", native: "ગુજરાતી", hue: "var(--muted)" },
-  { code: "pa-IN", short: "pa", name: "Punjabi", native: "ਪੰਜਾਬੀ", hue: "var(--muted)" },
+  { code: "kn-IN", short: "kn", name: "Kannada", native: "ಕನ್ನಡ", hue: "var(--kn)" },
+  { code: "ml-IN", short: "ml", name: "Malayalam", native: "മലയാളം", hue: "var(--ml)" },
+  { code: "mr-IN", short: "mr", name: "Marathi", native: "मराठी", hue: "var(--mr)" },
+  { code: "gu-IN", short: "gu", name: "Gujarati", native: "ગુજરાતી", hue: "var(--gu)" },
+  { code: "pa-IN", short: "pa", name: "Punjabi", native: "ਪੰਜਾਬੀ", hue: "var(--pa)" },
 ];
 
-export const TARGET_LANGS = LANGS.filter((l) => l.code !== "hi-IN");
 const ALL = [...LANGS, ...EXTRA_LANGS];
+/** Studio can dub into any of the ten (a non-Hindi video can go to Hindi). */
+export const STUDIO_LANGS = ALL;
+/** Live assumes a Hindi/Hinglish streamer, so Hindi is not a target there. */
+export const TARGET_LANGS = ALL.filter((l) => l.code !== "hi-IN");
+/** The four the landing page demos. */
+export const SHOWCASE_LANGS = LANGS.filter((l) => l.code !== "hi-IN");
 
 export function lang(code: string): Lang {
   return ALL.find((l) => l.code === code) ?? { code: code as LangCode, short: code, name: code, native: code, hue: "var(--muted)" };

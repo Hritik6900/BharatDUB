@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { Captions, Languages, Mic } from "lucide-react";
 import { VoiceBars } from "@/components/voice/VoiceBars";
-import { LANGS, TARGET_LANGS } from "@/lib/langs";
+import { LANGS, SHOWCASE_LANGS as TARGET_LANGS } from "@/lib/langs";
 
 /** One reel, with and without a dub. Counts are the product's own: 1 language in, 5 out, 4 subtitle files. */
 export function BeforeAfter() {

@@ -9,7 +9,7 @@ import { Button, LinkButton } from "@/components/ui/Button";
 import { Notice } from "@/components/ui/Notice";
 import { VoiceOrb } from "@/components/voice/VoiceOrb";
 import { API_BASE, api, fmtSeconds, type Job, type Output, type Segment } from "@/lib/api";
-import { TARGET_LANGS, lang } from "@/lib/langs";
+import { STUDIO_LANGS as TARGET_LANGS, lang } from "@/lib/langs";
 
 const STAGES: [string, string][] = [
   ["extract", "Extract audio"],

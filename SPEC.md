@@ -348,6 +348,9 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
   403 without consent). The consent sentence is a checkbox at upload, not read aloud. The runner builds a 5-28 s sample from the
   separated vocals, creates a normal voice profile with `consent_at` ("Voice from <file>") and attaches it to the job; under 5 s
   of speech or a clone error falls back to stock with a warning. The profile is reusable for Live and deletable on `/voices`.
+- [x] All ten languages are selectable (2026-11-13): Studio offers all ten (Hindi included, for non-Hindi videos), Live the nine
+  non-Hindi ones. Kannada, Malayalam, Marathi, Gujarati and Punjabi were checked once each on the real API: Gemini translation in
+  native script, Timbre stock voice (1.2-3.7 s), and Prisma heard the line back with at most one word different.
 - [x] Demucs htdemucs on CPU: **40.3 s for 60 s of audio** (Ryzen 7 7435HS, torch 2.15 CPU, measured 2026-11-13). Silero VAD: 3.5 s for a 14 s clip including model load.
 
 ## 18. Implementation notes (M2)

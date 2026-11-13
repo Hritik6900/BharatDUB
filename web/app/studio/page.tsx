@@ -9,7 +9,7 @@ import { LanguageChip } from "@/components/ui/LanguageChip";
 import { Notice } from "@/components/ui/Notice";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { api, type Job, type VoiceProfile } from "@/lib/api";
-import { TARGET_LANGS, lang } from "@/lib/langs";
+import { STUDIO_LANGS as TARGET_LANGS, lang } from "@/lib/langs";
 
 const MAX_MB = 500;
 // Same sentence the backend stores on the voice profile it creates from the video.
@@ -145,7 +145,7 @@ export default function StudioPage() {
 
             <fieldset>
               <StepLabel n={3}>Voice</StepLabel>
-              <div className="mt-4 grid gap-3">
+              <div className="mt-4 grid grid-cols-1 gap-3">
                 <label className={radio(voiceMode === "video")}>
                   <input type="radio" name="voice" checked={voiceMode === "video"} onChange={() => setVoiceMode("video")} className="mt-1 size-4" />
                   <span>
@@ -190,7 +190,7 @@ export default function StudioPage() {
                           setVoiceId(e.target.value);
                           setVoiceMode("saved");
                         }}
-                        className="input mt-2 h-9 px-2 text-sm"
+                        className="input mt-2 h-9 w-full min-w-0 px-2 text-sm"
                         aria-label="Voice profile"
                       >
                         {voices.map((v) => <option key={v.id} value={v.id}>{v.display_name}</option>)}

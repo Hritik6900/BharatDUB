@@ -162,8 +162,8 @@ function FitCard() {
 function NextCard() {
   return (
     <article data-reveal className="card p-6 sm:p-8 lg:col-span-3">
-      <h3 className="h-display text-[1.9rem]">Coming next</h3>
-      <p className="mt-2 text-muted">Voices for these five already exist. They are not switched on in the app yet.</p>
+      <h3 className="h-display text-[1.9rem]">Five more, switched on</h3>
+      <p className="mt-2 text-muted">Kannada, Malayalam, Marathi, Gujarati and Punjabi work in Studio and Live, next to the first five.</p>
       <ul className="cells mt-6 grid-cols-2 sm:grid-cols-3">
         {EXTRA_LANGS.map((l) => (
           <li key={l.code} className="tex-dots grid h-32 place-items-center text-center">
