@@ -116,7 +116,7 @@ export default function VoicesPage() {
           lede="20 to 30 seconds in a quiet room. Read the consent sentence aloud first, then keep talking naturally, the way you do on camera."
         />
 
-        <div className="mt-12 grid gap-8 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+        <div className="mt-12 grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
           <div className="card card-lift rise space-y-9 p-5 sm:p-8">
             <label className="block max-w-sm">
               <span className="text-lg font-medium tracking-[-0.01em]">Your name</span>

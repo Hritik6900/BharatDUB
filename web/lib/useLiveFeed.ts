@@ -13,6 +13,9 @@ export interface Stats {
   p50_ms: number | null;
   p95_ms: number | null;
   n: number;
+  /** End of a phrase to the moment a viewer starts hearing its dub (after earlier phrases have played). */
+  heard_p50_ms?: number | null;
+  heard_p95_ms?: number | null;
 }
 
 const JITTER_S = 0.3;

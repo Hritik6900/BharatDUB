@@ -48,7 +48,7 @@ function Watch() {
     setListening(true);
   };
 
-  if (demo) return <Demo feedCaptions={feed.captions} langs={s?.target_langs ?? []} p50={feed.stats?.p50_ms} />;
+  if (demo) return <Demo feedCaptions={feed.captions} langs={s?.target_langs ?? []} p50={feed.stats?.heard_p50_ms ?? feed.stats?.p50_ms} />;
 
   const caps = feed.captions.filter((c) => c.lang === (choice || "src")).slice(-2);
   const hue = choice === "src" || !choice ? "var(--hi)" : lang(choice).hue;
@@ -65,7 +65,7 @@ function Watch() {
               LIVE
             </span>
           )}
-          <DelayBadge ms={feed.stats?.p50_ms} />
+          <DelayBadge ms={feed.stats?.heard_p50_ms ?? feed.stats?.p50_ms} />
         </div>
       </header>
       <main className="relative mx-auto max-w-3xl px-4 pb-16">

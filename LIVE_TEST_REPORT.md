@@ -1,111 +1,99 @@
-# Live mode: end-to-end test, 13 Nov 2026
+# Live mode: measured results, 14 Nov 2026
 
-Everything below was measured on the real Gnani and Gemini APIs, through the running backend, the same way a
-streamer and a viewer use it. No number here is estimated.
+Everything below was measured on the real Gnani and Gemini APIs, through the running backend, the way a streamer
+and a viewer use it. No number here is estimated, except where a line says so.
 
-## What was tested, and what was not
+## Read this first
 
-- **Source "stream":** the audio of your own uploaded reel (`WhatsApp Video 2026-11-13 at 15.21.13`, 24.9 s, Hindi,
-  one speaker), played into `/ws/ingest` at real-time speed, 2 or 3 times in a row. This is exactly what the mic
-  client sends.
-- **I did not copy the voice of a stranger's live stream.** Cloning needs the speaker's consent (rule 4 in
-  SPEC.md), and a random streamer has not given it. Your reel already had your consent on record, so it was used.
-- A real YouTube live link (NASA's live channel) was used only to check that the viewer page embeds and plays a
-  live video. It plays.
-- This reel is a hard case: the speaker talks without pauses, so a 6-second line arrives every 6 seconds.
-  A streamer who pauses gives the system more room.
-- I cannot listen. Whether the copied voice sounds like you is the one thing you have to judge by ear
-  (files listed at the end).
+- **The number that matters is "heard".** Until 13 Nov this report gave "first audio": the time from the end of a
+  spoken line to the first dubbed audio leaving the server. A viewer hears a line only after the earlier lines have
+  finished playing, so the real delay is longer. The server now estimates that moment for every phrase, and an
+  offline replay of the web player's own rules agrees with it to within 0.1 s on the single-viewer runs.
+- **The 13 Nov numbers were about 0.3 to 0.6 s too kind.** They took the end of speech as "final transcript minus
+  0.5 s". Gnani's own `speech_end` event (found on 13 Nov) shows speech ends earlier than that.
+- **Source "stream":** the audio of your own reel (24.9 s, Hindi, one speaker, about 4.5 words a second with no
+  pauses), fed in real time, 2 or 3 times in a row. That is a hard case: a streamer who pauses gives the system room.
+- **Not tested:** a real microphone with a person speaking live, a real phone on a real network, a session longer
+  than 82 s, music or game sound behind the voice. I cannot listen, so how the dub sounds is yours to judge.
 
-## New in this session
+## Results (stock voices unless said)
 
-1. **Live learns the voice from the stream itself.** On `/live`, the default voice is now "The voice on this
-   stream". Tick the consent box, go live, and after 12 seconds of speech the dub switches from a stock voice to
-   the speaker's own voice. Without the consent tick the backend refuses (HTTP 403). The copy is saved under
-   Your voice and can be deleted there.
-2. **Translation no longer waits behind the previous line's audio.** Captions arrive sooner.
-3. **The dub keeps pace.** Stock voices speak 15% faster in Live, the translator is told to be brief, and the
-   viewer's player speeds up 10% when more than 2 s of audio is waiting (and skips a line that is over 10 s late).
-4. **Own voice in one language at a time.** See "The limit" below.
+"Heard" = end of a phrase to the moment the viewer starts hearing its dub. "From first word" = from the first word of
+the phrase instead of its end.
 
-## Results
-
-"First audio" is the time from the end of a spoken line to the first dubbed audio leaving the server.
-"Heard" is when the viewer actually starts hearing that line, counting earlier lines that are still playing.
-
-| Run | Voice | Languages | Lines | First audio p50 / p95 | Heard p50 / p95 / worst | Lines in own voice |
+| Run | Viewers on | Phrases | First audio p50 / p95 | Heard p50 / p95 / worst | From first word, heard p50 / p95 | Skipped |
 |---|---|---|---|---|---|---|
-| S3 | Stock | Tamil, Bengali, English | 10 | 3.6 s / 4.7 s | 4.3 s / 9.4 s / 11.6 s | none (by design) |
-| V1 | Your saved voice | Tamil | 10 | 4.6 s / 5.4 s | 4.8 s / 7.3 s / 7.7 s | 10 of 10 |
-| V3 | Your saved voice | Tamil, Bengali, English | 10 | 5.4 s / 8.8 s | 6.9 s / 11.8 s / 14.2 s | Tamil 10 of 10; Bengali, English stock |
-| L1 | Learned from the stream | Tamil | 15 | 4.3 s / 5.6 s | 4.6 s / 8.2 s / 8.3 s | 9 of 15 (first 6 were before the voice was ready) |
-| L3 | Learned from the stream | Tamil, Bengali, English | 15 | 4.9 s / 7.6 s | 6.6 s / 11.2 s / 14.1 s | Tamil 10 of 15; Bengali, English stock |
+| 4 languages offered | Tamil | 26 | 2.7 s / 3.6 s | 3.4 s / 5.8 s / 5.9 s | 4.8 s / 6.9 s | 0 |
+| 3 languages offered | Tamil | 26 | 3.5 s / 5.0 s | 4.4 s / 5.8 s / 6.2 s | 5.7 s / 7.3 s | 0 |
+| (same run) | Bengali | 26 | 3.8 s / 4.7 s | 6.0 s / 7.5 s / 7.5 s | 7.2 s / 8.9 s | 0 |
+| (same run) | English | 26 | 3.5 s / 4.9 s | 3.9 s / 5.5 s / 5.6 s | 5.2 s / 7.1 s | 0 |
+| Voice learned from the stream, 4 offered | Tamil | 38 | 2.6 s / 3.5 s | 3.5 s / 6.7 s / 7.1 s | 4.9 s / 7.6 s | 3 |
 
-- **No errors** in any run: no failed line, no dropped connection, no line skipped by the player.
-- **Learning the voice from the stream** took 33 to 37 s from the start of the stream (12 s of speech collected,
-  then about 1.4 s to make the copy).
-- **Where the time goes** for one line: about 0.5 s for speech-to-text, 1.5 to 1.7 s for translation, then
-  0.4 to 0.5 s for a stock voice to start, or 1.9 to 3.5 s for the copied voice (it arrives all at once, not as a stream).
-- **Viewer chat:** a Tamil message reached the streamer translated into Hindi in 1.2 to 2.2 s.
-- **Viewer page in a real browser (Edge, phone width):** captions, audio frames, chat and the live badge all
-  worked, with no console errors and no sideways scroll. Screenshot: `backend/scripts/out/live/L1_stream_1lang/watch_mobile.png`.
+- In the learned-voice run 14 of 38 phrases were in the speaker's own voice. The first 12 came before the voice was
+  ready; later ones fell back to the stock voice whenever the dub was already more than 5 s behind.
+- No errors and no dropped connection in any run. The viewer page in a real browser (Edge, phone width) played 398
+  audio frames with captions, no console errors, no sideways scroll, and its badge showed "Dub delay 3.4 s".
 
-### Before and after today's fixes (same reel, same languages)
+### What a viewer got before (same reel, Tamil, one viewer)
 
-| | Before | After |
-|---|---|---|
-| Stock, 3 languages: heard p50 / worst | 11.3 s / 37.8 s | 4.3 s / 11.6 s |
-| Your voice, 3 languages: first audio p50 | 22.3 s, and growing with every line | 5.4 s, stable |
-| Your voice, 1 language: first audio p50 | 5.2 s | 4.6 s |
+| | 13 Nov evening (whole lines) | 14 Nov, phrases only | 14 Nov, final |
+|---|---|---|---|
+| Heard p50 / p95 | 3.4 s / 7.1 s after a line of about 5 s | 7.8 s / 11.1 s | 3.4 s / 5.8 s after a phrase of about 1.2 s |
+| Phrases skipped by the player | 0 of 10 | 1 of 25 | 0 of 26 |
 
-## The limit: own voice in one language
+The middle column is why "first audio" was the wrong number to watch: cutting speech into short phrases brought first
+audio down to 2.3 s, but the Tamil dub came out 28% longer than the speech (64.4 s of audio for 50.3 s of talking), so
+audio piled up in the player and viewers heard it later, not sooner.
 
-- The Gnani account runs **one request at a time**. I sent three at once and two were refused
-  ("Only 1 active request is allowed at a time").
-- A line in the copied voice takes 2 to 4 s to make; a stock line starts in about 0.5 s.
-- So three languages in the copied voice cannot keep up: before the fix, the dub was 37 s behind after 55 s.
-- Now the first language you pick is dubbed in the speaker's own voice and the others use stock voices. If a line
-  is already more than 5 s late, that one line falls back to the stock voice to catch up.
-- If Gnani raises the limit, set `GNANI_MAX_CONCURRENCY` to the new number and that many languages get the own voice.
-  Worth asking them on Discord before the demo.
+## What changed on 13 and 14 Nov
 
-## Does it say the right words?
+1. **Phrases instead of whole lines.** Gnani's realtime speech-to-text has an undocumented switch (`x-partials: true`)
+   that sends the text so far about twice a second, with the part it will no longer change. Phrases of 6 to 12 words
+   are cut from that at clause boundaries, so translation and voice start while the speaker is still talking.
+2. **The dub no longer piles up.**
+   - The silence Timbre puts before and after every phrase is cut (it was about 0.27 s a phrase).
+   - When audio is still waiting to be played, the next phrase is shortened by up to 1.3x with ffmpeg `atempo`
+     (speed only, the pitch stays). In the single-viewer run this was applied to 21 of 26 phrases: this speaker is fast.
+   - A phrase that would be heard more than 8 s late is not spoken; its caption still goes out.
+3. **One voice call for several waiting phrases.** The Gnani account runs one request at a time. Phrases that queue up
+   behind it are now spoken in a single call (up to 3), which is what keeps three viewer languages from falling behind.
+4. **Audio only for languages someone is listening to.** Captions go out for every language.
+5. **Faster translation.** `gemini-3.1-flash-lite` for Live: 0.82 s a phrase against 1.02 s for `gemini-3.5-flash`
+   (48 phrases each, `scripts/live_llm_bench.py`). About 1 reply in 20 from the Flash models carries a word in the
+   wrong script (Devanagari, once Georgian, inside a Tamil line); such a reply is redone by the main model.
+6. **Source language is fixed per session** (Hindi/Hinglish by default). Auto-detect over game sound produced Bengali
+   and Kannada lines.
+7. **Sound can come from a browser tab** on the Live console (tab only; a window or screen share is refused because it
+   carries the dub back in and loops).
+8. The delay badge on the viewer page and the console now shows "heard", not "first audio".
 
-Every dubbed line was sent back through speech-to-text and compared with the text it was meant to say.
+Every one of these has a switch in `backend/app/config.py` (`LIVE_PARTIALS`, `LIVE_FIT`, `LIVE_TRIM_SILENCE`,
+`LIVE_MERGE_MAX`, `LIVE_TTS_ONLY_HEARD`, `LLM_MODEL_FAST`), so any of them can be turned off without touching code.
 
-| Language | Own voice | Stock voice |
-|---|---|---|
-| Tamil | 85 to 87% of words match | 87 to 89% |
-| Bengali | not run in own voice | 86 to 87% |
-| English | not run in own voice | 98 to 99% |
+## Limits that code does not remove
 
-The copied voice is as clear as the stock voice in Tamil. Part of the mismatch is the speech-to-text itself
-(spelling of English words inside Tamil and Bengali).
+- **One Gnani request at a time.** With viewers on three languages, first audio is about 3.5 to 3.8 s instead of 2.7 s,
+  and Bengali is heard 6 s behind. A higher account limit would fix this; ask Gnani.
+- **The copied voice is slow to make** (1.9 to 3.5 s a phrase, not streamed), so it is used only while the dub is less
+  than 5 s behind, and only for the first language.
+- **Dense, fast speech does not fit.** Tamil and Bengali take longer to say than Hindi. With this speaker most phrases
+  are played 1.3x faster. Please listen to how that sounds.
 
-## Does it sound like you?
+## Listen
 
-Not proven. The only automatic check available was speaking pitch: your reel is around 219 Hz, the own-voice
-Tamil dub around 190 Hz, the stock Tamil voice around 240 Hz. Pitch alone does not settle it. Please listen:
+`backend/scripts/out/live/`:
 
-- Own voice, learned live: `backend/scripts/out/live/L1_stream_1lang/dub_ta-IN.wav` (lines 7 to 15 are your voice; 1 to 6 are stock)
-- Own voice, saved profile: `backend/scripts/out/live/V1_saved_1lang/dub_ta-IN.wav`
-- Stock, for comparison: `backend/scripts/out/live/S3_stock_3lang/dub_ta-IN.wav`
-- Your original: `backend/data/jobs/45f013a9…/voice_sample.wav`
-
-## Not tested
-
-- A real microphone and a human speaking live (the audio came from a file).
-- A real phone on a real network; a second viewer at the same time.
-- Sessions longer than 82 s (the 15-minute speech-to-text reconnect was not reached).
-- Music or game sound behind the voice while the voice is being learned.
+- `J_stock_ta/dub_ta-IN.wav`: stock voice, final settings (phrases, trimmed, sped up where needed)
+- `H_stream_ta/dub_ta-IN.wav`: voice learned from the stream (about the last third is the copied voice)
+- `H4_stock_4lang_1heard/dub_ta-IN.wav`: 13 Nov, whole lines, for comparison
 
 ## Run it again
 
 ```
 cd backend
-python scripts/live_e2e.py <video> scripts/out/live --name mytest --voice stream --langs ta-IN --loops 3
-python scripts/live_analyze.py scripts/out/live mytest
-python scripts/live_quality.py scripts/out/live <voice_sample.wav> mytest
+python scripts/live_e2e.py <video> scripts/out/live --name mytest --voice stock --langs ta-IN,bn-IN,en-IN --listen ta-IN --loops 2
+python scripts/live_player_sim.py scripts/out/live mytest ta-IN     # what the viewer hears, replayed offline
+python scripts/live_llm_bench.py gemini-3.1-flash-lite gemini-3.5-flash@none
 ```
 
-`--voice` is `stock`, `stream`, or a saved voice id. Raw numbers: `backend/scripts/out/live/results.json` and `quality.json`.
+`--voice` is `stock`, `stream`, or a saved voice id. `--listen` is the languages a viewer is tuned to (default: all).

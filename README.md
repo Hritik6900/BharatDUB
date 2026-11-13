@@ -82,7 +82,31 @@ npm run dev                     # http://localhost:3000
 
 ## Results
 
-No numbers yet. This section only ever holds measured results from `backend/eval/run.py` (M6).
+Measured on the real Gnani and Gemini APIs. Nothing here is estimated. `backend/eval/run.py` (WER on 20 clips,
+slot-fit %) is not written yet, so those numbers are missing.
+
+### Live (14 Nov 2026)
+
+Source: a 24.9 s Hindi reel (one fast speaker, no pauses) fed in real time, twice. Stock voices. "Heard" is the time
+from the end of a phrase to the moment a viewer starts hearing its dub, after earlier phrases have played.
+Full report and how to rerun: [LIVE_TEST_REPORT.md](LIVE_TEST_REPORT.md).
+
+| Viewers on | First audio p50 / p95 | Heard p50 / p95 | Phrases skipped |
+|---|---|---|---|
+| Tamil (4 languages offered) | 2.7 s / 3.6 s | 3.4 s / 5.8 s | 0 of 26 |
+| Tamil, Bengali, English at once | 3.5 to 3.8 s / 4.7 to 5.0 s | 3.9 to 6.0 s / 5.5 to 7.5 s | 0 of 26 |
+| Tamil, voice learned from the stream | 2.6 s / 3.5 s | 3.5 s / 6.7 s | 3 of 38 |
+
+The Gnani account runs one request at a time; that is what separates the first row from the second.
+Not measured: a live microphone, a phone on a mobile network, sessions longer than 82 s.
+
+### Studio (13 Nov 2026)
+
+- A 24.9 s reel into 4 languages with stock voices, nothing cached: 84.9 s in total (Demucs 22.9 s, translation 20.7 s,
+  voice 12.2 s, one line shortened and re-voiced 20.8 s).
+- Demucs `htdemucs` on CPU: 40.3 s for 60 s of audio (Ryzen 7 7435HS).
+- Since 14 Nov the target languages are translated at once: on a 13.8 s reel into 2 new languages the translate stage took
+  1.3 s instead of 3.4 s (one run each, different language pairs).
 
 ## Credits
 

@@ -134,7 +134,7 @@ export default function JobPage() {
           )}
         </header>
 
-        <div className={`mt-10 grid gap-8 ${done ? "lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]" : "lg:grid-cols-2"}`}>
+        <div className={`mt-10 grid grid-cols-1 gap-8 ${done ? "lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]" : "lg:grid-cols-2"}`}>
           <div className={done ? "" : "order-2 lg:order-1"}>
             {done && tracks.length > 1 ? (
               <ABPlayer tracks={tracks} active={track || tracks[1].key} onActive={setTrack} segments={segments} seekTo={seek} />
@@ -301,7 +301,7 @@ function Review({ jobId, lang: code, segments, onPlay, onUpdated }: { jobId: str
         The {l.name} <em>lines</em>
       </h2>
       <p className="mt-3 max-w-[58ch] text-muted">Edit a line and save. Only that line is re-voiced, then the video is re-rendered.</p>
-      <div className="card mt-8 overflow-x-auto" data-lenis-prevent>
+      <div className="card relative mt-8 overflow-x-auto" data-lenis-prevent>
         <table className="w-full min-w-[720px] text-left">
           <thead className="border-b border-line">
             <tr className="eyebrow">

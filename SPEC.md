@@ -380,6 +380,24 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
 - Live translation uses `LLM_MODEL_FAST=gemini-3.5-flash-lite` with `LLM_REASONING_EFFORT_FAST=minimal` (`none` is a 400 for
   lite): 0.8-0.95 s per phrase against 1.3-1.5 s for `gemini-3.5-flash`. Lite sometimes returns the Hindi unchanged; such a
   reply (Devanagari in a non-Devanagari target) is re-translated by the main model.
+- [x] **"First audio" is not what a viewer hears** (2026-11-14). Phrase chunking cut first audio to 2.3 s but the Tamil dub came
+  out 28% longer than the speech (64.4 s for 50.3 s), so audio piled up in the player: heard p50 7.8 s. Now the pipeline keeps a
+  per-language playhead (`_playhead`: when a viewer's queued dub ends) and: trims Timbre's silence around every phrase
+  (`live_trim_silence`), shortens a phrase with ffmpeg `atempo` up to 1.3x when audio is still waiting (`live_fit*`), skips a
+  phrase that would be heard more than 8 s late, and speaks up to 3 waiting phrases in one voice call (`live_merge_max`; the worker
+  takes the voice turn `_voice_turn` before choosing its batch). `t_heard:<lang>` is stored per chunk; stats and metrics carry
+  `heard_p50_ms`/`heard_p95_ms` (additive) and the UI badges show those. `scripts/live_player_sim.py` replays a run through the
+  web player's rules; it agreed with the server estimate within 0.1 s on single-viewer runs.
+  Measured (same reel): 1 viewer language heard p50 3.4 s / p95 5.8 s; 3 viewer languages 3.9-6.0 s / 5.5-7.5 s; learned voice
+  3.5 s / 6.7 s. Full table in LIVE_TEST_REPORT.md.
+- Live translation model is `gemini-3.1-flash-lite` (0.82 s a phrase, 0 of 48 replies in a wrong script;
+  `gemini-3.5-flash` 1.02 s and 4 of 48, `gemini-3.5-flash-lite` 1.06 s and 4 of 48, `gemini-3.7-flash` 1.84 s;
+  `scripts/live_llm_bench.py`). Any reply with letters outside the target script and Latin (`wrong_script`) is redone once
+  by the main model. This supersedes the flash-lite note above.
+- Studio translates all target languages at once (`studio_translate_ahead`, `_pretranslate` in the runner): each language's
+  translate stage awaits its own task, so stage order, events and cache are unchanged.
+- `PUBLIC_API_BASE` must match the port the backend runs on (8010 on the dev laptop): local render URLs are built from it,
+  and a wrong port leaves the A/B player without video.
 - Live console can take its sound from a browser tab (`getDisplayMedia`, tab only; window/screen share is refused because it
   carries the dub back in and loops). The YouTube link is only an embed: the browser cannot read a cross-origin player's audio.
 - [x] Demucs htdemucs on CPU: **40.3 s for 60 s of audio** (Ryzen 7 7435HS, torch 2.15 CPU, measured 2026-11-13). Silero VAD: 3.5 s for a 14 s clip including model load.

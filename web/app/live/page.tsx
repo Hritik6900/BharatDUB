@@ -99,7 +99,7 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
   return (
     <div className="mx-auto max-w-6xl px-5 pb-24 pt-12 sm:px-8 sm:pt-16">
       <PageHeader icon={Radio} eyebrow="Live" title={<>Go live in <em>every language</em></>} lede="Stream on YouTube as usual. Your viewers open your Bharat Dub link and hear you dubbed while you speak." />
-      <div className="mt-12 grid gap-8 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+      <div className="mt-12 grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
         <div className="card card-lift rise space-y-8 p-5 sm:p-8">
           <label className="block">
             <span className="text-lg font-medium tracking-[-0.01em]">YouTube live link or video id</span>
@@ -290,8 +290,8 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
           </ul>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <DelayBadge ms={feed.stats?.p50_ms} label="Median delay" />
-          {feed.stats?.p95_ms != null && <span className="tnum font-mono text-xs text-muted">p95 {(feed.stats.p95_ms / 1000).toFixed(1)} s</span>}
+          <DelayBadge ms={feed.stats?.heard_p50_ms ?? feed.stats?.p50_ms} label="Median delay" />
+          {feed.stats?.p95_ms != null && <span className="tnum font-mono text-xs text-muted">p95 {((feed.stats.heard_p95_ms ?? feed.stats.p95_ms) / 1000).toFixed(1)} s</span>}
           {isLive ? (
             <Button variant="secondary" size="lg" onClick={stop}>
               <Square aria-hidden className="size-4 fill-current" />
@@ -338,7 +338,7 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
         </ul>
       )}
 
-      <div className="mt-8 grid gap-5 lg:grid-cols-[1fr_1fr_340px]">
+      <div className="mt-8 grid grid-cols-1 gap-5 lg:grid-cols-[1fr_1fr_340px]">
         <section className="card flex flex-col p-5 sm:p-6 lg:self-start" aria-labelledby="src-h">
           <div className="flex items-center justify-between">
             <h2 id="src-h" className="eyebrow flex items-center gap-2"><Mic aria-hidden className="size-3.5" />You said</h2>
