@@ -186,6 +186,7 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
   const [info, setInfo] = useState<LiveSession | null>(null);
   const [transcript, setTranscript] = useState<{ text: string; t: number }[]>([]);
   const [speaking, setSpeaking] = useState(false);
+  const [hearing, setHearing] = useState(""); // words of the line still being spoken
   const [errors, setErrors] = useState<string[]>([]);
   const [mic, setMic] = useState<MicIngest | null>(null);
   const [micState, setMicState] = useState<string>("off");
@@ -193,7 +194,10 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
   const [recent, setRecent] = useState<number[]>([]);
   const [copied, setCopied] = useState("");
   const onEvent = useCallback((m: Record<string, unknown>) => {
-    if (m.type === "transcript") setTranscript((t) => [...t, { text: String(m.text), t: Number(m.t_ms) }].slice(-30));
+    if (m.type === "transcript") {
+      setHearing("");
+      setTranscript((t) => [...t, { text: String(m.text), t: Number(m.t_ms) }].slice(-30));
+    } else if (m.type === "partial") setHearing(String(m.text));
     else if (m.type === "vad") setSpeaking(Boolean(m.speaking));
     else if (m.type === "error") setErrors((e) => [String(m.message), ...e].slice(0, 3));
   }, []);
@@ -345,9 +349,10 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
             <VoiceBars analyser={analyser} active={false} bars={36} height={48} colors={["--hi"]} />
           </div>
           <ul className="mt-5 max-h-[400px] flex-1 space-y-2.5 overflow-y-auto font-indic text-lg" lang="hi" data-lenis-prevent>
+            {hearing && <li className="font-medium">{hearing} …</li>}
             {transcript.length ? (
-              transcript.slice().reverse().map((t, i) => <li key={`${t.t}-${i}`} className={i ? "text-base text-muted" : "font-medium"}>{t.text}</li>)
-            ) : (
+              transcript.slice().reverse().map((t, i) => <li key={`${t.t}-${i}`} className={i || hearing ? "text-base text-muted" : "font-medium"}>{t.text}</li>)
+            ) : hearing ? null : (
               <li className="font-sans text-sm text-muted">Press Go live and speak. To dub a stream playing on this PC, set Sound from to a browser tab and tick Also share tab audio.</li>
             )}
           </ul>

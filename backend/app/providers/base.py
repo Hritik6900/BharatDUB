@@ -44,10 +44,17 @@ class STTResult:
 
 @dataclass
 class TranscriptEvent:
-    """Realtime STT event. Prisma has no partials: kind == "final" carries text."""
+    """Realtime STT event. kind == "final" carries the utterance text.
 
-    kind: Literal["connected", "speech_start", "processing", "final", "error"]
+    With partials on (`x-partials: true`), "partial" carries the utterance so far in `text` and the part the
+    recogniser no longer changes in `stable_text`; "processing" then carries `t_ms`, the stream-clock time
+    at which the end of speech was declared.
+    """
+
+    kind: Literal["connected", "speech_start", "processing", "partial", "final", "error"]
     text: str = ""
+    stable_text: str = ""
+    t_ms: int | None = None
     segment_id: str | None = None
     utterance_id: str | None = None
     detected_lang: str | None = None

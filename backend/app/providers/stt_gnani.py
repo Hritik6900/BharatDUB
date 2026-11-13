@@ -146,7 +146,12 @@ def parse_ws_message(msg: str) -> TranscriptEvent | None:
     except ValueError:
         return None
     t = j.get("type")
-    if t == "transcript":
+    if t == "partial_transcript":
+        return TranscriptEvent(kind="partial", text=(j.get("text") or "").strip(),
+                               stable_text=(j.get("stable_text") or "").strip(), utterance_id=j.get("utterance_id"))
+    if t == "speech_end":  # sent with partials on; same meaning as `processing`
+        return TranscriptEvent(kind="processing", utterance_id=j.get("utterance_id"), t_ms=j.get("t_ms"))
+    if t in ("transcript", "final_transcript"):
         return TranscriptEvent(
             kind="final", text=(j.get("text") or "").strip(), segment_id=j.get("segment_id"),
             utterance_id=j.get("utterance_id"), detected_lang=j.get("detected_language_code"),

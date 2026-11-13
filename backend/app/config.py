@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     # Optional `reasoning_effort` for reasoning models (e.g. "none" on Gemini Flash). Left unset, hidden
     # thinking can eat the max_tokens budget and truncate short translations.
     llm_reasoning_effort: str = ""
+    llm_reasoning_effort_fast: str = ""   # for LLM_MODEL_FAST when it needs another value (flash-lite: `minimal`)
 
     supabase_url: str = ""
     supabase_service_key: SecretStr = SecretStr("")
@@ -58,6 +59,10 @@ class Settings(BaseSettings):
     live_sample_rate: int = 24000      # Live TTS PCM rate sent to viewers
     live_clone_max_lag_ms: int = 5000  # a Live chunk already this late is spoken in the stock voice (catch-up)
     live_clone_langs: int = 0          # languages (in session order) dubbed in the cloned voice; 0 = GNANI_MAX_CONCURRENCY
+    live_partials: bool = True         # cut dub chunks from Prisma partials instead of waiting for the utterance to end
+    live_partial_interval_ms: int = 300  # how often Prisma sends a partial (its default is 450)
+    live_phrase_min_words: int = 6     # a phrase is cut at a clause boundary once it has this many settled words
+    live_phrase_max_words: int = 12    # ... and at this many words with or without a boundary
     live_tts_only_heard: bool = True   # no TTS for a language nobody is tuned to (captions still go out)
     live_skip_after_ms: int = 8000     # a line already this late is not spoken at all (caption only)
     live_tts_speed: float = 1.15       # stock voices speak a little faster in Live so the dub keeps pace

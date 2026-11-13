@@ -36,7 +36,8 @@ class OpenAILLM:
         self.last_latency_s: float | None = None
 
     async def _chat(self, system: str, user: str, *, model: str | None = None, temperature: float = 0.3,
-                    max_tokens: int | None = None, timeout: float | None = None) -> str:
+                    max_tokens: int | None = None, timeout: float | None = None,
+                    effort: str | None = None) -> str:
         if not (self.s.llm_base_url and self.s.llm_model):
             raise ProviderError("LLM_BASE_URL / LLM_MODEL are not set")
         body: dict[str, Any] = {"model": model or self.s.llm_model, "temperature": temperature,
@@ -44,8 +45,8 @@ class OpenAILLM:
                                              {"role": "user", "content": user}]}
         if max_tokens:
             body["max_tokens"] = max_tokens
-        if self.s.llm_reasoning_effort:
-            body["reasoning_effort"] = self.s.llm_reasoning_effort
+        if effort or self.s.llm_reasoning_effort:
+            body["reasoning_effort"] = effort or self.s.llm_reasoning_effort
         headers = {"Authorization": f"Bearer {self.s.llm_api_key.get_secret_value()}"}
         url = f"{self.s.llm_base_url.rstrip('/')}/chat/completions"
 
@@ -84,14 +85,21 @@ class OpenAILLM:
             "than the original: keep every point, drop filler words and repetition. "
             + script_rule(target) +
             f"Keep these words in English exactly: {', '.join(glossary) or 'none'}. Keep brand and game names in English. "
+            "The speaker is still talking: CURRENT may be only a piece of a sentence, without punctuation. Translate just "
+            "that piece so it carries on from the previous lines; never finish the sentence yourself, repeat what came before, or add words the speaker did not say. "
             "Use the previous lines only for context; do not translate them. Reply with the translation only."
         )
         user = ""
         if context:
             user += "Previous lines:\n" + "\n".join(context[-3:]) + "\n\n"
         user += f"CURRENT: {text}"
-        out = await self._chat(system, user, model=self.s.llm_fast, max_tokens=400, timeout=20.0)
-        return clean_line(out)
+        fast = bool(self.s.llm_model_fast) and self.s.llm_model_fast != self.s.llm_model
+        out = clean_line(await self._chat(system, user, model=self.s.llm_fast, max_tokens=400, timeout=20.0,
+                                          effort=(self.s.llm_reasoning_effort_fast or None) if fast else None))
+        if fast and looks_untranslated(out, text, target):
+            # Small models sometimes hand the Hindi straight back; the main model gets that line instead.
+            out = clean_line(await self._chat(system, user, max_tokens=400, timeout=20.0))
+        return out
 
     async def shorten(self, text: str, target: str, max_seconds: float) -> str:
         lang = LANG_NAMES.get(target, target)
@@ -112,6 +120,17 @@ def batch_system_prompt(target: str, glossary: list[str]) -> str:
         "Keep each line about the same spoken length as the source so it fits the same time slot. "
         "Return ONLY a JSON array of strings, same length and order as the input. No commentary."
     )
+
+
+def looks_untranslated(out: str, src: str, target: str) -> bool:
+    """True when a reply is still (mostly) the Devanagari source although the target is written in another script."""
+    if not out.strip():
+        return True
+    if SCRIPTS.get(target) == "Devanagari":
+        return False
+    letters = [ch for ch in out if ch.isalpha() or "\u0900" <= ch <= "\u097f"]
+    deva = sum(1 for ch in letters if "\u0900" <= ch <= "\u097f")
+    return bool(letters) and deva / len(letters) > 0.3
 
 
 def strip_thinking(text: str) -> str:

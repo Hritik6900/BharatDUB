@@ -11,7 +11,7 @@ import numpy as np
 
 from app.config import DEFAULT_GLOSSARY, VOICE_BY_LANG, get_settings
 from app.db import get_store
-from app.live.assembler import STT_SILENCE_MS, Assembler, Chunk
+from app.live.assembler import STT_SILENCE_MS, Assembler, Chunk, Phraser
 from app.live.bus import ALL
 from app.live.session import LiveSession
 from app.providers import get_llm, get_stt, get_tts
@@ -34,6 +34,8 @@ class LivePipeline:
         self.s = get_settings()
         self.audio: asyncio.Queue[bytes | None] = asyncio.Queue()
         self.assembler = Assembler()
+        self.phraser = Phraser(self.s.live_phrase_min_words, self.s.live_phrase_max_words)
+        self._stt_t0: int | None = None   # session clock at the start of the current STT stream
         self.context: deque[str] = deque(maxlen=3)
         self.queues: dict[str, asyncio.Queue[tuple[Chunk, asyncio.Task[tuple[str, bool]]] | None]] = {
             lg: asyncio.Queue() for lg in sess.langs}
@@ -164,6 +166,10 @@ class LivePipeline:
     async def _stt_loop(self) -> None:
         headers = {"x-min-silence-ms": str(STT_SILENCE_MS), "x-max-speech-s": "6", "x-idle-timeout-sec": "300",
                    "format": get_settings().stt_format}
+        if self.s.live_partials:
+            # Undocumented switch (found 2026-11-13): partial_transcript events with stable_text, plus speech_end.
+            # Phrases are cut from the partials, so an utterance may run longer before Prisma forces a final.
+            headers |= {"x-partials": "true", "x-partial-interval-ms": str(self.s.live_partial_interval_ms)}
         while self.running:
             try:
                 async for ev in self.stt.stream(self._frames(), self.sess.row.get("src_lang") or "indic-auto",
@@ -181,16 +187,44 @@ class LivePipeline:
 
     def _on_stt(self, ev: Any) -> None:
         now = self.sess.now_ms()
-        if ev.kind == "speech_start":
+        if ev.kind == "connected":
+            self._stt_t0 = now
+            self.phraser.reset()
+        elif ev.kind == "speech_start":
             self._t_start = now
             self._speaking = True
             self.assembler.speech_started()
             self.sess.bus.publish(ALL, {"type": "vad", "speaking": True}, to_all=False)
         elif ev.kind == "processing":
-            self._t_end = now - STT_SILENCE_MS
+            # `speech_end` gives the stream-clock time at which the pause was declared (speech end + min silence).
+            # Audio is fed in real time, so stream clock + stream start = session clock. Without it: arrival time.
+            if ev.t_ms is not None and self._stt_t0 is not None:
+                self._t_end = min(now, self._stt_t0 + int(ev.t_ms)) - STT_SILENCE_MS
+            else:
+                self._t_end = now - STT_SILENCE_MS
             self._speaking = False
             self.sess.bus.publish(ALL, {"type": "vad", "speaking": False}, to_all=False)
+        elif ev.kind == "partial":
+            self.sess.bus.publish(ALL, {"type": "partial", "text": ev.text, "t_ms": now}, to_all=False)
+            cut = self.phraser.partial(ev.utterance_id, ev.stable_text, ev.text, now)
+            if cut:
+                held = self.assembler.flush()  # an earlier unfinished line goes out first, in order
+                if held:
+                    self._dispatch(held)
+                text, t_start, t_end = cut
+                self._dispatch(self.assembler.make(text, t_start_ms=t_start, t_end_ms=t_end, t_final_ms=now))
+        elif ev.kind == "final" and ev.text and self.phraser.covered(ev.utterance_id):
+            # Phrases of this utterance are already being dubbed: only the tail is left.
+            rest = self.phraser.final(ev.utterance_id, ev.text)
+            t_end = self._t_end if self._t_end is not None else now - STT_SILENCE_MS
+            self._t_start = self._t_end = None
+            self._speaking = False
+            self.sess.bus.publish(ALL, {"type": "vad", "speaking": False}, to_all=False)
+            self.sess.bus.publish(ALL, {"type": "transcript", "text": ev.text, "t_ms": now}, to_all=False)
+            if rest:
+                self._dispatch(self.assembler.make(rest, t_start_ms=min(t_end, now), t_end_ms=t_end, t_final_ms=now))
         elif ev.kind == "final" and ev.text:
+            self.phraser.final(ev.utterance_id, ev.text)  # no phrase went out: forget the utterance
             t_end = self._t_end if self._t_end is not None else now - STT_SILENCE_MS
             t_start = self._t_start if self._t_start is not None else t_end - (ev.audio_duration_ms or 0)
             self._t_start = self._t_end = None

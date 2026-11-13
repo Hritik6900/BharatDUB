@@ -58,6 +58,7 @@ LLM_API_KEY=
 LLM_MODEL=               # e.g. gnani/gnani-evon-v3.3-30B-A3B
 LLM_MODEL_FAST=          # optional low-latency model for Live; defaults to LLM_MODEL
 LLM_REASONING_EFFORT=    # optional; `none` for Gemini Flash (hidden thinking otherwise truncates short replies)
+LLM_REASONING_EFFORT_FAST=  # optional; for LLM_MODEL_FAST when it needs another value (`minimal` for flash-lite)
 SUPABASE_URL=
 SUPABASE_SERVICE_KEY=
 UPLOAD_TTL_HOURS=24
@@ -362,6 +363,25 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
   then on; stock voices until then. Measured: ready 33-37 s after the stream starts.
 - Live fan-out: every chunk is translated immediately for all languages (captions in order per language); only TTS is queued.
   The viewer plays 1.1x when more than 2 s of audio is waiting and skips a chunk more than 10 s late.
+- [x] **Realtime STT partials exist** (found 2026-11-13, not in the docs): upgrade header `x-partials: true` (and
+  `x-partial-interval-ms`, we send 300) turns on `partial_transcript` events `{text, stable_text, volatile_text, utterance_id, seq}`
+  about every 0.5 s, `speech_end` `{t_ms, audio_ms}` (stream clock, = end of speech + min silence) and `final_transcript`
+  (instead of `transcript`). The next utterance's `speech_start` can arrive before the previous `final_transcript`.
+  Live cuts phrases from `stable_text` (`Phraser` in `live/assembler.py`: 6-12 words, at a clause boundary) so translation and
+  voice start before the speaker pauses; the final only supplies the tail. `LIVE_PARTIALS=false` restores whole-utterance chunks.
+- [x] Live latency after phrase chunking (2026-11-13, same 24.9 s reel in real time, 4 languages, one viewer language):
+  stock voice, end of phrase to first audio p50 2.3 s / p95 3.6 s, first word of phrase to first audio p50 3.4 s / p95 5.2 s;
+  voice learned from the stream p50 4.1 s / p95 4.8 s (first word 5.0 s / 6.6 s). `t_speech_end` now comes from `speech_end`
+  for utterance tails and from the partial that first showed the phrase's last word minus 600 ms (an estimate) for phrases.
+  **Earlier numbers in this file used final arrival - 500 ms, which the real `speech_end` shows was about 0.3-0.6 s too kind.**
+- Live audio is made only for languages a viewer is tuned to (`live_tts_only_heard`), and a phrase more than 8 s late is not
+  spoken (`live_skip_after_ms`); captions always go out. Source language is pinned per session (`src_lang`, default `hi-IN`):
+  `indic-auto` over game sound produced Bengali/Kannada garbage. `hi-IN,en-IN` is not accepted by the realtime socket.
+- Live translation uses `LLM_MODEL_FAST=gemini-3.5-flash-lite` with `LLM_REASONING_EFFORT_FAST=minimal` (`none` is a 400 for
+  lite): 0.8-0.95 s per phrase against 1.3-1.5 s for `gemini-3.5-flash`. Lite sometimes returns the Hindi unchanged; such a
+  reply (Devanagari in a non-Devanagari target) is re-translated by the main model.
+- Live console can take its sound from a browser tab (`getDisplayMedia`, tab only; window/screen share is refused because it
+  carries the dub back in and loops). The YouTube link is only an embed: the browser cannot read a cross-origin player's audio.
 - [x] Demucs htdemucs on CPU: **40.3 s for 60 s of audio** (Ryzen 7 7435HS, torch 2.15 CPU, measured 2026-11-13). Silero VAD: 3.5 s for a 14 s clip including model load.
 
 ## 18. Implementation notes (M2)
