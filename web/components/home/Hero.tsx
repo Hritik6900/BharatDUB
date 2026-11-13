@@ -69,7 +69,7 @@ export function Hero() {
             <span data-h="line" className="gs-hide block">One voice.</span>
           </span>
           <span className="-mt-[0.14em] block overflow-hidden pb-[0.2em]">
-            <span data-h="line" className="gs-hide block italic">Every language.</span>
+            <span data-h="line" className="gs-hide block"><em>Every language.</em></span>
           </span>
         </h1>
         <p data-h="fade" aria-hidden className="gs-hide -mt-1 h-11 font-indic text-[clamp(1.35rem,3.2vw,2rem)] font-medium">
@@ -94,7 +94,9 @@ export function Hero() {
         </div>
       </div>
 
-      <div data-h="drift" className="mx-auto mt-16 max-w-5xl">
+      <div data-h="drift" className="relative mx-auto mt-16 max-w-5xl">
+        {/* Hatched rails behind the console */}
+        <span aria-hidden className="tex-hatch absolute -inset-x-14 bottom-16 top-10 -z-10 hidden rounded-[28px] border border-line xl:block" />
         <div data-h="console" className="gs-hide card card-lift p-2">
           <div className="flex items-center justify-between px-4 py-2.5">
             <span className="eyebrow">How a line travels</span>
@@ -114,7 +116,7 @@ export function Hero() {
             <div className="grid place-items-center px-3 py-1">
               <VoiceOrb size={92} />
             </div>
-            <div className="theme-dark flex flex-col rounded-[18px] bg-bg p-6 text-left text-fg">
+            <div className="theme-dark stage flex flex-col overflow-hidden rounded-[18px] p-6 text-left text-fg" style={{ ["--glow" as string]: t.hue }}>
               <p className="eyebrow flex items-center gap-2">
                 <AudioLines aria-hidden className="size-3.5" />
                 Viewers hear · {t.name}

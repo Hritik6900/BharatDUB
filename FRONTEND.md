@@ -10,9 +10,12 @@ the palette, type, orb, layouts and copy here are our own.
   `.theme-dark` flips all of them; used for `/live`, `/watch`, the footer and dark panels inside light pages.
 - One hue per language: `--hi` saffron, `--ta` teal, `--bn` rose, `--te` violet, `--en` blue. `--spectrum` is the five in a row.
   A hue marks a language (dot, bar, stripe). It never carries text: selected chips are ink-filled, so contrast never depends on a hue.
-- Type: Instrument Serif for headings (`.h-display`, weight 400 only, italics for the emphasised words), Geist for UI and body,
-  Geist Mono for `.eyebrow` labels and numbers, Anek (`font-indic`) and Noto for Indic scripts.
+- Type: Outfit for headings (`.h-display`, weight 500, tight tracking) and for UI and body. Accent words inside headings are
+  `<em>`, set in Instrument Serif italic. Geist Mono for `.eyebrow` labels and numbers, Anek (`font-indic`) and Noto for Indic scripts.
   Font variables live on `<html>` so custom CSS can use them.
+- Texture: one fixed film-grain layer over the whole site (`body::after`), plus `.tex-grain`, `.tex-dots`, `.tex-hatch`, `.tex-tint`
+  (grainy panel washed with the language hues) and `.stage` (dark panel with a hue glow, fading dot grid and grain; set `--glow`).
+  `.cells` draws hairline cell grids.
 - Shapes: pills for buttons and chips, `.card` (24 px radius, 1 px line), 16 px panels. Utilities: `.card`, `.card-lift`, `.input`,
   `.eyebrow`, `.aura`, `.spectrum`, `.rise`.
 
@@ -31,6 +34,13 @@ the palette, type, orb, layouts and copy here are our own.
   Without one they draw a speech-like illustration, used only inside blocks labelled as illustrations.
 - `Waveform`: single-stroke waveform for the pipeline story.
 - `lib/useMic.ts`: `useMic` (local mic, visuals only, nothing sent) and `useAnalyser` (tap an existing audio node).
+
+## Landing sections (`components/home/`)
+
+Hero (console with hatched rails), ScriptMarquee, Products (Studio lanes and Live orb mocks on `.stage`), Explorer (twelve
+capabilities, pick one to light its row), PipelineStory (pinned), Bento (voice profile orbit, live provider status from
+`/health`, line-fit stepper, coming-next languages), BeforeAfter toggle, MicTry (mic-driven orb with languages in orbit),
+MeasuredNumbers, Trust, FinalCTA.
 
 ## Motion
 

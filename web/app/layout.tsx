@@ -4,18 +4,18 @@ import {
   Anek_Devanagari,
   Anek_Tamil,
   Anek_Telugu,
-  Geist,
   Geist_Mono,
   Instrument_Serif,
   Noto_Sans_Bengali,
   Noto_Sans_Devanagari,
   Noto_Sans_Tamil,
   Noto_Sans_Telugu,
+  Outfit,
 } from "next/font/google";
 import "./globals.css";
 
-const serif = Instrument_Serif({ subsets: ["latin"], weight: "400", style: ["normal", "italic"], variable: "--font-serif" });
-const geist = Geist({ subsets: ["latin"], variable: "--font-geist" });
+const outfit = Outfit({ subsets: ["latin"], variable: "--font-outfit" });
+const serif = Instrument_Serif({ subsets: ["latin"], weight: "400", style: ["italic"], variable: "--font-serif" });
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" });
 const anekDeva = Anek_Devanagari({ subsets: ["devanagari"], variable: "--font-anek-deva", preload: false });
 const anekTamil = Anek_Tamil({ subsets: ["tamil"], variable: "--font-anek-tamil", preload: false });
@@ -26,7 +26,7 @@ const notoTamil = Noto_Sans_Tamil({ subsets: ["tamil"], variable: "--font-noto-t
 const notoBengali = Noto_Sans_Bengali({ subsets: ["bengali"], variable: "--font-noto-bengali", preload: false });
 const notoTelugu = Noto_Sans_Telugu({ subsets: ["telugu"], variable: "--font-noto-telugu", preload: false });
 
-const fontVars = [serif, geist, geistMono, anekDeva, anekTamil, anekBangla, anekTelugu, notoDeva, notoTamil, notoBengali, notoTelugu]
+const fontVars = [outfit, serif, geistMono, anekDeva, anekTamil, anekBangla, anekTelugu, notoDeva, notoTamil, notoBengali, notoTelugu]
   .map((f) => f.variable)
   .join(" ");
 

@@ -1,4 +1,7 @@
 import { Shell } from "@/components/layout/Shell";
+import { BeforeAfter } from "@/components/home/BeforeAfter";
+import { Bento } from "@/components/home/Bento";
+import { Explorer } from "@/components/home/Explorer";
 import { Hero } from "@/components/home/Hero";
 import { MeasuredNumbers } from "@/components/home/MeasuredNumbers";
 import { MicTry } from "@/components/home/MicTry";
@@ -13,7 +16,11 @@ export default function Home() {
       <Hero />
       <ScriptMarquee />
       <Products />
+      <Explorer />
+      <div className="h-24 sm:h-32" />
       <PipelineStory />
+      <Bento />
+      <BeforeAfter />
       <MicTry />
       <MeasuredNumbers />
       <Trust />

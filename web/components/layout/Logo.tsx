@@ -16,7 +16,7 @@ export function Wordmark({ className = "" }: { className?: string }) {
   return (
     <Link href="/" aria-label="Bharat Dub, home" className={`inline-flex shrink-0 items-center gap-2.5 ${className}`}>
       <LogoMark />
-      <span className="font-display text-[1.6rem] leading-none tracking-[-0.01em]">Bharat Dub</span>
+      <span className="font-display text-[1.35rem] font-semibold leading-none tracking-[-0.04em]">Bharat Dub</span>
     </Link>
   );
 }

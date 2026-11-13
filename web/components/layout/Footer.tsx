@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { ArrowUpRight, ShieldCheck, Tag, Trash2 } from "lucide-react";
 import { Wordmark } from "./Logo";
 
@@ -62,12 +62,12 @@ export function Footer() {
             <h2 className="eyebrow">Built with</h2>
             <p className="mt-5 text-sm leading-relaxed text-muted">
               Speech models by Gnani AI: Prisma, Timbre and Vachana voice cloning. Open source: Demucs, Silero VAD, FastAPI, Next.js, GSAP, Lenis,
-              Lucide, and the Instrument Serif, Geist, Anek and Noto typefaces.
+              Lucide, and the Outfit, Instrument Serif, Geist Mono, Anek and Noto typefaces.
             </p>
           </div>
         </div>
 
-        <p aria-hidden className="text-spectrum mt-16 select-none whitespace-nowrap text-center font-display text-[clamp(4.5rem,19vw,17rem)] leading-[0.82] tracking-[-0.03em] opacity-90">
+        <p aria-hidden className="text-spectrum mt-16 select-none whitespace-nowrap text-center font-display text-[clamp(3rem,16vw,14rem)] font-semibold leading-[0.9] tracking-[-0.06em] opacity-90">
           Bharat Dub
         </p>
       </div>

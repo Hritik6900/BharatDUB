@@ -60,7 +60,7 @@ function Visual({ stage }: { stage?: number }) {
       <div data-v="3" className="absolute inset-0 grid place-items-center px-8" style={show(3)}>
         <div className="w-full">
           <Waveform samples={voice} hue="var(--ta)" height={160} />
-          <p className="mt-4 text-center font-display text-2xl italic">your voice, in Tamil</p>
+          <p className="mt-4 text-center font-accent text-3xl italic">your voice, in Tamil</p>
         </div>
       </div>
     </div>

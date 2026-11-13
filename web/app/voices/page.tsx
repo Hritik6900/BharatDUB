@@ -128,7 +128,7 @@ export default function VoicesPage() {
                 <Quote aria-hidden className="size-3.5" />
                 Read this aloud first
               </figcaption>
-              <blockquote className="mt-4 font-display text-[clamp(1.5rem,3.2vw,2.1rem)] leading-[1.18]">{consentSentence(name.trim())}</blockquote>
+              <blockquote className="mt-4 font-accent text-[clamp(1.6rem,3.4vw,2.25rem)] italic leading-[1.18]">{consentSentence(name.trim())}</blockquote>
             </figure>
 
             <div className="flex flex-col items-center gap-6 rounded-panel border border-line p-6 sm:flex-row sm:gap-8">

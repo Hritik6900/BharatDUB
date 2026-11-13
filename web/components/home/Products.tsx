@@ -1,9 +1,10 @@
 "use client";
 import { useEffect, useState } from "react";
-import { ArrowRight, BookA, Captions, Check, Clapperboard, Mic, Music2, Play, Radio, type LucideIcon } from "lucide-react";
+import { ArrowRight, Check, Clapperboard, Play, Radio, type LucideIcon } from "lucide-react";
 import { LinkButton } from "@/components/ui/Button";
 import { DelayBadge } from "@/components/ui/DelayBadge";
 import { VoiceBars } from "@/components/voice/VoiceBars";
+import { VoiceOrb } from "@/components/voice/VoiceOrb";
 import { api, type Dashboard } from "@/lib/api";
 import { useReducedMotion } from "@/lib/hooks";
 import { lang } from "@/lib/langs";
@@ -23,11 +24,24 @@ const TRACKS = [
 ];
 const LIVE_LANGS = ["ta-IN", "bn-IN", "te-IN", "en-IN"];
 
+const MUSIC_PATH = "M0 8 Q 6 1 12 8" + Array.from({ length: 19 }, (_, i) => ` T ${(i + 2) * 12} 8`).join("");
+
+function Lane({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-3">
+      <span className="w-11 shrink-0 font-mono text-[10px] uppercase tracking-[0.14em] text-muted">{label}</span>
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
+/** Studio: three lanes. Your voice comes off the music, and the dub lands on the same beats. */
 function StudioMock() {
   const [track, setTrack] = useState("ta-IN");
-  const hue = track === "src" ? "var(--hi)" : lang(track).hue;
+  const src = track === "src";
+  const hue = src ? "var(--hi)" : lang(track).hue;
   return (
-    <div className="theme-dark relative flex aspect-[4/3] flex-col justify-between overflow-hidden rounded-[18px] bg-bg p-5 text-fg">
+    <div className="theme-dark stage flex aspect-[4/3] flex-col justify-between overflow-hidden rounded-[18px] p-5 text-fg" style={{ ["--glow" as string]: hue }}>
       <div role="tablist" aria-label="Audio track" className="flex gap-1.5">
         {TRACKS.map((t) => (
           <button
@@ -41,9 +55,21 @@ function StudioMock() {
           </button>
         ))}
       </div>
-      <VoiceBars key={track} colors={[hue]} bars={44} height={72} seed={3} />
+      <div aria-hidden className="space-y-2 rounded-[14px] border border-white/10 bg-black/35 p-3.5 backdrop-blur-sm">
+        <Lane label="Voice">
+          <VoiceBars key={`v-${src}`} colors={[src ? "--hi" : "--muted"]} bars={42} height={24} seed={3} />
+        </Lane>
+        <Lane label="Music">
+          <svg viewBox="0 0 240 16" preserveAspectRatio="none" className="block h-4 w-full">
+            <path d={MUSIC_PATH} fill="none" stroke="var(--muted)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+          </svg>
+        </Lane>
+        <Lane label="Dub">
+          <VoiceBars key={`d-${track}`} active={!src} colors={[hue]} bars={42} height={34} seed={3} />
+        </Lane>
+      </div>
       <div>
-        <p key={track} lang={track === "src" ? "hi" : lang(track).short} className="rise text-center font-indic text-lg font-medium leading-snug sm:text-xl">
+        <p key={track} lang={src ? "hi" : lang(track).short} className="rise text-center font-indic text-lg font-medium leading-snug sm:text-xl">
           {LINE[track]}
         </p>
         <div className="mt-4 flex items-center gap-3">
@@ -60,6 +86,7 @@ function StudioMock() {
   );
 }
 
+/** Live: Hindi goes into the orb, the viewer's language comes out the other side. */
 function LiveMock() {
   const [i, setI] = useState(0);
   const [delay, setDelay] = useState<number | null>(null);
@@ -76,8 +103,9 @@ function LiveMock() {
       .catch(() => {});
   }, []);
   const code = LIVE_LANGS[i];
+  const l = lang(code);
   return (
-    <div className="theme-dark relative flex aspect-[4/3] flex-col justify-between overflow-hidden rounded-[18px] bg-bg p-5 text-fg">
+    <div className="theme-dark stage flex aspect-[4/3] flex-col justify-between overflow-hidden rounded-[18px] p-5 text-fg" style={{ ["--glow" as string]: l.hue }}>
       <div className="flex items-center justify-between">
         <span className="inline-flex items-center gap-1.5 rounded-chip bg-danger px-2.5 py-1 text-[11px] font-semibold text-white">
           <span className="pulse-dot size-1.5 rounded-full bg-white" />
@@ -85,9 +113,28 @@ function LiveMock() {
         </span>
         <DelayBadge ms={delay} />
       </div>
-      <VoiceBars colors={["--hi", lang(code).hue]} bars={44} height={72} seed={11} />
+      <div aria-hidden>
+        <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <VoiceBars colors={["--hi"]} bars={18} height={52} seed={11} />
+          </div>
+          <div className="relative grid size-24 shrink-0 place-items-center">
+            <span className="ripple" />
+            <span className="ripple" style={{ animationDelay: "1s" }} />
+            <span className="ripple" style={{ animationDelay: "2s" }} />
+            <VoiceOrb size={62} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <VoiceBars key={code} colors={[l.hue]} bars={18} height={52} seed={5} />
+          </div>
+        </div>
+        <div className="mt-1 flex justify-between font-mono text-[10px] uppercase tracking-[0.14em] text-muted">
+          <span>Hindi in</span>
+          <span>{l.name} out</span>
+        </div>
+      </div>
       <div>
-        <p key={code} lang={lang(code).short} className="rise text-center font-indic text-lg font-medium leading-snug sm:text-xl">
+        <p key={code} lang={l.short} className="rise text-center font-indic text-lg font-medium leading-snug sm:text-xl">
           {LINE[code]}
         </p>
         <ul className="mt-4 flex flex-wrap justify-center gap-1.5">
@@ -115,13 +162,6 @@ interface Product {
   mock: React.ReactNode;
 }
 
-const FEATURES = [
-  { icon: Mic, title: "Your own voice", text: "Record 20 to 30 seconds once. Every dub then sounds like you, not a narrator." },
-  { icon: Music2, title: "Music stays", text: "Your voice is lifted off the background, so the music and game sound survive the dub." },
-  { icon: BookA, title: "Words that never change", text: "Your name, game titles and catchphrases go in a glossary and are kept as they are." },
-  { icon: Captions, title: "Subtitles included", text: "Every language comes with a subtitle file timed to the dubbed lines." },
-];
-
 export function Products() {
   const products: Product[] = [
     {
@@ -148,7 +188,7 @@ export function Products() {
     },
   ];
   return (
-    <section id="products" className="mx-auto max-w-6xl px-5 py-24 sm:px-8 sm:py-32">
+    <section id="products" className="mx-auto max-w-6xl px-5 pb-20 pt-24 sm:px-8 sm:pb-24 sm:pt-32">
       <SectionHead
         eyebrow="Two products, one voice"
         title={<>Record once. <em>Publish in every language.</em></>}
@@ -184,16 +224,6 @@ export function Products() {
         ))}
       </div>
       <p className="mt-4 text-sm text-muted">The two players above are illustrations. Your own reel and stream appear in them once dubbed.</p>
-
-      <ul className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-        {FEATURES.map((f) => (
-          <li key={f.title} data-reveal className="card p-6">
-            <f.icon aria-hidden className="size-5" />
-            <h3 className="mt-5 font-medium tracking-[-0.01em]">{f.title}</h3>
-            <p className="mt-1.5 text-sm text-muted">{f.text}</p>
-          </li>
-        ))}
-      </ul>
     </section>
   );
 }
