@@ -228,6 +228,10 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
     setMicState("off");
     await api(`/api/live/sessions/${sid}/stop`, { method: "POST" }).catch(() => {});
   };
+  const endAndNew = async () => {
+    await stop();
+    onNew();
+  };
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const copy = async (text: string, what: string) => {
     try {
@@ -309,9 +313,9 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
           {copied === "overlay" ? <Check aria-hidden className="size-4 text-ok" /> : <Copy aria-hidden className="size-4" />}
           {copied === "overlay" ? "Copied" : "Copy OBS overlay link"}
         </button>
-        <button onClick={onNew} className="ml-auto inline-flex h-10 items-center gap-2 rounded-chip px-3 text-sm text-muted hover:text-fg">
+        <button onClick={endAndNew} className={`${tool} ml-auto`}>
           <Plus aria-hidden className="size-4" />
-          New session
+          End this stream and start a new one
         </button>
       </div>
 
