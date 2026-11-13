@@ -135,11 +135,14 @@ async def session_metrics(sid: str) -> dict[str, Any]:
     per_lang = {}
     for lang, vals in s.latencies.items():
         v = list(vals)
+        h = list(s.heard.get(lang, ()))
         per_lang[lang] = {"p50_ms": percentile(v, 50), "p95_ms": percentile(v, 95), "n": len(v),
-                          "recent_ms": v[-60:]}
+                          "recent_ms": v[-60:], "heard_p50_ms": percentile(h, 50), "heard_p95_ms": percentile(h, 95)}
     all_ms = [x for d in s.latencies.values() for x in d]
+    heard = [x for d in s.heard.values() for x in d]
     return {"chunks": s.chunk_count, "p50_ms": percentile(all_ms, 50), "p95_ms": percentile(all_ms, 95),
-            "n": len(all_ms), "per_lang": per_lang}
+            "n": len(all_ms), "heard_p50_ms": percentile(heard, 50), "heard_p95_ms": percentile(heard, 95),
+            "per_lang": per_lang}
 
 
 # ---------- WebSockets ----------

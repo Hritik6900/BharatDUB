@@ -79,4 +79,32 @@ def test_spots_a_line_the_model_did_not_translate():
     assert not looks_untranslated("and it tastes so good", src, "en-IN")
     assert not looks_untranslated("இந்த grill chicken-அ நான் சாப்பிடுவேன்", src, "ta-IN")
     assert not looks_untranslated(src, src, "mr-IN")  # same script: cannot tell, so never flagged
+    # a stray word in a third script inside an otherwise Tamil line
+    assert looks_untranslated("நான் சொல்றேன் \u10db\u10d7\u10d4\u10da\u10d8 Delhi-ல இந்த taste.", src, "ta-IN")
+    assert looks_untranslated("அதே oil-லதான் \u09ac\u09be\u09b0\u09ac\u09be\u09b0", src, "ta-IN")
+    assert not looks_untranslated("ਮੈਂ ਇਹ grill chicken ਖੁਦ ਖਾਂਦਾ ਹਾਂ।", src, "pa-IN")
+    assert not looks_untranslated("আমি নিজে এই grill chicken খাই — সত্যি!", src, "bn-IN")
     assert looks_untranslated("", src, "en-IN")
+
+
+def test_trim_pcm_silence_and_tempo():
+    import numpy as np
+
+    from app.shared import audio_utils as au
+
+    sr = 24000
+    tone = (np.sin(np.arange(sr) * 2 * np.pi * 220 / sr) * 8000).astype("<i2")
+    quiet = np.zeros(sr // 2, dtype="<i2")
+    pcm = np.concatenate([quiet, tone, quiet]).tobytes()
+    both = au.trim_pcm_silence(pcm, start=True, end=True, sr=sr)
+    assert abs(len(both) / 2 / sr - 1.08) < 0.02          # 1 s of tone plus 40 ms kept on each side
+    head = au.trim_pcm_silence(pcm, start=True, end=False, sr=sr)
+    assert abs(len(head) / 2 / sr - 1.54) < 0.02
+    assert au.trim_pcm_silence(quiet.tobytes(), start=True, end=False) == b""
+    assert au.trim_pcm_silence(quiet.tobytes(), start=False, end=True) == quiet.tobytes()
+    try:
+        au.ffmpeg_bin()
+    except au.FFmpegError:
+        return
+    fast = au.tempo_pcm(tone.tobytes(), sr, 1.25)
+    assert abs(len(fast) / 2 / sr - 0.8) < 0.05

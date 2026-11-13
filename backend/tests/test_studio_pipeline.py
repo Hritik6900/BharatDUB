@@ -156,3 +156,33 @@ async def test_voice_from_video_creates_profile_only_with_consent(rig):
         assert (await r.voice_spec(Ctx(job["id"], r.job_dir(job["id"])), "ta-IN"))["kind"] == "clone"
     else:
         assert not calls and any("too little" in w for w in done["stage_timings"]["_warnings"])
+
+
+async def test_languages_are_translated_at_once_without_extra_calls(rig, monkeypatch):
+    """All target languages start translating together; each is still translated exactly once."""
+    import asyncio
+
+    r, stt, llm, tts, tmp = rig
+    running, peak = 0, 0
+    plain = llm.translate_batch
+
+    async def slow(lines, target, glossary):
+        nonlocal running, peak
+        running += 1
+        peak = max(peak, running)
+        await asyncio.sleep(0.05)
+        running -= 1
+        return await plain(lines, target, glossary)
+
+    monkeypatch.setattr(llm, "translate_batch", slow)
+    # languages no other test uses: the translation cache is shared within a test session
+    upload = make_video(tmp / "upload_multi.mp4")
+    job = await r.create_job(upload, "multi.mp4", ["gu-IN", "mr-IN", "kn-IN"])
+    await r.run(job["id"])
+    done = await r.store.get("jobs", job["id"])
+    assert done["status"] == "done", done.get("error")
+    assert llm.batch_calls == 3 and peak == 3
+    assert [x["lang"] for x in await r.store.select("renders", job_id=job["id"])] == ["gu-IN", "mr-IN", "kn-IN"]
+    assert not r._ahead
+    for lang in ("gu-IN", "mr-IN", "kn-IN"):
+        assert f"translate:{lang}" in done["stage_timings"]

@@ -28,6 +28,7 @@ class LiveSession:
     bus: Bus = field(default_factory=Bus)
     t0: float = field(default_factory=time.monotonic)
     latencies: dict[str, deque[int]] = field(default_factory=dict)
+    heard: dict[str, deque[int]] = field(default_factory=dict)
     chunk_count: int = 0
     pipeline: Any = None
 
@@ -44,6 +45,10 @@ class LiveSession:
 
     def record_latency(self, lang: str, ms: int) -> None:
         self.latencies.setdefault(lang, deque(maxlen=500)).append(ms)
+
+    def record_heard(self, lang: str, ms: int) -> None:
+        """End of a phrase to the moment a viewer starts hearing its dub (after earlier phrases have played)."""
+        self.heard.setdefault(lang, deque(maxlen=500)).append(ms)
 
     def public(self) -> dict[str, Any]:
         r = self.row

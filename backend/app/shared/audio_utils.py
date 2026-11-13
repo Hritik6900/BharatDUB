@@ -107,3 +107,29 @@ def sha256_file(path: str | Path, chunk: int = 1 << 20) -> str:
 def cache_key(*parts: object) -> str:
     raw = json.dumps(parts, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+def trim_pcm_silence(pcm: bytes, *, start: bool, end: bool, threshold: int = 330, keep_ms: int = 40,
+                     sr: int = 24000) -> bytes:
+    """Cut near-silence (|sample| < threshold, PCM16 mono) off the start and/or end, leaving `keep_ms` of it."""
+    x = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype="<i2")
+    if not len(x):
+        return b""
+    loud = np.flatnonzero(np.abs(x.astype(np.int32)) >= threshold)
+    if not len(loud):
+        return b"" if start else pcm
+    keep = int(sr * keep_ms / 1000)
+    a = max(0, int(loud[0]) - keep) if start else 0
+    b = min(len(x), int(loud[-1]) + 1 + keep) if end else len(x)
+    return x[a:b].tobytes()
+
+
+def tempo_pcm(pcm: bytes, sr: int, tempo: float) -> bytes:
+    """Speed PCM16 mono up or down with ffmpeg atempo (pitch is kept). Blocking: call from a thread."""
+    proc = subprocess.run(
+        [ffmpeg_bin(), "-v", "error", "-f", "s16le", "-ar", str(sr), "-ac", "1", "-i", "pipe:0",
+         "-filter:a", f"atempo={tempo:.3f}", "-f", "s16le", "-ar", str(sr), "-ac", "1", "pipe:1"],
+        input=pcm, capture_output=True, timeout=15)
+    if proc.returncode != 0 or not proc.stdout:
+        raise FFmpegError(f"tempo failed: {proc.stderr.decode('utf-8', 'replace')[-300:]}")
+    return proc.stdout

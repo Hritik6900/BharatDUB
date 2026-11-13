@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     tts_model: str = "timbre-v2.5"
     tts_sample_rate: int = 44100
 
+    studio_translate_ahead: bool = True  # translate all target languages at once instead of one by one
     live_sample_rate: int = 24000      # Live TTS PCM rate sent to viewers
     live_clone_max_lag_ms: int = 5000  # a Live chunk already this late is spoken in the stock voice (catch-up)
     live_clone_langs: int = 0          # languages (in session order) dubbed in the cloned voice; 0 = GNANI_MAX_CONCURRENCY
@@ -65,6 +66,10 @@ class Settings(BaseSettings):
     live_phrase_max_words: int = 12    # ... and at this many words with or without a boundary
     live_tts_only_heard: bool = True   # no TTS for a language nobody is tuned to (captions still go out)
     live_skip_after_ms: int = 8000     # a line already this late is not spoken at all (caption only)
+    live_trim_silence: bool = True     # cut the silence Timbre puts before and after every phrase
+    live_fit: bool = True              # when dubbed audio is piling up for viewers, shorten the next phrase (tempo, pitch kept)
+    live_fit_after_ms: int = 600       # ... once more than this much audio is still waiting to be played
+    live_fit_max_tempo: float = 1.3    # ... by at most this factor
     live_tts_speed: float = 1.15       # stock voices speak a little faster in Live so the dub keeps pace
     mock_providers: bool = False       # simulate Gnani + LLM for UI work without keys (UI shows a banner)
 

@@ -123,13 +123,16 @@ async def main() -> None:
             deadline = time.monotonic() + 90
             silence = b"\x00" * FRAME
             while time.monotonic() < deadline:
-                seqs = {m["seq"] for m in events if m.get("type") == "caption" and m["_ch"] == "all" and m.get("lang") == "src"}
+                seqs = {m["seq"] for m in events if m.get("type") == "caption" and m["_ch"] in heard}
                 done = {(m["lang"], m["seq"]) for m in events if m.get("type") == "audio" and m.get("last") and m["_ch"] != "all"}
                 quiet_for = time.monotonic() - t0 - max((m["_t"] for m in events), default=0)
                 if seqs and all((lg, q) in done for lg in heard for q in seqs) and quiet_for > 4:
                     break
                 await ws.send(silence)
                 await asyncio.sleep(FRAME_S)
+            else:
+                missing = sorted((lg, q) for lg in heard for q in seqs if (lg, q) not in done)
+                print(f"gave up waiting: quiet_for={quiet_for:.1f}s missing={missing[:10]} last={[m.get('type') for m in events[-6:]]}")
         metrics = (await http.get(f"/api/live/sessions/{sid}/metrics")).json()
         await http.post(f"/api/live/sessions/{sid}/stop")
         await asyncio.sleep(1.0)

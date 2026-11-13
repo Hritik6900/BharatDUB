@@ -93,12 +93,19 @@ class OpenAILLM:
         if context:
             user += "Previous lines:\n" + "\n".join(context[-3:]) + "\n\n"
         user += f"CURRENT: {text}"
+        system += (f" CURRENT has {len(text.split())} words: your {lang} must not take longer to say than that, "
+                   "so prefer the shortest natural wording and do not add address words like bro.")
         fast = bool(self.s.llm_model_fast) and self.s.llm_model_fast != self.s.llm_model
         out = clean_line(await self._chat(system, user, model=self.s.llm_fast, max_tokens=400, timeout=20.0,
                                           effort=(self.s.llm_reasoning_effort_fast or None) if fast else None))
-        if fast and looks_untranslated(out, text, target):
-            # Small models sometimes hand the Hindi straight back; the main model gets that line instead.
-            out = clean_line(await self._chat(system, user, max_tokens=400, timeout=20.0))
+        if wrong_script(out, target):
+            # About 1 reply in 20 carries a word in the wrong script (measured, scripts/live_llm_bench.py): the
+            # voice would misread it. The main model gets that line once more, with the rule spelled out.
+            only = f" Write every word in {SCRIPTS[target]} letters (English words in Latin letters); no other script."\
+                if target in SCRIPTS else " Write in English only, in Latin letters."
+            again = clean_line(await self._chat(system + only, user, max_tokens=400, timeout=20.0))
+            if not wrong_script(again, target):
+                out = again
         return out
 
     async def shorten(self, text: str, target: str, max_seconds: float) -> str:
@@ -122,15 +129,37 @@ def batch_system_prompt(target: str, glossary: list[str]) -> str:
     )
 
 
-def looks_untranslated(out: str, src: str, target: str) -> bool:
-    """True when a reply is still (mostly) the Devanagari source although the target is written in another script."""
+# Unicode blocks of the scripts we write (first, last code point).
+SCRIPT_RANGES = {
+    "Devanagari": (0x0900, 0x097F), "Bengali": (0x0980, 0x09FF), "Gurmukhi": (0x0A00, 0x0A7F),
+    "Gujarati": (0x0A80, 0x0AFF), "Tamil": (0x0B80, 0x0BFF), "Telugu": (0x0C00, 0x0C7F),
+    "Kannada": (0x0C80, 0x0CFF), "Malayalam": (0x0D00, 0x0D7F),
+}
+
+
+def wrong_script(out: str, target: str) -> bool:
+    """True when a reply has letters that are neither Latin nor in the target language's script.
+
+    Small models sometimes leave a Hindi word in Devanagari inside a Tamil line, or slip in a word in a
+    third script; the voice then reads it wrongly or skips it. An empty reply counts as wrong too.
+    """
     if not out.strip():
         return True
-    if SCRIPTS.get(target) == "Devanagari":
-        return False
-    letters = [ch for ch in out if ch.isalpha() or "\u0900" <= ch <= "\u097f"]
-    deva = sum(1 for ch in letters if "\u0900" <= ch <= "\u097f")
-    return bool(letters) and deva / len(letters) > 0.3
+    lo, hi = SCRIPT_RANGES.get(SCRIPTS.get(target, ""), (0, -1))
+    for ch in out:
+        cp = ord(ch)
+        if cp < 0x0250 or lo <= cp <= hi:      # ASCII, Latin-1 and Latin Extended; or the target script
+            continue
+        if 0x2000 <= cp <= 0x206F or cp in (0x0964, 0x0965, 0x200C, 0x200D):  # punctuation, danda, joiners
+            continue
+        if ch.isalpha() or 0x0900 <= cp <= 0x0D7F:
+            return True
+    return False
+
+
+def looks_untranslated(out: str, src: str, target: str) -> bool:
+    """Kept for callers and tests: a reply that still carries the source script, or any other wrong script."""
+    return wrong_script(out, target)
 
 
 def strip_thinking(text: str) -> str:

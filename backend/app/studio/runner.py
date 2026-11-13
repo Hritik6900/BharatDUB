@@ -41,6 +41,8 @@ class StudioRunner:
         self._store, self._stt, self._llm, self._tts = store, stt, llm, tts
         self._tasks: set[asyncio.Task[Any]] = set()
         self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        # (job, lang) -> (source lines, running translation). See _pretranslate.
+        self._ahead: dict[tuple[str, str], tuple[list[str], asyncio.Task[list[str]]]] = {}
 
     # Lazy so the app can start without keys.
     @property
@@ -100,6 +102,7 @@ class StudioRunner:
         try:
             async with self._locks[job_id]:
                 await self._prepare(ctx, meta)
+                await self._pretranslate(ctx, job["target_langs"])
                 for lang in job["target_langs"]:
                     await self._process_lang(ctx, meta, lang)
             await self._set(ctx, status="done", stage=None)
@@ -107,6 +110,7 @@ class StudioRunner:
             log.exception("job %s failed", job_id)
             await self._set(ctx, status="failed", error=_user_error(e))
         finally:
+            self._drop_ahead(job_id)
             await self._save_stats(ctx)
             events.publish(job_id, {"type": "end", "job": await self.store.get("jobs", job_id)})
 
@@ -200,6 +204,32 @@ class StudioRunner:
                 self._warn(ctx, f"Could not copy the voice from this video; using a stock voice ({e})"[:300])
 
     # ---------- per language ----------
+    async def _pretranslate(self, ctx: Ctx, langs: list[str]) -> None:
+        """Start the translation of every language now, instead of one language after the other.
+
+        Voice lines queue behind the one-request Gnani gate, but the LLM does not: while the first language
+        is being voiced, the others are already translated. Each language's translate stage then waits for
+        its own task, so stage order, events, cache and results are unchanged.
+        """
+        if not self.s.studio_translate_ahead or len(langs) < 2:
+            return
+        segs = await self.spoken_segments(ctx.job_id)
+        glossary = await self.glossary()
+        model = self.s.llm_model or "unset"
+        for lang in langs:
+            done = {t["segment_id"]: t for t in await self.store.select_in(
+                "translations", "segment_id", [s["id"] for s in segs], lang=lang)}
+            lines = [s["src_text"] for s in segs if not done.get(s["id"], {}).get("edited")]
+            if not lines:
+                continue
+            task = asyncio.create_task(translate.translate(self.llm, lines, lang, glossary, model, ctx.usage))
+            task.add_done_callback(lambda t: t.cancelled() or t.exception())  # read later, or not at all
+            self._ahead[(ctx.job_id, lang)] = (lines, task)
+
+    def _drop_ahead(self, job_id: str) -> None:
+        for key in [k for k in self._ahead if k[0] == job_id]:
+            self._ahead.pop(key)[1].cancel()
+
     async def _process_lang(self, ctx: Ctx, meta: dict[str, Any], lang: str) -> None:
         segs = await self.spoken_segments(ctx.job_id)
         existing = {t["segment_id"]: t for t in await self.store.select_in(
@@ -209,8 +239,14 @@ class StudioRunner:
             todo = [s for s in segs if not existing.get(s["id"], {}).get("edited")]
             if todo:
                 model = self.s.llm_model or "unset"
-                out = await translate.translate(self.llm, [s["src_text"] for s in todo], lang,
-                                                await self.glossary(), model, ctx.usage)
+                lines = [s["src_text"] for s in todo]
+                ahead = self._ahead.pop((ctx.job_id, lang), None)
+                if ahead and ahead[0] == lines:
+                    out = await ahead[1]
+                else:
+                    if ahead:
+                        ahead[1].cancel()
+                    out = await translate.translate(self.llm, lines, lang, await self.glossary(), model, ctx.usage)
                 for s, text in zip(todo, out):
                     if s["id"] in existing:
                         existing[s["id"]] = await self.store.update("translations", existing[s["id"]]["id"],
@@ -308,6 +344,7 @@ class StudioRunner:
         try:
             async with self._locks[job_id]:
                 meta = self._meta(ctx.dir)
+                await self._pretranslate(ctx, langs)
                 for lang in langs:
                     await self._process_lang(ctx, meta, lang)
             await self._set(ctx, status="done", stage=None)
@@ -315,6 +352,7 @@ class StudioRunner:
             log.exception("render %s failed", job_id)
             await self._set(ctx, status="failed", error=_user_error(e))
         finally:
+            self._drop_ahead(job_id)
             await self._save_stats(ctx, merge=True)
             events.publish(job_id, {"type": "end", "job": await self.store.get("jobs", job_id)})
 
