@@ -26,7 +26,9 @@ export type IngestSource = "mic" | "tab";
 async function tabAudio(): Promise<MediaStream> {
   const s = await navigator.mediaDevices.getDisplayMedia({
     video: true,
-    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    // suppressLocalAudioPlayback: the shared tab goes silent on the speakers but is still captured,
+    // so the streamer hears only the dub (Chromium; ignored elsewhere).
+    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, suppressLocalAudioPlayback: true } as MediaTrackConstraints,
   });
   s.getVideoTracks().forEach((t) => t.stop());
   if (!s.getAudioTracks().length) {
