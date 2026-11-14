@@ -106,9 +106,11 @@ class GpuVoice:
     async def health(self) -> list[dict[str, Any]]:
         out = []
         for u in self.urls:
+            t0 = time.perf_counter()
             try:
                 r = await self._client.get(u + "/health", timeout=3.0)
-                out.append({"ok": r.status_code == 200, **(r.json() if r.status_code == 200 else {})})
+                out.append({**(r.json() if r.status_code == 200 else {}), "ok": r.status_code == 200})
             except httpx.HTTPError as e:
                 out.append({"ok": False, "error": type(e).__name__})
+            out[-1]["ms"] = round((time.perf_counter() - t0) * 1000)   # this engine's own round trip
         return out

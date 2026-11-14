@@ -64,10 +64,7 @@ async def health() -> dict[str, Any]:
     from app.config import get_settings
     s, gpu, engines = get_settings(), get_gpu_voice(), []
     if gpu.enabled:
-        t0 = time.perf_counter()
-        for h in await gpu.health():
-            engines.append({"ok": bool(h.get("ok")), "ms": round((time.perf_counter() - t0) * 1000)})
-            t0 = time.perf_counter()
+        engines = [{"ok": bool(h.get("ok")), "ms": h.get("ms")} for h in await gpu.health()]
     return {"gnani": bool(s.gnani_api_key.get_secret_value()) or s.mock_providers,
             "llm": bool(s.llm_base_url and s.llm_model) or s.mock_providers,
             "gpu_engines": engines, "gpu_separate": bool(s.gpu_separate_url)}

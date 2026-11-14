@@ -24,6 +24,10 @@ the palette, type, orb, layouts and copy here are our own.
 - `components/layout/Shell.tsx` frames every page: aura, sticky `Header`, content, `Footer`, Lenis.
 - `Header`: floating pill nav (transparent at the top, blurred card after scrolling), Products dropdown, mobile sheet, and the
   honest status bar (mock mode / backend down).
+- The red "Go live" pill in the header goes to `/streamer` (hidden under 640 px; the menu sheet has it).
+- `/streamer` is dark like `/live`: three-step rail, the step's card on the left, and a sticky "Signal path" panel whose orb
+  and bars show the real input (recording, chosen device) or a preview of the copied voice while it plays, above the
+  service checks (engine times are measured per engine; speech and translation only say that a key is set).
 - `Footer`: dark, three promises, link columns, credits, large spectrum wordmark.
 - `components/ui/`: `Button`/`LinkButton`, `LanguageChip`, `PageHeader`, `Notice`, `DelayBadge`, `Sparkline`. Icons: lucide-react.
 
@@ -37,7 +41,8 @@ the palette, type, orb, layouts and copy here are our own.
 
 ## Landing sections (`components/home/`)
 
-Hero (console with hatched rails), ScriptMarquee, Products (Studio lanes and Live orb mocks on `.stage`), Explorer (twelve
+Hero (console with hatched rails), ScriptMarquee, Products (three modes: Studio, Streamer, Live; pick one to open its
+details, its mock on `.stage` and a "what is happening" step rail that lights one step after the other), Explorer (twelve
 capabilities, pick one to light its row), PipelineStory (pinned), Bento (voice profile orbit, live provider status from
 `/health`, line-fit stepper, coming-next languages), BeforeAfter toggle, MicTry (mic-driven orb with languages in orbit),
 MeasuredNumbers, Trust, FinalCTA.

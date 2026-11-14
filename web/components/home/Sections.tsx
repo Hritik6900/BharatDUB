@@ -82,7 +82,7 @@ export function FinalCTA() {
               Dub a video
               <ArrowRight aria-hidden className="size-4 transition-transform group-hover:translate-x-0.5" />
             </LinkButton>
-            <LinkButton href="/live" size="lg" variant="secondary">
+            <LinkButton href="/streamer" size="lg" variant="secondary">
               <Radio aria-hidden className="size-4" />
               Go live
             </LinkButton>

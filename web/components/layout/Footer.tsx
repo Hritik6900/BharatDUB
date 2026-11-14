@@ -7,7 +7,8 @@ const COLS = [
     title: "Products",
     links: [
       { href: "/studio", label: "Studio" },
-      { href: "/live", label: "Live" },
+      { href: "/streamer", label: "Streamer" },
+      { href: "/live", label: "Any stream" },
       { href: "/#how", label: "How it works" },
     ],
   },

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ArrowRight, AudioLines, BookA, ChevronDown, Clapperboard, LayoutDashboard, Menu, Mic, Radio, X, type LucideIcon } from "lucide-react";
+import { ArrowRight, AudioLines, BookA, ChevronDown, Clapperboard, LayoutDashboard, Menu, Mic, MonitorPlay, Radio, X, type LucideIcon } from "lucide-react";
 import { LinkButton } from "@/components/ui/Button";
 import { useHealth } from "@/lib/hooks";
 import { Wordmark } from "./Logo";
@@ -17,7 +17,7 @@ interface NavItem {
 const PRODUCTS: NavItem[] = [
   { href: "/studio", label: "Studio", desc: "Dub a reel or short, music kept", icon: Clapperboard },
   { href: "/streamer", label: "Streamer", desc: "Go live in your own voice", icon: Radio },
-  { href: "/live", label: "Any stream (beta)", desc: "Dub a stream that is playing", icon: Radio },
+  { href: "/live", label: "Any stream (beta)", desc: "Dub a stream that is playing", icon: MonitorPlay },
 ];
 const LINKS: NavItem[] = [
   { href: "/#how", label: "How it works", desc: "From your voice to a dubbed line", icon: AudioLines },
@@ -88,7 +88,7 @@ export function Header() {
 
           <ul className="hidden items-center gap-0.5 lg:flex">
             <li className="relative" onMouseEnter={() => setProducts(true)} onMouseLeave={() => setProducts(false)}>
-              <button type="button" aria-expanded={products} aria-haspopup="true" onClick={() => setProducts((p) => !p)} className={link(active("/studio") || active("/live"))}>
+              <button type="button" aria-expanded={products} aria-haspopup="true" onClick={() => setProducts((p) => !p)} className={link(active("/studio") || active("/live") || active("/streamer"))}>
                 Products
                 <ChevronDown aria-hidden className={`size-3.5 transition-transform ${products ? "rotate-180" : ""}`} />
               </button>
@@ -122,12 +122,18 @@ export function Header() {
           </ul>
 
           <div className="flex items-center gap-1.5">
-            <span className="hidden sm:block">
-              <LinkButton href="/live" variant="ghost" size="sm">
-                <Radio aria-hidden className="size-4" />
-                Go live
-              </LinkButton>
-            </span>
+            <Link
+              href="/streamer"
+              aria-current={active("/streamer") ? "page" : undefined}
+              className={`group hidden h-10 items-center gap-2 rounded-chip border pl-3 pr-4 text-sm font-medium transition-colors sm:inline-flex ${
+                active("/streamer") ? "border-danger bg-danger text-white" : "border-danger/45 bg-danger/10 hover:bg-danger hover:text-white"
+              }`}
+            >
+              <span aria-hidden className="relative grid size-4 place-items-center">
+                <span className={`pulse-dot size-2 rounded-full ${active("/streamer") ? "bg-white" : "bg-danger group-hover:bg-white"}`} />
+              </span>
+              Go live
+            </Link>
             <LinkButton href="/studio" size="sm" className="h-10">
               Dub a video
               <ArrowRight aria-hidden className="size-4 transition-transform group-hover:translate-x-0.5" />
