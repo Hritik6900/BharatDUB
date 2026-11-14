@@ -24,6 +24,13 @@ def get_tts() -> Any:
 
 
 @lru_cache
+def get_gpu_voice() -> Any:
+    from app.providers.tts_gpu import GpuVoice
+    s = get_settings()
+    return GpuVoice(s.model_copy(update={"gpu_voice_url": ""}) if s.mock_providers else s)
+
+
+@lru_cache
 def get_llm() -> Any:
     if get_settings().mock_providers:
         from app.providers.mock import MockLLM

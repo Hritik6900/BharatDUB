@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     live_fit_after_ms: int = 600       # ... once more than this much audio is still waiting to be played
     live_fit_max_tempo: float = 1.3    # ... by at most this factor
     live_tts_speed: float = 1.15       # stock voices speak a little faster in Live so the dub keeps pace
+    # Our own GPU voice engine for Live (IndicF5, not a Gnani model): the speaker's copied voice without Gnani's
+    # one-request limit. Empty = off. See providers/tts_gpu.py.
+    gpu_voice_url: str = ""
+    gpu_voice_timeout_s: float = 8.0
+    gpu_voice_concurrency: int = 3     # lines the engine makes at once (its REPLICAS)
+    gpu_voice_speed: float = 1.0       # < 1 = slower speech; the engine copies the pace of the voice sample
     live_brief: bool = True            # while a language's dub is running behind, ask for a condensed translation
     live_brief_after_ms: int = 500     # ... once it is this far behind
     # Sync mode: when the console reports the time of the video it feeds from, every phrase is dubbed for the

@@ -78,7 +78,7 @@ class OpenAILLM:
         return list(await asyncio.gather(*(self.translate_chunk(line, target, glossary, []) for line in lines)))
 
     async def translate_chunk(self, text: str, target: str, glossary: list[str], context: list[str],
-                              brief: bool = False) -> str:
+                              brief: bool = False, native: bool = False) -> str:
         """`brief`: the dub is behind the speaker, so condense like an interpreter would (main point only)."""
         lang = LANG_NAMES.get(target, target)
         system = (
@@ -97,6 +97,12 @@ class OpenAILLM:
         user += f"CURRENT: {text}"
         system += (f" CURRENT has {len(text.split())} words: your {lang} must not take longer to say than that, "
                    "so prefer the shortest natural wording and do not add address words like bro.")
+        if native and target in SCRIPTS:
+            # Our GPU voice reads only the language's own letters (measured: "green chicken" in Latin letters came
+            # out as noise, in Tamil letters word for word). This overrides the rule about English letters.
+            system += (f" IMPORTANT, this overrides the earlier rule: write EVERY word in {SCRIPTS[target]} letters, "
+                       "including English words, brand and game names, spelled the way they are pronounced. "
+                       "No Latin letters at all; write numbers as words.")
         if brief:
             system += (" The dub is running behind the speaker, so condense: say only the main point, in at most "
                        f"{max(3, round(len(text.split()) * 0.6))} words, and leave out everything else.")

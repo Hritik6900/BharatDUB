@@ -108,7 +108,7 @@ class MockLLM:
         return [_translate(x, target) for x in lines]
 
     async def translate_chunk(self, text: str, target: str, glossary: list[str], context: list[str],
-                              brief: bool = False) -> str:
+                              brief: bool = False, native: bool = False) -> str:
         await asyncio.sleep(0.35)
         return _translate(text, target)
 

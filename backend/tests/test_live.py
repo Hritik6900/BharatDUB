@@ -303,3 +303,64 @@ async def test_sync_delay_grows_only_when_audio_keeps_coming_late(tmp_path, monk
     assert p.sync_delay() == p.s.live_sync_delay_max_ms   # never beyond the limit
     p._media.clear()
     assert p.sync_delay() == 0                       # the console stopped reporting: back to the old behaviour
+
+
+class FakeGpu:
+    """Stands in for the GPU voice engine: records what it is given."""
+    enabled = True
+
+    def __init__(self):
+        self.refs: list[tuple[str, str, str | None]] = []
+        self.lines: list[tuple[str, str]] = []
+
+    def speaks(self, lang):
+        return lang != "en-IN"
+
+    async def set_ref(self, session_id, wav_path, ref_text, *, consent_at):
+        assert consent_at, "the pipeline must never ask for a copy without consent"
+        self.refs.append((session_id, ref_text, consent_at))
+        return {"ok": True}
+
+    async def synth(self, session_id, text, lang):
+        self.lines.append((lang, text))
+        return (b"\x10\x20" * 12000, 24000)
+
+
+async def test_gpu_voice_needs_consent_and_speaks_indian_languages_only(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.live.pipeline.get_store", lambda: LocalStore(tmp_path / "db.json"))
+    line = "yeh ek poori line hai jo paanch second chali"
+    # Without the consent given for this stream the engine is never handed a voice sample.
+    plain = LiveSession({"id": "g0", "target_langs": ["ta-IN"], "src_lang": "hi-IN"})
+    gpu0 = FakeGpu()
+    p0 = LivePipeline(plain, stt=SilentSTT(), llm=MockLLM(), tts=MockTTS(), gpu=gpu0)
+    p0.running = True
+    p0.feed(b"\x00\x10" * 512)
+    p0._t_start, p0._t_end = 0, 5000
+    p0._maybe_gpu_ref(line, 5600)
+    assert not p0._ring and not gpu0.refs and not p0._gpu_speaks("ta-IN")
+
+    sess = LiveSession({"id": "g1", "target_langs": ["ta-IN", "en-IN"], "src_lang": "hi-IN",
+                        "voice_from_stream": {"consent_at": "2026-11-14T10:00:00+00:00", "consent_text": "ok"}})
+    gpu = FakeGpu()
+    tts = MockTTS()
+    p = LivePipeline(sess, stt=SilentSTT(), llm=MockLLM(), tts=tts, gpu=gpu)
+    ta, en = sess.bus.subscribe("ta-IN"), sess.bus.subscribe("en-IN")
+    await p.start()
+    for t in range(0, 5200, 32):                       # 5 s of the stream's sound, stamped as it arrived
+        p._ring.append((t, b"\x00\x10" * 512))
+    p._t_start, p._t_end = 100, 5000
+    p._maybe_gpu_ref(line, 5600)
+    for _ in range(50):
+        if p.gpu_ready:
+            break
+        await asyncio.sleep(0.02)
+    assert p.gpu_ready and gpu.refs == [("g1", line, "2026-11-14T10:00:00+00:00")]
+    now = sess.now_ms()
+    p._dispatch(p.assembler.make("line one", t_start_ms=now, t_end_ms=now, t_final_ms=now))
+    for q in (ta, en):
+        while True:
+            m = await asyncio.wait_for(q.get(), 10)
+            if m["type"] == "audio" and m["last"]:
+                break
+    await p.stop()
+    assert [lang for lang, _ in gpu.lines] == ["ta-IN"]   # Tamil from the engine; English stays on the Gnani voice

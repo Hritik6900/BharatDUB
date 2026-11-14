@@ -14,7 +14,7 @@ from app.db import get_store
 from app.live.assembler import STT_SILENCE_MS, Assembler, Chunk, Phraser
 from app.live.bus import ALL
 from app.live.session import LiveSession
-from app.providers import get_llm, get_stt, get_tts
+from app.providers import get_gpu_voice, get_llm, get_stt, get_tts
 from app.providers.base import ProviderError, VoiceSpec
 from app.shared import audio_utils as au
 from app.shared.metrics import percentile
@@ -26,19 +26,35 @@ ENROL_SPEECH_S = 12.0   # speech collected from the stream before the voice is c
 ENROL_MIN_RMS = 300     # PCM16 units; frames quieter than this are pauses, not voice
 LIVE_FRAME_BYTES = 9600  # audio message size on the watch socket: 0.2 s at 24 kHz
 PLAYER_JITTER_MS = 300   # the web player starts an idle queue this long after the first audio arrives
+GPU_REF_MIN_MS, GPU_REF_MS = 4500, 7000  # the voice sample for the GPU engine: the last 7 s before a pause (at least 4.5 s)
 SYNC_ARRIVE_MS = 100     # sync mode: audio that arrives after its moment starts this soon
 MAX_QUEUED_AUDIO = 400  # ~13 s of 1024-byte frames; beyond that we drop (the streamer's network is ahead)
 
 
+def _rms(pcm: bytes) -> float:
+    x = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype="<i2").astype(np.float64)
+    return float(np.sqrt(np.mean(x ** 2))) if len(x) else 0.0
+
+
 class LivePipeline:
-    def __init__(self, sess: LiveSession, stt: Any = None, llm: Any = None, tts: Any = None) -> None:
+    def __init__(self, sess: LiveSession, stt: Any = None, llm: Any = None, tts: Any = None,
+                 gpu: Any = None) -> None:
         self.sess = sess
+        # Our GPU voice engine (off unless GPU_VOICE_URL is set): the copied voice for Indian languages.
+        self.gpu = gpu if gpu is not None else get_gpu_voice()
+        self.gpu_ready = False     # the engine has this session's voice
+        self._gpu_busy = False
+        self._gpu_tries = 0
+        self._gpu_fail = 0
+        self._ring: deque[tuple[int, bytes]] = deque(maxlen=700)  # ~22 s of the stream's sound, with arrival time
+        self._prev_start: int | None = None
         self.stt, self.llm, self.tts = stt or get_stt(), llm or get_llm(), tts or get_tts()
         self.s = get_settings()
         self.audio: asyncio.Queue[bytes | None] = asyncio.Queue()
         self.assembler = Assembler()
         self.phraser = Phraser(self.s.live_phrase_min_words, self.s.live_phrase_max_words)
         self._voice_turn = asyncio.Semaphore(max(1, self.s.gnani_max_concurrency))
+        self._gpu_turn = asyncio.Semaphore(max(1, self.s.gpu_voice_concurrency))
         self._playhead: dict[str, int] = {}  # per language: session time at which a viewer's queued dub ends
         self._stt_t0: int | None = None   # session clock at the start of the current STT stream
         self.context: deque[str] = deque(maxlen=3)
@@ -116,6 +132,8 @@ class LivePipeline:
     def feed(self, pcm: bytes) -> None:
         if self.running and self.audio.qsize() < MAX_QUEUED_AUDIO:
             self.audio.put_nowait(pcm)
+        if self._gpu_wanted():
+            self._ring.append((self.sess.now_ms(), pcm))
         if self._enrol is not None and self._speaking and self.running:
             self._collect(pcm)
 
@@ -131,7 +149,8 @@ class LivePipeline:
         now = self.sess.now_ms()
         self._media.append((now, media_s, playing))
         if not self._sync_delay:
-            cloned = self.voice is not None or self._enrol is not None
+            # A copied voice from Gnani needs the longer start; our GPU engine is as quick as a stock voice.
+            cloned = (self.voice is not None or self._enrol is not None) and not self.gpu.enabled
             self._sync_delay = self.s.live_sync_delay_clone_ms if cloned else self.s.live_sync_delay_ms
         self.sess.bus.broadcast({"type": "sync", "t_ms": now, "media_s": round(media_s, 3), "playing": playing,
                                  "delay_ms": self._sync_delay})
@@ -174,6 +193,71 @@ class LivePipeline:
         return {"sync_delay_ms": self._sync_delay, "sync_n": len(late), "sync_grown": len(self.sync_grown),
                 "sync_on_time_pct": round(100 * sum(v <= 250 for v in late) / len(late), 1),
                 "sync_late_p95_ms": int(percentile(late, 95) or 0)}
+
+    # ---------- copied voice on our GPU engine ----------
+    def _gpu_wanted(self) -> bool:
+        """Still looking for a voice sample for the GPU engine: only with the consent given for this stream."""
+        consent = self.sess.row.get("voice_from_stream") or {}
+        return bool(self.running and self.gpu.enabled and not self.gpu_ready and self._gpu_tries < 8
+                    and consent.get("consent_at"))
+
+    def _gpu_planned(self, lang: str) -> bool:
+        """This language is, or is about to be, spoken by the GPU engine (so its text is written for it)."""
+        consent = self.sess.row.get("voice_from_stream") or {}
+        return bool(self.gpu.enabled and consent.get("consent_at") and self.gpu.speaks(lang)
+                    and self._gpu_fail < 3 and (self.gpu_ready or self._gpu_tries < 8))
+
+    def _gpu_speaks(self, lang: str) -> bool:
+        return self.gpu_ready and self._gpu_fail < 3 and self.gpu.speaks(lang)
+
+    def _maybe_gpu_ref(self, text: str, now: int) -> None:
+        """At a pause, the last few seconds of the stream become the voice sample for the engine, if they are
+        mostly speech. Prisma then transcribes that very cut, so the sample and its words always match."""
+        if self._gpu_busy or not self._gpu_wanted():
+            return
+        t1 = self._t_end if self._t_end is not None else now - STT_SILENCE_MS
+        frames = [p for t, p in self._ring if t1 - GPU_REF_MS <= t <= t1 + 350]  # ends in the pause after the line
+        if len(frames) * 32 < GPU_REF_MIN_MS:
+            return
+        loud = sum(1 for p in frames if _rms(p) >= ENROL_MIN_RMS)
+        if loud < 0.55 * len(frames):
+            return
+        pcm = b"".join(frames)
+        self._gpu_busy = True
+        self._gpu_tries += 1
+        self.tasks.append(asyncio.create_task(self._gpu_enrol(pcm, text.strip())))
+
+    async def _gpu_enrol(self, pcm: bytes, text: str) -> None:
+        consent = self.sess.row.get("voice_from_stream") or {}
+        wav = Path(tempfile.gettempdir()) / f"bd_gpu_ref_{self.sess.id}.wav"
+        try:
+            audio = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype="<i2").astype(np.float32) / 32768.0
+            audio = np.concatenate([audio, np.zeros(4000, dtype=np.float32)])  # a clean stop: 0.25 s of silence
+            await asyncio.to_thread(au.write_wav, wav, audio, 16000)
+            # The engine copies pace and words from the sample, so its text must be exactly what is in this cut
+            # (measured: a text longer than the audio made every phrase twice too fast). Prisma hears the cut itself.
+            try:
+                heard = (await self.stt.transcribe(str(wav), self.sess.row.get("src_lang") or "hi-IN")).text.strip()
+            except Exception as e:  # noqa: BLE001 - mock STT or a failed call: keep the live transcript
+                log.warning("live gpu voice sample: could not re-transcribe (%s)", e)
+                heard = ""
+            if len(heard.split()) >= 4:
+                text = heard
+            if len(text.split()) < 4:
+                return  # nothing usable was said in this cut; the next pause tries again
+            await self.gpu.set_ref(self.sess.id, str(wav), text, consent_at=consent.get("consent_at"))
+            log.info("live gpu voice sample: %.1f s, %d words", len(audio) / 16000, len(text.split()))
+            self.gpu_ready = True
+            self._ring.clear()
+            self.voice_ready_ms = self.voice_ready_ms or self.sess.now_ms()
+            self.sess.bus.broadcast({"type": "voice", "cloned": True, "engine": "gpu", "t_ms": self.sess.now_ms()})
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 - fail soft: the Gnani voices carry on
+            log.warning("live gpu voice sample failed: %s", e)
+        finally:
+            self._gpu_busy = False
+            wav.unlink(missing_ok=True)
 
     # ---------- voice from the stream ----------
     def _collect(self, pcm: bytes) -> None:
@@ -274,11 +358,15 @@ class LivePipeline:
 
     def _on_stt(self, ev: Any) -> None:
         now = self.sess.now_ms()
+        if ev.kind == "final" and ev.text:
+            self._maybe_gpu_ref(ev.text, now)
+        elif ev.kind == "processing":
+            self._maybe_gpu_ref("", now)
         if ev.kind == "connected":
             self._stt_t0 = now
             self.phraser.reset()
         elif ev.kind == "speech_start":
-            self._t_start = now
+            self._prev_start, self._t_start = self._t_start, now
             self._speaking = True
             self.assembler.speech_started()
             self.sess.bus.publish(ALL, {"type": "vad", "speaking": True}, to_all=False)
@@ -361,8 +449,10 @@ class LivePipeline:
             # While this language's dub is behind, a condensed translation lets it catch up (an interpreter does
             # the same). Decided now, because translation starts before the phrase's turn to be spoken.
             behind = self._lag.get(lang, 0) if self.sync_delay() else self._playhead.get(lang, 0) - self.sess.now_ms()
-            kw = {"brief": True} if self.s.live_brief and behind > self.s.live_brief_after_ms else {}
-            if kw and chunk.seq in self._pending:
+            kw: dict[str, bool] = {"brief": True} if self.s.live_brief and behind > self.s.live_brief_after_ms else {}
+            if self._gpu_planned(lang):
+                kw["native"] = True  # the GPU voice reads only the language's own letters
+            if kw.get("brief") and chunk.seq in self._pending:
                 self._pending[chunk.seq]["timings"][f"brief:{lang}"] = 1
             text = await asyncio.wait_for(self.llm.translate_chunk(chunk.text, lang, self.glossary, ctx, **kw),
                                           TRANSLATE_TIMEOUT_S)
@@ -391,7 +481,9 @@ class LivePipeline:
             # (not inside the provider) means that whatever piled up meanwhile and is already translated is
             # spoken together: one call instead of several, so the queue drains.
             await asyncio.wait({item[1]})  # translated first, so the turn is never held while waiting on the LLM
-            await self._voice_turn.acquire()
+            # Lines for our GPU engine do not wait behind Gnani's one-at-a-time turn.
+            turn = self._gpu_turn if self._gpu_speaks(lang) else self._voice_turn
+            await turn.acquire()
             while len(batch) < self.s.live_merge_max and not q.empty():
                 nxt = q._queue[0]  # type: ignore[attr-defined] - peek; only this worker takes from the queue
                 if nxt is None or not nxt[1].done():
@@ -419,7 +511,7 @@ class LivePipeline:
                                                  "sample_rate": self.s.live_sample_rate, "pcm_b64": "",
                                                  "last": True})
             finally:
-                self._voice_turn.release()
+                turn.release()
                 for chunk, _ in batch:
                     await self._chunk_done(chunk.seq)
 
@@ -494,6 +586,20 @@ class LivePipeline:
 
         async def stream() -> None:
             nonlocal lead, held, carry
+            if self._gpu_speaks(lang):
+                try:
+                    pcm, rate = await self.gpu.synth(self.sess.id, text, lang)
+                    if rate != sr:
+                        x = np.frombuffer(pcm, dtype="<i2").astype(np.float32)
+                        n = int(len(x) * sr / rate)
+                        pcm = np.interp(np.linspace(0, len(x) - 1, n), np.arange(len(x)), x).astype("<i2").tobytes()
+                    held = au.trim_pcm_silence(pcm, start=True, end=False) if self.s.live_trim_silence else pcm
+                    timings[f"clone:{lang}"] = timings[f"gpu:{lang}"] = 1
+                    self._gpu_fail = 0
+                    return
+                except Exception as e:  # noqa: BLE001 - fail soft: this line goes to the Gnani voice instead
+                    self._gpu_fail += 1
+                    log.warning("live gpu voice failed (%d): %s", self._gpu_fail, e)
             async for pcm in self.tts.synth_stream(text, lang, voice, sample_rate=sr, speed=self.s.live_tts_speed):
                 pcm = carry + pcm
                 cut = len(pcm) // 2 * 2
