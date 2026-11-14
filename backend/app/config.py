@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     gpu_voice_native_speedup: bool = False  # let the engine itself speak faster when a line must be shortened
     gpu_voice_format: str = "opus"     # how lines come back: `opus` (a tenth of the bytes) or `pcm`
     gpu_voice_speed: float = 1.0       # < 1 = slower speech; the engine copies the pace of the voice sample
+    # Only a streamer who recorded their own voice with consent gets a copied voice. Any other Live session
+    # (a stream that is merely playing on this PC may be someone else's) speaks in stock voices.
+    live_clone_needs_streamer: bool = True
     live_brief: bool = True            # while a language's dub is running behind, ask for a condensed translation
     live_length_budget: bool = True    # tell the translator how many words fit the time the speaker took
     live_brief_after_ms: int = 500     # ... once it is this far behind

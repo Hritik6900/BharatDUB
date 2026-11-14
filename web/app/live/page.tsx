@@ -11,7 +11,7 @@ import { Sparkline } from "@/components/ui/Sparkline";
 import { ChatList, useChat } from "@/components/live/ChatFeed";
 import { VoiceBars } from "@/components/voice/VoiceBars";
 import { VoiceOrb } from "@/components/voice/VoiceOrb";
-import { API_BASE, api, type LiveSession, type VoiceProfile } from "@/lib/api";
+import { API_BASE, api, type LiveSession } from "@/lib/api";
 import { startMicIngest, type IngestSource, type MicIngest } from "@/lib/micIngest";
 import { useAnalyser } from "@/lib/useMic";
 import { useLiveFeed } from "@/lib/useLiveFeed";
@@ -27,10 +27,6 @@ function inputDevice(): string {
     return "";
   }
 }
-const STREAM = "__stream__";
-// Same sentence the backend stores on the voice profile it creates from the stream.
-const STREAM_VOICE_CONSENT =
-  "The voice on this stream is mine, or I have the speaker's permission, and I agree that Bharat Dub may make a copy of it to dub this stream.";
 
 interface Saved {
   sid: string;
@@ -74,15 +70,9 @@ const HOW = [
 function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
   const [yt, setYt] = useState("");
   const [langs, setLangs] = useState<string[]>(["ta-IN", "bn-IN", "en-IN"]);
-  const [voices, setVoices] = useState<VoiceProfile[]>([]);
-  const [voice, setVoice] = useState(STREAM);
-  const [voiceConsent, setVoiceConsent] = useState(false);
   const [src, setSrc] = useState("hi-IN");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    api<VoiceProfile[]>("/api/voices").then(setVoices).catch(() => {});
-  }, []);
   const toggle = (c: string) => setLangs((l) => (l.includes(c) ? l.filter((x) => x !== c) : l.length >= 4 ? l : [...l, c]));
   const create = async () => {
     setBusy(true);
@@ -94,9 +84,6 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
           youtube_video_id: yt,
           target_langs: langs,
           src_lang: src,
-          voice_profile_id: voice && voice !== STREAM ? voice : null,
-          voice_from_stream: voice === STREAM,
-          voice_consent: voice === STREAM && voiceConsent,
         }),
       });
       onCreated({ sid: r.session_id, token: r.ingest_token });
@@ -128,35 +115,16 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
               {TARGET_LANGS.map((l) => <LanguageChip key={l.code} code={l.code} selected={langs.includes(l.code)} onClick={() => toggle(l.code)} />)}
             </div>
           </fieldset>
-          <label className="block">
-            <span className="text-lg font-medium tracking-[-0.01em]">Voice</span>
-            <select value={voice} onChange={(e) => setVoice(e.target.value)} className="input mt-3">
-              <option value={STREAM}>The voice on this stream (learned while you speak)</option>
-              <option value="">Stock voice per language</option>
-              {voices.map((v) => <option key={v.id} value={v.id}>{v.display_name} (saved voice)</option>)}
-            </select>
-          </label>
-          {voice === STREAM && (
-            <div className="tex-tint rounded-[14px] border border-line p-4">
-              <label className="flex cursor-pointer items-start gap-3">
-                <input type="checkbox" checked={voiceConsent} onChange={(e) => setVoiceConsent(e.target.checked)} className="mt-1 size-4" />
-                <span className="text-[0.95rem]">{STREAM_VOICE_CONSENT}</span>
-              </label>
-              <p className="mt-2 pl-7 text-sm text-muted">
-                The first 12 seconds of speech are dubbed in a stock voice while the copy is made. Works best with one speaker and no loud
-                music. The copy is saved under Your voice, where you can delete it.
-              </p>
-            </div>
-          )}
-          {voice !== "" && langs.length > 1 && (
-            <p className="text-sm text-muted">
-              For now your own voice plays in the first language you picked ({lang(langs[0]).name}); the others use stock voices. A copied
-              voice takes 2 to 4 seconds per line and our speech account runs one request at a time, so more would fall behind.
+          <div className="tex-tint rounded-[14px] border border-line p-4">
+            <p className="font-medium">Voice: stock voices</p>
+            <p className="mt-1 text-sm text-muted">
+              A stream that is playing on this PC may be someone else&apos;s, so its voice is not copied. To be dubbed in your own voice,
+              record it once with your consent and go live from <a href="/streamer" className="underline">Streamer</a>.
             </p>
-          )}
+          </div>
           {err && <Notice tone="error" role="alert">{err}</Notice>}
           <div className="flex flex-wrap items-center gap-5">
-            <Button size="lg" disabled={!langs.length || busy || (voice === STREAM && !voiceConsent)} onClick={create}>
+            <Button size="lg" disabled={!langs.length || busy} onClick={create}>
               {busy ? "Creating…" : "Create session"}
               <ArrowRight aria-hidden className="size-4 transition-transform group-hover:translate-x-0.5" />
             </Button>

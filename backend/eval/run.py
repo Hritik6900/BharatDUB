@@ -133,7 +133,7 @@ async def main() -> None:
     sids = a.live_sessions
     if sids is None:  # default: the runs behind LIVE_TEST_REPORT.md
         base = HERE.parent / "scripts" / "out" / "live"
-        sids = [(base / n / "session.txt").read_text().strip() for n in ("J_stock_ta", "J_stock_3all", "H_stream_ta")
+        sids = [(base / n / "session.txt").read_text().strip() for n in ("J_stock_ta", "J_stock_3all", "H_stream_ta", "P2_streamer_2lang", "P3_streamer_offset")
                 if (base / n / "session.txt").exists()]
     rows += await live_rows(sids)
 

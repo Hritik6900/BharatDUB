@@ -1,12 +1,7 @@
 area,metric,value,unit,n,note
 stt,wer,,%,0,not run (pass --wer)
-studio,turnaround,34.918,s,2,"13.8 s video, 2 languages, stock voice, separate 16.673 s, job abb21377"
-studio,turnaround,25.447,s,4,"13.8 s video, 4 languages, stock voice, separate 0.004 s, job 6f336429"
-studio,turnaround,84.889,s,4,"24.9 s video, 4 languages, stock voice, separate 22.884 s, job d67d50a6"
-studio,turnaround,24.402,s,3,"13.8 s video, 3 languages, cloned voice, separate 0.004 s, job 1629902e"
-studio,turnaround,60.348,s,4,"24.9 s video, 4 languages, cloned voice, separate 0.008 s, job 45f013a9"
-studio,slot_fit_natural,63.4,%,41,dubbed lines that fit their slot with no speed-up
-studio,slot_fit_within_max,97.6,%,41,lines that fit below the 1.35x cap; the rest hit the cap and may overrun
+studio,turnaround,,s,0,no uncached finished job in the store
+studio,slot_fit_natural,,%,0,no dubbed lines in the store
 live,first_audio_p50,2678,ms,26,"session 697ccb07, ta-IN, 0 phrases skipped"
 live,first_audio_p95,3558,ms,26,"session 697ccb07, ta-IN, 0 phrases skipped"
 live,heard_p50,3326,ms,26,"session 697ccb07, ta-IN, 0 phrases skipped"
@@ -27,3 +22,15 @@ live,first_audio_p50,2572,ms,35,"session c67ae2e3, ta-IN, 3 phrases skipped"
 live,first_audio_p95,3478,ms,35,"session c67ae2e3, ta-IN, 3 phrases skipped"
 live,heard_p50,3535,ms,35,"session c67ae2e3, ta-IN, 3 phrases skipped"
 live,heard_p95,6722,ms,35,"session c67ae2e3, ta-IN, 3 phrases skipped"
+live,first_audio_p50,2875,ms,33,"session 07d62a62, bn-IN, 2 phrases skipped"
+live,first_audio_p95,3804,ms,33,"session 07d62a62, bn-IN, 2 phrases skipped"
+live,heard_p50,4373,ms,33,"session 07d62a62, bn-IN, 2 phrases skipped"
+live,heard_p95,6350,ms,33,"session 07d62a62, bn-IN, 2 phrases skipped"
+live,first_audio_p50,3029,ms,33,"session 07d62a62, ta-IN, 2 phrases skipped"
+live,first_audio_p95,3624,ms,33,"session 07d62a62, ta-IN, 2 phrases skipped"
+live,heard_p50,4720.0,ms,33,"session 07d62a62, ta-IN, 2 phrases skipped"
+live,heard_p95,6215,ms,33,"session 07d62a62, ta-IN, 2 phrases skipped"
+live,first_audio_p50,2996,ms,31,"session ab0e9908, ta-IN, 4 phrases skipped"
+live,first_audio_p95,3751,ms,31,"session ab0e9908, ta-IN, 4 phrases skipped"
+live,heard_p50,6450,ms,31,"session ab0e9908, ta-IN, 4 phrases skipped"
+live,heard_p95,8701,ms,31,"session ab0e9908, ta-IN, 4 phrases skipped"

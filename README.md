@@ -100,6 +100,23 @@ Full report and how to rerun: [LIVE_TEST_REPORT.md](LIVE_TEST_REPORT.md).
 The Gnani account runs one request at a time; that is what separates the first row from the second.
 Not measured: a live microphone, a phone on a mobile network, sessions longer than 82 s.
 
+### Streamer Mode (15 Nov 2026)
+
+A streamer records their voice once with consent and goes live from `/streamer`; viewers hear them in their own
+voice from the first sentence. Spec: [STREAMER_MODE.md](STREAMER_MODE.md). The copied voice comes from our own GPU
+engine (IndicF5, see [gpu_engine/README.md](gpu_engine/README.md)), not from a Gnani model; without it the first
+language uses Gnani's copy and the rest stock voices.
+
+| What | Measured |
+|---|---|
+| Recording to a ready, tested voice | 17.6 s (score 1.0: the test sentence was heard back word for word) |
+| Phrases in the streamer's voice, Tamil and Bengali at once | 33 of 33 in each, from the first phrase |
+| Words heard back by Prisma | 87% Tamil, 80% Bengali |
+| Dub timed 8 s after speech, viewer page in Edge | 30 of 31 phrases arrived early; 77% started within 1 s of their moment |
+
+Source: the same dense 24.9 s reel fed as a microphone would. Not tested: a person at a real microphone, a real
+OBS to YouTube broadcast, a phone.
+
 ### Studio (13 Nov 2026)
 
 - A 24.9 s reel into 4 languages with stock voices, nothing cached: 84.9 s in total (Demucs 22.9 s, translation 20.7 s,

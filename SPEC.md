@@ -457,6 +457,25 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
 - [x] Studio separation on the GPU (2026-11-15, `GPU_SEPARATE_URL`, `gpu_engine/sep_engine.py`): 60 s of audio in 11.5-13.8 s
   through the tunnel (1.5 s on the A100, the rest is transfer), against 38.9 s on the laptop CPU; same stems (-40 dB
   difference). Falls back to the CPU on any failure.
+- [x] **Streamer Mode** (2026-11-15, spec in STREAMER_MODE.md; reuses the Live pipeline, nothing rebuilt):
+  - `/streamer`: profile (`streamers` table), voice recorded once with the consent sentence read aloud, go-live wizard
+    (any audio input incl. virtual cables, level meter, service health). `POST /api/streamers`, `.../voice`,
+    `.../voice/preview`, `DELETE .../voice`, `GET /api/streamers/health`.
+  - The recording becomes a Gnani embedding and a GPU voice: cleaned with Demucs on the GPU machine, up to three
+    7 s cuts, each transcribed from the exact cut and scored; the best is stored (`ref_path`, `ref_text`, `ref_score`).
+    Measured: 17.6 s for the whole request (11.7 s for the GPU voice), score 1.0 on the first cut, previews 1.6-1.9 s.
+  - `POST /api/live/sessions` takes `streamer_id` + `voice_mode` (`clone`|`stock`). With `clone` the stored voice goes to
+    the engines when the session starts. Measured, Tamil + Bengali, sync mode: 33 of 33 spoken phrases in the streamer's
+    voice in each language, from the first phrase; delay stayed 6 s; 87% / 80% of words heard back.
+  - A streamer's own mic: speech is real time, YouTube shows it later, so each phrase is due `offset_ms` after it was
+    spoken (session `clock` messages let a viewer place `t_speech_ms`; console slider 0-40 s; viewers follow it unless
+    they moved their own). The offset is YouTube's delay, so it never grows by itself. Viewers report how late each
+    phrase really started (`played` on the watch socket -> `viewer_on_time_pct`). Measured in Edge, offset 8 s, dense
+    reel: 30 of 31 phrases arrived before they were due; 77% started within 1 s of their moment, p95 3.2 s late.
+    The offset is set by ear; automatic calibration from the embed's sound was not built.
+  - `live_clone_needs_streamer` (on): a session without a streamer cannot copy a voice (403); the old `/live` form offers
+    stock voices only. `scripts/live_e2e.py --voice stream` therefore needs `--streamer <id>` now.
+  - Not tested: a real microphone with a person, a real OBS -> YouTube broadcast with this flow, a phone.
 - [x] Demucs htdemucs on CPU: **40.3 s for 60 s of audio** (Ryzen 7 7435HS, torch 2.15 CPU, measured 2026-11-13). Silero VAD: 3.5 s for a 14 s clip including model load.
 
 ## 18. Implementation notes (M2)

@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
-from app.config import LANG_NAMES
+from app.config import LANG_NAMES, get_settings
 from app.db import get_store, now_iso
 from app.live.bus import ALL
 from app.live.chat import chat
@@ -71,6 +71,9 @@ async def create_session(body: CreateSession) -> dict[str, Any]:
         body.voice_from_stream = False
         if body.voice_mode == "clone" and not body.voice_profile_id:
             raise HTTPException(403, "Record your voice with consent before going live in your own voice.")
+    if not streamer and get_settings().live_clone_needs_streamer and (body.voice_from_stream or body.voice_profile_id):
+        raise HTTPException(403, "A copied voice needs a streamer profile with the speaker's own recorded consent. "
+                                 "This session can use stock voices; to go live in your own voice, record it on /streamer.")
     if body.voice_profile_id:
         p = await get_store().get("voice_profiles", body.voice_profile_id)
         if not p or not p.get("consent_at") or p.get("deleted_at"):

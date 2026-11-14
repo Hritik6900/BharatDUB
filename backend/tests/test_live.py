@@ -202,8 +202,19 @@ def test_voice_from_stream_needs_consent_flag():
     c = TestClient(app)
     r = c.post("/api/live/sessions", json={"target_langs": ["ta-IN"], "voice_from_stream": True})
     assert r.status_code == 403
+    # A tick box on a stream that is merely playing is not the speaker's consent: only a streamer profile clones.
     r = c.post("/api/live/sessions", json={"target_langs": ["ta-IN"], "voice_from_stream": True, "voice_consent": True})
-    assert r.status_code == 201 and r.json()["voice_from_stream"] is True and "consent" not in json.dumps(r.json())
+    assert r.status_code == 403 and "streamer" in r.json()["detail"]
+    assert c.post("/api/live/sessions", json={"target_langs": ["ta-IN"], "voice_profile_id": "x"}).status_code == 403
+    r = c.post("/api/live/sessions", json={"target_langs": ["ta-IN"]})   # stock voices: always allowed
+    assert r.status_code == 201 and r.json()["voice_from_stream"] is False and r.json()["voice_profile_id"] is None
+    from app.config import get_settings
+    get_settings().__dict__["live_clone_needs_streamer"] = False      # the old behaviour, behind the switch
+    try:
+        r = c.post("/api/live/sessions", json={"target_langs": ["ta-IN"], "voice_from_stream": True, "voice_consent": True})
+        assert r.status_code == 201 and r.json()["voice_from_stream"] is True and "consent" not in json.dumps(r.json())
+    finally:
+        get_settings().__dict__["live_clone_needs_streamer"] = True
 
 
 class SilentSTT:
