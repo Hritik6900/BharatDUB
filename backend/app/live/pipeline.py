@@ -523,7 +523,11 @@ class LivePipeline:
                 raise
             except Exception as e:  # noqa: BLE001 - reconnect (15 min cap, network)
                 log.warning("live stt error: %s", e)
-                self.sess.bus.publish(ALL, {"type": "error", "message": f"Speech recognition: {str(e)[:160]}"})
+                # A PC clock that is hours off makes every TLS certificate look "not yet valid" or "expired".
+                why = ("this PC's date, time or time zone is wrong, so the secure connection is refused. Sync the clock "
+                       "(Windows: Settings, Time & language, Sync now)." if "CERTIFICATE_VERIFY_FAILED" in str(e)
+                       and ("not yet valid" in str(e) or "expired" in str(e)) else str(e)[:160])
+                self.sess.bus.publish(ALL, {"type": "error", "message": f"Speech recognition: {why}"})
                 await asyncio.sleep(1.0)
             else:
                 if self.running:  # server closed the stream (session cap): reconnect

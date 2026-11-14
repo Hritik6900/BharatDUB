@@ -476,8 +476,9 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
     phrase really started (`played` on the watch socket -> `viewer_on_time_pct`). Measured in Edge, offset 8 s, dense
     reel: 30 of 31 phrases arrived before they were due; 77% started within 1 s of their moment, p95 3.2 s late.
     The offset is set by ear; automatic calibration from the embed's sound was not built.
-  - `live_clone_needs_streamer` (on): a session without a streamer cannot copy a voice (403); the old `/live` form offers
-    stock voices only. `scripts/live_e2e.py --voice stream` therefore needs `--streamer <id>` now.
+  - `live_clone_needs_streamer`: **off since 15 Nov (the user's decision)**, so `/live` can again copy the voice on the
+    stream behind its consent tick (403 without it). On = only a streamer profile clones and the `/live` form is stock only.
+    Was: a session without a streamer cannot copy a voice (403). `scripts/live_e2e.py --voice stream` therefore needs `--streamer <id>` now.
   - Not tested: a real microphone with a person, a real OBS -> YouTube broadcast with this flow, a phone.
 - [x] Demucs htdemucs on CPU: **40.3 s for 60 s of audio** (Ryzen 7 7435HS, torch 2.15 CPU, measured 2026-11-13). Silero VAD: 3.5 s for a 14 s clip including model load.
 
@@ -516,3 +517,6 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
 > Supabase SQL migration. Implement the three providers behind the protocols in section 7, with retries and timeouts,
 > and `scripts/smoke.py`. Run the smoke script, show me the latencies, then answer the "Known unknowns" you can verify
 > and update section 16. Stop and wait for me before starting M2.
+- [x] A wrong PC clock stops Live (2026-11-15): the dev laptop's clock fell 5 h 30 min behind, Gnani had renewed its
+  certificate that night, and every Gnani connection failed with "certificate is not yet valid" (0 phrases, no dub).
+  The console now says to sync the clock. Check `date` against a server's `Date` header before blaming the pipeline.

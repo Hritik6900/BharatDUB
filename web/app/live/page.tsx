@@ -19,6 +19,10 @@ import { useYouTubeClock } from "@/lib/youtubeClock";
 import { TARGET_LANGS, lang } from "@/lib/langs";
 
 const KEY = "bd-live-session";
+const STREAM = "__stream__";
+// Same sentence the backend stores on the voice profile it creates from the stream.
+const STREAM_VOICE_CONSENT =
+  "The voice on this stream is mine, or I have the speaker's permission, and I agree that Bharat Dub may make a copy of it to dub this stream.";
 /** The input the streamer picked on /streamer (a mic or a virtual cable). */
 function inputDevice(): string {
   try {
@@ -71,6 +75,8 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
   const [yt, setYt] = useState("");
   const [langs, setLangs] = useState<string[]>(["ta-IN", "bn-IN", "en-IN"]);
   const [src, setSrc] = useState("hi-IN");
+  const [voice, setVoice] = useState(STREAM);
+  const [voiceConsent, setVoiceConsent] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const toggle = (c: string) => setLangs((l) => (l.includes(c) ? l.filter((x) => x !== c) : l.length >= 4 ? l : [...l, c]));
@@ -84,6 +90,8 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
           youtube_video_id: yt,
           target_langs: langs,
           src_lang: src,
+          voice_from_stream: voice === STREAM,
+          voice_consent: voice === STREAM && voiceConsent,
         }),
       });
       onCreated({ sid: r.session_id, token: r.ingest_token });
@@ -115,16 +123,36 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
               {TARGET_LANGS.map((l) => <LanguageChip key={l.code} code={l.code} selected={langs.includes(l.code)} onClick={() => toggle(l.code)} />)}
             </div>
           </fieldset>
-          <div className="tex-tint rounded-[14px] border border-line p-4">
-            <p className="font-medium">Voice: stock voices</p>
-            <p className="mt-1 text-sm text-muted">
-              A stream that is playing on this PC may be someone else&apos;s, so its voice is not copied. To be dubbed in your own voice,
-              record it once with your consent and go live from <a href="/streamer" className="underline">Streamer</a>.
-            </p>
-          </div>
+          <fieldset>
+            <legend className="text-lg font-medium tracking-[-0.01em]">Voice</legend>
+            <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
+              {([[STREAM, "The voice on this stream", "Learned from the stream while it plays, then used for the dub."], ["", "Stock voices", "A ready-made voice for each language."]] as const).map(([v, label, hint]) => (
+                <button key={v} type="button" role="radio" aria-checked={voice === v} onClick={() => setVoice(v)}
+                  className={`rounded-panel border p-4 text-left transition-colors ${voice === v ? "border-fg bg-sunken" : "border-line hover:border-fg/50"}`}>
+                  <span className="flex items-center justify-between gap-2 font-medium">
+                    {label}
+                    <span className={`grid size-5 shrink-0 place-items-center rounded-full border ${voice === v ? "border-fg bg-fg text-on-fg" : "border-line"}`}>{voice === v && <Check aria-hidden className="size-3" />}</span>
+                  </span>
+                  <span className="mt-1 block text-sm text-muted">{hint}</span>
+                </button>
+              ))}
+            </div>
+          </fieldset>
+          {voice === STREAM && (
+            <div className="tex-tint rounded-[14px] border border-line p-4">
+              <label className="flex cursor-pointer items-start gap-3">
+                <input type="checkbox" checked={voiceConsent} onChange={(e) => setVoiceConsent(e.target.checked)} className="mt-1 size-4" />
+                <span className="text-[0.95rem]">{STREAM_VOICE_CONSENT}</span>
+              </label>
+              <p className="mt-2 pl-7 text-sm text-muted">
+                The first seconds are dubbed in a stock voice while the copy is made. Works best with one speaker and no loud music. English
+                keeps a stock voice. For your own streams, <a href="/streamer" className="underline">Streamer</a> records your voice once and uses it from the first sentence.
+              </p>
+            </div>
+          )}
           {err && <Notice tone="error" role="alert">{err}</Notice>}
           <div className="flex flex-wrap items-center gap-5">
-            <Button size="lg" disabled={!langs.length || busy} onClick={create}>
+            <Button size="lg" disabled={!langs.length || busy || (voice === STREAM && !voiceConsent)} onClick={create}>
               {busy ? "Creating…" : "Create session"}
               <ArrowRight aria-hidden className="size-4 transition-transform group-hover:translate-x-0.5" />
             </Button>
