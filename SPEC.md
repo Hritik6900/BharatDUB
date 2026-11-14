@@ -450,6 +450,13 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
   A first version cut every pause to 0.16 s and the copied voice rushed (8 words in 1.4 s, 47% of words heard back); with
   natural pauses 77%. The engine copies the sample's pace, so a rushed sample means a rushed dub.
   With the natural-pace voice the dense reel is still about 1 s behind at the median (26 phrases, 4 skipped).
+- [x] Live voice sample check (2026-11-15): each sample becomes its own voice on the engine (`<session>-v<n>`), speaks one
+  known sentence and Prisma hears it back; the share of words is its score (`gpu_voice_score` on the session). The first
+  sample is used at once; if it scores under 0.85, later pauses give up to two more and a clearly better one takes over.
+  One run: score 0.89, and 86% of the words of that run's dub were heard back.
+- [x] Studio separation on the GPU (2026-11-15, `GPU_SEPARATE_URL`, `gpu_engine/sep_engine.py`): 60 s of audio in 11.5-13.8 s
+  through the tunnel (1.5 s on the A100, the rest is transfer), against 38.9 s on the laptop CPU; same stems (-40 dB
+  difference). Falls back to the CPU on any failure.
 - [x] Demucs htdemucs on CPU: **40.3 s for 60 s of audio** (Ryzen 7 7435HS, torch 2.15 CPU, measured 2026-11-13). Silero VAD: 3.5 s for a 14 s clip including model load.
 
 ## 18. Implementation notes (M2)

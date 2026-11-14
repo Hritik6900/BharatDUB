@@ -186,3 +186,60 @@ async def test_languages_are_translated_at_once_without_extra_calls(rig, monkeyp
     assert not r._ahead
     for lang in ("gu-IN", "mr-IN", "kn-IN"):
         assert f"translate:{lang}" in done["stage_timings"]
+
+
+def test_gpu_separation_reply_is_checked_and_stored_as_wav(tmp_path, monkeypatch):
+    import io
+
+    import numpy as np
+    import soundfile as sf
+
+    from app.studio.stages import separate as sep
+
+    full = tmp_path / "full.wav"
+    audio = (np.sin(np.arange(44100) / 20) * 8000).astype(np.int16)
+    sf.write(full, audio, 44100, subtype="PCM_16")
+
+    def flac(x):
+        b = io.BytesIO()
+        sf.write(b, x, 44100, format="FLAC", subtype="PCM_16")
+        return b.getvalue()
+
+    class Reply:
+        headers = {"x-separate-ms": "1200"}
+
+        def __init__(self, content):
+            self.content = content
+
+        def raise_for_status(self):
+            pass
+
+    class Client:
+        reply = b""
+
+        def __init__(self, **kw):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, files):
+            assert url == "http://gpu/separate" and files["audio"][1][:4] == b"fLaC"   # sent lossless
+            return Reply(Client.reply)
+
+    monkeypatch.setattr(sep.httpx, "Client", Client)
+    v, b = flac(audio // 2), flac(audio - audio // 2)
+    Client.reply = len(v).to_bytes(8, "big") + v + b
+    out_v, out_b = tmp_path / "v.wav", tmp_path / "b.wav"
+    sep._separate_gpu("http://gpu", full, out_v, out_b)
+    assert sf.info(out_v).frames == 44100 and sf.info(out_b).samplerate == 44100
+    assert sep.last_run["where"] == "gpu" and sep.last_run["gpu_s"] == 1.2
+    Client.reply = len(v).to_bytes(8, "big") + v + flac(audio[:1000])          # a stem of the wrong length
+    try:
+        sep._separate_gpu("http://gpu", full, out_v, out_b)
+        raise AssertionError("a mismatched stem must be refused")
+    except RuntimeError:
+        pass

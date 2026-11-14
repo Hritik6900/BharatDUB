@@ -25,3 +25,15 @@ The voice is copied only on sessions created with "copy the voice on this stream
 Measured 14 Nov 2026 (A100 40 GB, NFE 12, bf16): one line 0.91 s on the machine whatever its length; three lines
 at once 1.19 s with three processes (2.26 s with three replicas in one process). From a laptop in India through
 the tunnel (machine in Seoul): one line 1.2 to 1.7 s, three at once 1.6 to 1.9 s.
+
+## Studio: Demucs on the GPU
+
+```
+bash start_sep.sh        # on the GPU machine: installs Demucs beside the voice venv (not inside it), port 9010
+# backend/.env on the PC (the tunnel script forwards 9010 too):
+GPU_SEPARATE_URL=http://127.0.0.1:9010
+```
+
+Measured 15 Nov 2026 on 60 s of audio: 11.5 to 13.8 s through the tunnel (1.5 s on the GPU, the rest is sending
+2.4 MB and receiving 4.3 MB of FLAC), against 38.9 s on the laptop CPU. The stems match the CPU result
+(difference 40 dB below the signal). On any failure the backend separates on the CPU as before.

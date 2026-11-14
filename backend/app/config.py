@@ -76,6 +76,7 @@ class Settings(BaseSettings):
     # one-request limit. Empty = off. See providers/tts_gpu.py.
     gpu_voice_url: str = ""
     gpu_voice_timeout_s: float = 6.0
+    gpu_separate_url: str = ""         # Studio: Demucs on our GPU machine (gpu_engine/sep_engine.py); empty = this PC's CPU
     gpu_voice_native_speedup: bool = False  # let the engine itself speak faster when a line must be shortened
     gpu_voice_format: str = "opus"     # how lines come back: `opus` (a tenth of the bytes) or `pcm`
     gpu_voice_speed: float = 1.0       # < 1 = slower speech; the engine copies the pace of the voice sample
