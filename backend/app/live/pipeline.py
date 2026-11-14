@@ -39,24 +39,30 @@ def _rms(pcm: bytes) -> float:
 
 
 def speech_cut(frames: list[bytes], want_ms: int = GPU_REF_MS, min_ms: int = GPU_REF_MIN_MS,
-               frame_ms: int = 32, keep_pause_ms: int = 160) -> bytes | None:
-    """The most recent `want_ms` of speech in `frames`, with every pause shortened to `keep_pause_ms`.
+               frame_ms: int = 32, keep_pause_ms: int = 450, hang_ms: int = 200) -> bytes | None:
+    """The most recent `want_ms` of speech in `frames`, with long silences shortened to `keep_pause_ms`.
 
     A speaker who talks in short lines ("Answer.", "B wala chalo") never gives 3.5 s in one go (measured
     2026-11-14: the voice was learned 30 s after the first word). Joined like this, a few short lines are enough.
-    Returns None when there is less than `min_ms` of speech.
+    The engine copies the pace of the sample, so the speech itself must stay as it was: everything within
+    `hang_ms` of a loud frame counts as speech (quiet consonants, breaths), and pauses up to `keep_pause_ms` are
+    kept whole. (Cutting every pause to 160 ms made the copied voice rush: 8 words in 1.4 s, 47% of the words
+    heard back instead of 80%.) Returns None when there is less than `min_ms` of speech.
     """
+    loud = [_rms(f) >= ENROL_MIN_RMS for f in frames]
+    hang = max(1, hang_ms // frame_ms)
+    speech = [any(loud[max(0, i - hang): i + hang + 1]) for i in range(len(frames))]
     out: list[bytes] = []
     voiced = gap = 0
-    for p in reversed(frames):
-        if _rms(p) >= ENROL_MIN_RMS:
-            out.append(p)
-            voiced += frame_ms
+    for f, sp, ld in zip(reversed(frames), reversed(speech), reversed(loud)):
+        if sp:
+            out.append(f)
+            voiced += frame_ms if ld else 0
             gap = 0
         else:
             gap += frame_ms
             if gap <= keep_pause_ms:
-                out.append(p)
+                out.append(f)
         if voiced >= want_ms:
             break
     return b"".join(reversed(out)) if voiced >= min_ms else None
@@ -82,6 +88,8 @@ class LivePipeline:
         self.phraser = Phraser(self.s.live_phrase_min_words, self.s.live_phrase_max_words)
         self._voice_turn = asyncio.Semaphore(max(1, self.s.gnani_max_concurrency))
         self._gpu_turn = asyncio.Semaphore(max(1, int(getattr(self.gpu, "capacity", 1))))
+        self._src_ms_per_word = 350.0             # how fast the speaker talks (from finished lines)
+        self._dub_ms_per_word: dict[str, float] = {}  # per language: how long the dubbing voice takes per word
         self._gpu_ms_per_byte: dict[str, float] = {}  # per language: speech the GPU voice makes per byte of text
         self._playhead: dict[str, int] = {}  # per language: session time at which a viewer's queued dub ends
         self._stt_t0: int | None = None   # session clock at the start of the current STT stream
@@ -393,6 +401,10 @@ class LivePipeline:
         now = self.sess.now_ms()
         if ev.kind == "final" and ev.text:
             self._maybe_gpu_ref(ev.text, now)
+            n = len(ev.text.split())
+            if n >= 3 and ev.audio_duration_ms:
+                pace = min(700.0, max(150.0, ev.audio_duration_ms / n))
+                self._src_ms_per_word = 0.8 * self._src_ms_per_word + 0.2 * pace
         elif ev.kind == "processing":
             self._maybe_gpu_ref("", now)
         if ev.kind == "connected":
@@ -430,7 +442,8 @@ class LivePipeline:
             self.sess.bus.publish(ALL, {"type": "vad", "speaking": False}, to_all=False)
             self.sess.bus.publish(ALL, {"type": "transcript", "text": ev.text, "t_ms": now}, to_all=False)
             if rest:
-                self._dispatch(self.assembler.make(rest, t_start_ms=min(t_end, now), t_end_ms=t_end, t_final_ms=now))
+                t_start = min(t_end, now) - int(len(rest.split()) * self._src_ms_per_word)
+                self._dispatch(self.assembler.make(rest, t_start_ms=t_start, t_end_ms=t_end, t_final_ms=now))
         elif ev.kind == "final" and ev.text:
             self.phraser.final(ev.utterance_id, ev.text)  # no phrase went out: forget the utterance
             t_end = self._t_end if self._t_end is not None else now - STT_SILENCE_MS
@@ -482,7 +495,18 @@ class LivePipeline:
             # While this language's dub is behind, a condensed translation lets it catch up (an interpreter does
             # the same). Decided now, because translation starts before the phrase's turn to be spoken.
             behind = self._lag.get(lang, 0) if self.sync_delay() else self._playhead.get(lang, 0) - self.sess.now_ms()
-            kw: dict[str, bool] = {"brief": True} if self.s.live_brief and behind > self.s.live_brief_after_ms else {}
+            kw: dict[str, Any] = {"brief": True} if self.s.live_brief and behind > self.s.live_brief_after_ms else {}
+            pace = self._dub_ms_per_word.get(lang)
+            if self.s.live_length_budget and pace:
+                # Words that fit the time the speaker took: a little over when in step (a small speed-up is fine),
+                # less when behind, much less when far behind (better a short line than a skipped one).
+                share = 1.15 if not kw else 0.9 if behind <= 2000 else 0.6
+                n_src = len(chunk.text.split())
+                fit_words = max(2, int(n_src * self._src_ms_per_word * share / pace))
+                if fit_words < n_src * 1.5:  # otherwise the limit says nothing
+                    kw["max_words"] = fit_words
+                    if chunk.seq in self._pending:
+                        self._pending[chunk.seq]["timings"][f"budget:{lang}"] = fit_words
             if self._gpu_planned(lang):
                 kw["native"] = True  # the GPU voice reads only the language's own letters
             if kw.get("brief") and chunk.seq in self._pending:
@@ -690,6 +714,12 @@ class LivePipeline:
             bus.publish(ALL, {"type": "error", "message": f"{lang} voice failed: {str(e)[:120]}"}, to_all=False)
         if self.s.live_trim_silence:
             held = au.trim_pcm_silence(held, start=False, end=True)
+        # The pace of this voice in this language, for the next phrases' word limit.
+        said = len(text.split())
+        raw_ms = (sent + len(held)) / 2 / sr * 1000 * spoke_at
+        if said >= 2 and raw_ms > 200:
+            prev = self._dub_ms_per_word.get(lang)
+            self._dub_ms_per_word[lang] = raw_ms / said if not prev else 0.7 * prev + 0.3 * raw_ms / said
         if fit and held:
             # The viewer is still playing earlier phrases, so holding this one back costs nothing; it is
             # shortened (tempo only, pitch kept) by as much as it takes to catch up, within a limit.

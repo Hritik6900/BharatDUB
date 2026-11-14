@@ -78,7 +78,7 @@ class OpenAILLM:
         return list(await asyncio.gather(*(self.translate_chunk(line, target, glossary, []) for line in lines)))
 
     async def translate_chunk(self, text: str, target: str, glossary: list[str], context: list[str],
-                              brief: bool = False, native: bool = False) -> str:
+                              brief: bool = False, native: bool = False, max_words: int | None = None) -> str:
         """`brief`: the dub is behind the speaker, so condense like an interpreter would (main point only)."""
         lang = LANG_NAMES.get(target, target)
         system = (
@@ -103,9 +103,14 @@ class OpenAILLM:
             system += (f" IMPORTANT, this overrides the earlier rule: write EVERY word in {SCRIPTS[target]} letters, "
                        "including English words, brand and game names, spelled the way they are pronounced. "
                        "No Latin letters at all; write numbers as words.")
+        # `max_words`: how many words of this language fit the time the speaker took (from the measured pace of
+        # the dubbing voice). Without it a dub that is behind is cut to about 60% of the words.
         if brief:
             system += (" The dub is running behind the speaker, so condense: say only the main point, in at most "
-                       f"{max(3, round(len(text.split()) * 0.6))} words, and leave out everything else.")
+                       f"{max_words or max(3, round(len(text.split()) * 0.6))} words, and leave out everything else.")
+        elif max_words:
+            system += (f" Time limit: the speaker took the time of about {max_words} {lang} words. Use at most "
+                       f"{max_words} words; if the full meaning does not fit, keep the main point.")
         fast = bool(self.s.llm_model_fast) and self.s.llm_model_fast != self.s.llm_model
         out = clean_line(await self._chat(system, user, model=self.s.llm_fast, max_tokens=400, timeout=20.0,
                                           effort=(self.s.llm_reasoning_effort_fast or None) if fast else None))

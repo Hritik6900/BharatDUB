@@ -440,6 +440,16 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
     80% of words heard back. Tamil + Bengali + Telugu at once: 30-31 of 31 in the copied voice each, delay 9 s, behind
     p50 0.4-1.1 s / p95 2.8-3.2 s, 1 of 34 skipped, 85-89% of words heard back (Bengali, Telugu).
   - Not known: how close the voice sounds to the speaker (needs ears), behaviour with game sound under the voice.
+- Live, 14 Nov night. `live_length_budget`: the pipeline measures how long the dubbing voice takes per word in each language
+  and how fast the speaker talks, and gives the translator a word limit per phrase (1.15x the speaker's time in step, 0.9x
+  when behind, 0.6x when more than 2 s behind). On the dense reel the translator never went over the limit (24 and more
+  phrases a run) and phrases needing the 1.3x speed-up fell from 28-29 to 18-20 of about 30. The tail of a line now starts
+  when its words were spoken (word count x the speaker's pace), not when the line ended. `/watch` keeps the stream's own
+  sound at 18% under the dub (checkbox, on by default).
+  The voice sample is joined from short lines (`speech_cut`): pauses over 0.45 s are shortened, speech is left as it was.
+  A first version cut every pause to 0.16 s and the copied voice rushed (8 words in 1.4 s, 47% of words heard back); with
+  natural pauses 77%. The engine copies the sample's pace, so a rushed sample means a rushed dub.
+  With the natural-pace voice the dense reel is still about 1 s behind at the median (26 phrases, 4 skipped).
 - [x] Demucs htdemucs on CPU: **40.3 s for 60 s of audio** (Ryzen 7 7435HS, torch 2.15 CPU, measured 2026-11-13). Silero VAD: 3.5 s for a 14 s clip including model load.
 
 ## 18. Implementation notes (M2)

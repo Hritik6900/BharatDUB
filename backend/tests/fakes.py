@@ -28,7 +28,7 @@ class FakeLLM:
         self.batch_calls += 1
         return [f"{target} {line}" for line in lines]
 
-    async def translate_chunk(self, text, target, glossary, context, brief=False, native=False):
+    async def translate_chunk(self, text, target, glossary, context, brief=False, native=False, max_words=None):
         return f"{target} {text}"
 
     async def shorten(self, text, target, max_seconds):

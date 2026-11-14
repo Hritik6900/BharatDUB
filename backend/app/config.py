@@ -80,6 +80,7 @@ class Settings(BaseSettings):
     gpu_voice_format: str = "opus"     # how lines come back: `opus` (a tenth of the bytes) or `pcm`
     gpu_voice_speed: float = 1.0       # < 1 = slower speech; the engine copies the pace of the voice sample
     live_brief: bool = True            # while a language's dub is running behind, ask for a condensed translation
+    live_length_budget: bool = True    # tell the translator how many words fit the time the speaker took
     live_brief_after_ms: int = 500     # ... once it is this far behind
     # Sync mode: when the console reports the time of the video it feeds from, every phrase is dubbed for the
     # moment it was spoken and viewers hold their video this far behind, so picture and dub play together.

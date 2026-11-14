@@ -374,9 +374,11 @@ def test_speech_cut_joins_short_lines_and_needs_enough_speech():
     cut = speech_cut(line * 5)                               # five short lines: 4.8 s of speech
     assert cut is not None
     frames = len(cut) // 1024
-    assert 150 <= frames <= 150 + 5 * 5                      # all the speech, each pause cut to 160 ms
+    assert 150 + 5 * 12 <= frames <= 150 + 5 * 28            # all the speech; each 1.3 s pause cut to under 0.9 s
     long = speech_cut([loud] * 600)                          # 19 s without a pause: only the last 7 s
     assert long is not None and 215 <= len(long) // 1024 <= 222
+    dip = [loud] * 60 + [quiet] * 8 + [loud] * 60            # a 0.25 s dip inside a sentence stays whole
+    assert len(speech_cut(dip)) // 1024 == 128
 
 
 async def test_gpu_voice_comes_back_after_the_engine_was_away(tmp_path, monkeypatch):
@@ -390,3 +392,34 @@ async def test_gpu_voice_comes_back_after_the_engine_was_away(tmp_path, monkeypa
     assert not p._gpu_speaks("ta-IN")
     p._gpu_retry_at = sess.now_ms() - 1                           # later the engine gets another try
     assert p._gpu_speaks("ta-IN")
+
+
+class BudgetLLM(MockLLM):
+    def __init__(self):
+        super().__init__()
+        self.seen: list[dict] = []
+
+    async def translate_chunk(self, text, target, glossary, context, brief=False, native=False, max_words=None):
+        self.seen.append({"words": len(text.split()), "brief": brief, "max_words": max_words})
+        return await super().translate_chunk(text, target, glossary, context)
+
+
+async def test_translator_gets_a_word_limit_from_the_measured_pace(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.live.pipeline.get_store", lambda: LocalStore(tmp_path / "db.json"))
+    sess = LiveSession({"id": "b1", "target_langs": ["ta-IN"], "src_lang": "hi-IN"})
+    llm = BudgetLLM()
+    p = LivePipeline(sess, stt=SilentSTT(), llm=llm, tts=MockTTS())
+    sess.bus.subscribe("ta-IN")
+    await p.start()
+    line = "ek do teen chaar paanch chheh saat aath"     # 8 words: about 2.8 s at the default pace
+    now = sess.now_ms()
+    chunk = p.assembler.make(line, t_start_ms=now, t_end_ms=now, t_final_ms=now)
+    await p._translate("ta-IN", chunk, [], None)
+    assert llm.seen[-1]["max_words"] is None              # no pace measured yet: no limit
+    p._dub_ms_per_word["ta-IN"] = 700.0                   # this voice needs 0.7 s a word
+    await p._translate("ta-IN", chunk, [], None)
+    assert llm.seen[-1] == {"words": 8, "brief": False, "max_words": 4}   # 2.8 s * 1.15 / 0.7 s
+    p._playhead["ta-IN"] = sess.now_ms() + 3000           # the dub is 3 s behind: a much shorter line
+    await p._translate("ta-IN", chunk, [], None)
+    assert llm.seen[-1]["brief"] and llm.seen[-1]["max_words"] == 2
+    await p.stop()

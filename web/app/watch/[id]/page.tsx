@@ -12,6 +12,8 @@ import { useYouTubeClock } from "@/lib/youtubeClock";
 import { useLocalNumber } from "@/lib/hooks";
 import { lang } from "@/lib/langs";
 
+const BED_VOLUME = 18; // percent: the original stream under the dub
+
 export default function WatchPage() {
   return (
     <Suspense>
@@ -26,6 +28,9 @@ function Watch() {
   const [choice, setChoice] = useState<string>("");
   const [listening, setListening] = useState(false);
   const [ytAudio, setYtAudio] = useState(false);
+  // The stream's own sound, kept quiet under the dub: the room, the game and the laughter stay, which is what
+  // makes a dub feel in step with the picture. It is the video's own audio, so it is always in sync with it.
+  const [bed, setBed] = useState(true);
   const [offset, setOffset] = useLocalNumber(`bd-offset-${id}`, 0);
   const [offsetTouched, setOffsetTouched] = useState(false);
   const iframe = useRef<HTMLIFrameElement>(null);
@@ -103,8 +108,11 @@ function Watch() {
   const yt = (cmd: "mute" | "unMute") =>
     iframe.current?.contentWindow?.postMessage(JSON.stringify({ event: "command", func: cmd, args: [] }), "*");
   useEffect(() => {
-    yt(ytAudio || choice === "src" ? "unMute" : "mute");
-  }, [ytAudio, choice]);
+    const full = ytAudio || choice === "src";
+    const under = bed && listening && !full;  // only once the viewer has tapped to hear the dub
+    iframe.current?.contentWindow?.postMessage(JSON.stringify({ event: "command", func: "setVolume", args: [full ? 100 : BED_VOLUME] }), "*");
+    yt(full || under ? "unMute" : "mute");
+  }, [ytAudio, choice, bed, listening]);
 
   const listen = async () => {
     await feed.ensureAudio();
@@ -204,6 +212,12 @@ function Watch() {
             <label className="flex items-center justify-between gap-4">
               <span className="flex items-center gap-2.5"><Volume2 aria-hidden className="size-4 text-muted" />Original stream audio</span>
               <input type="checkbox" checked={ytAudio || choice === "src"} disabled={choice === "src"} onChange={(e) => setYtAudio(e.target.checked)} className="size-5" />
+            </label>
+          )}
+          {s?.youtube_video_id && choice !== "src" && !ytAudio && (
+            <label className="flex items-center justify-between gap-4">
+              <span className="flex items-center gap-2.5"><Volume2 aria-hidden className="size-4 text-muted" />Keep the original quietly under the dub</span>
+              <input type="checkbox" checked={bed} onChange={(e) => setBed(e.target.checked)} className="size-5" />
             </label>
           )}
           <label className="block">
