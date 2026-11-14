@@ -57,10 +57,14 @@ export async function startMicIngest(
   token: string,
   onStatus: (s: "connecting" | "live" | "closed" | "error", detail?: string) => void,
   from: IngestSource = "mic",
+  /** Streamer Mode: this input device (a mic or a virtual cable), with the browser's filters off. */
+  deviceId = "",
 ): Promise<MicIngest> {
   onStatus("connecting");
   const stream = from !== "mic" ? await tabAudio(from === "player") : await navigator.mediaDevices.getUserMedia({
-    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    audio: deviceId
+      ? { deviceId: { exact: deviceId }, channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+      : { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
   });
   stream.getAudioTracks()[0]?.addEventListener("ended", () => onStatus("closed", from !== "mic" ? "Sharing stopped." : undefined));
   const ctx = new AudioContext({ sampleRate: 16000 }); // browser resamples the mic for us

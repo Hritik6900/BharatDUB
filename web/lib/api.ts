@@ -99,6 +99,9 @@ export interface LiveSession {
   clone_langs?: string[] | null;
   /** Our GPU engine has learned the speaker's voice from this stream. */
   gpu_voice?: boolean;
+  /** Streamer Mode: the session belongs to this streamer and uses their recorded voice (`clone`) or none. */
+  streamer_id?: string | null;
+  voice_mode?: "clone" | "stock" | null;
   stats?: { p50_ms: number | null; p95_ms: number | null; n: number } | null;
 }
 

@@ -16,7 +16,8 @@ interface NavItem {
 
 const PRODUCTS: NavItem[] = [
   { href: "/studio", label: "Studio", desc: "Dub a reel or short, music kept", icon: Clapperboard },
-  { href: "/live", label: "Live", desc: "Dub your stream while you speak", icon: Radio },
+  { href: "/streamer", label: "Streamer", desc: "Go live in your own voice", icon: Radio },
+  { href: "/live", label: "Any stream (beta)", desc: "Dub a stream that is playing", icon: Radio },
 ];
 const LINKS: NavItem[] = [
   { href: "/#how", label: "How it works", desc: "From your voice to a dubbed line", icon: AudioLines },

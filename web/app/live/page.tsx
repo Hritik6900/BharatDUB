@@ -19,6 +19,14 @@ import { useYouTubeClock } from "@/lib/youtubeClock";
 import { TARGET_LANGS, lang } from "@/lib/langs";
 
 const KEY = "bd-live-session";
+/** The input the streamer picked on /streamer (a mic or a virtual cable). */
+function inputDevice(): string {
+  try {
+    return localStorage.getItem("bd-live-input") ?? "";
+  } catch {
+    return "";
+  }
+}
 const STREAM = "__stream__";
 // Same sentence the backend stores on the voice profile it creates from the stream.
 const STREAM_VOICE_CONSENT =
@@ -213,11 +221,12 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
   const clock = useYouTubeClock(player, Boolean(ytId));
   const picked = useRef(false);
   useEffect(() => {
-    if (ytId && !picked.current) {
+    // A streamer's own session takes the streamer's voice (mic or virtual cable), never the video's sound.
+    if (ytId && !picked.current && session && !session.streamer_id) {
       picked.current = true;
       setFrom("player");
     }
-  }, [ytId]);
+  }, [ytId, session]);
   useEffect(() => {
     if (!mic || from !== "player") return;
     const id = setInterval(() => {
@@ -249,7 +258,7 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
       const m = await startMicIngest(sid, token, (s, d) => {
         setMicState(s);
         if (d) setErrors((e) => [d, ...e].slice(0, 3));
-      }, from);
+      }, from, session?.streamer_id ? inputDevice() : "");
       setMic(m);
     } catch (e) {
       setMicState("error");
