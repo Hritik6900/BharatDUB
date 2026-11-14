@@ -59,7 +59,8 @@ class LiveSession:
                 "voice_from_stream": bool((r.get("voice_from_stream") or {}).get("consent_at")),
                 "clone_langs": list(self.pipeline.clone_langs) if self.pipeline else None,
                 "sync_delay_ms": self.pipeline.sync_delay() if self.pipeline else 0,
-                "gpu_voice": bool(self.pipeline and self.pipeline.gpu_ready)}
+                "gpu_voice": bool(self.pipeline and self.pipeline.gpu_ready),
+                "gpu_voice_score": self.pipeline._gpu_score if self.pipeline else None}
 
 
 class SessionManager:

@@ -354,7 +354,7 @@ async def test_gpu_voice_needs_consent_and_speaks_indian_languages_only(tmp_path
         if p.gpu_ready:
             break
         await asyncio.sleep(0.02)
-    assert p.gpu_ready and gpu.refs == [("g1", line, "2026-11-14T10:00:00+00:00")]
+    assert p.gpu_ready and gpu.refs == [("g1-v1", line, "2026-11-14T10:00:00+00:00")]
     now = sess.now_ms()
     p._dispatch(p.assembler.make("line one", t_start_ms=now, t_end_ms=now, t_final_ms=now))
     for q in (ta, en):
@@ -363,7 +363,7 @@ async def test_gpu_voice_needs_consent_and_speaks_indian_languages_only(tmp_path
             if m["type"] == "audio" and m["last"]:
                 break
     await p.stop()
-    assert [lang for lang, _ in gpu.lines] == ["ta-IN"]   # Tamil from the engine; English stays on the Gnani voice
+    assert {lang for lang, _ in gpu.lines} == {"ta-IN"}   # Tamil from the engine; English stays on the Gnani voice
 
 
 def test_speech_cut_joins_short_lines_and_needs_enough_speech():
@@ -423,3 +423,52 @@ async def test_translator_gets_a_word_limit_from_the_measured_pace(tmp_path, mon
     await p._translate("ta-IN", chunk, [], None)
     assert llm.seen[-1]["brief"] and llm.seen[-1]["max_words"] == 2
     await p.stop()
+
+
+def test_words_heard_scores_a_copied_voice():
+    from app.live.pipeline import words_heard
+    said = "இன்று வானிலை மிகவும் நன்றாக இருக்கிறது"
+    assert words_heard(said, "இன்று வானிலை மிகவும் நன்றாக இருக்கிறது.") == 1.0
+    assert words_heard(said, "இன்று வானிலை நன்றாக") == 0.6
+    assert words_heard(said, "மேய்ச்சல் இயந்திரம்") == 0.0
+
+
+class ScoringSTT(SilentSTT):
+    """Hears the first voice badly and the second one well."""
+
+    def __init__(self):
+        self.n = 0
+
+    async def transcribe(self, wav_path, lang="indic-auto", **kw):
+        from app.live.pipeline import GPU_CHECK_LINES
+        from app.providers.base import STTResult
+        if "bd_gpu_check" not in wav_path:
+            return STTResult(text="yeh ek poori line hai jo abhi boli gayi", latency_s=0.0)
+        self.n += 1
+        line = GPU_CHECK_LINES["ta-IN"]
+        return STTResult(text=line.split()[0] if self.n == 1 else line, latency_s=0.0)
+
+
+async def test_a_better_voice_sample_replaces_a_poor_one(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.live.pipeline.get_store", lambda: LocalStore(tmp_path / "db.json"))
+    sess = LiveSession({"id": "g3", "target_langs": ["ta-IN"], "src_lang": "hi-IN",
+                        "voice_from_stream": {"consent_at": "2026-11-14T10:00:00+00:00", "consent_text": "ok"}})
+    p = LivePipeline(sess, stt=ScoringSTT(), llm=MockLLM(), tts=MockTTS(), gpu=FakeGpu())
+
+    async def four_seconds(session_id, text, lang, speed=None):   # a natural pace for the check sentence
+        return (b" " * 96000, 24000)
+
+    p.gpu.synth = four_seconds
+    p.running = True
+    pcm = b"\x00\x10" * 16000 * 5
+    p._gpu_tries = 1
+    await p._gpu_enrol(pcm, "x")
+    assert p.gpu_ready and p._gpu_sid == "g3-v1" and p._gpu_score is not None and p._gpu_score < 0.3
+    assert not p._gpu_wanted()                       # not again straight away
+    p._gpu_last_try = sess.now_ms() - 60_000
+    assert p._gpu_wanted()                           # ... but a later pause may give a better sample
+    p._gpu_tries = 2
+    await p._gpu_enrol(pcm, "x")
+    assert p._gpu_sid == "g3-v2" and p._gpu_score == 1.0
+    p._gpu_last_try = sess.now_ms() - 60_000
+    assert not p._gpu_wanted()                       # good enough: it stays

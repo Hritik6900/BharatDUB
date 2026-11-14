@@ -3,6 +3,7 @@ import asyncio
 import base64
 import logging
 import tempfile
+import unicodedata
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,36 @@ MAX_QUEUED_AUDIO = 400  # ~13 s of 1024-byte frames; beyond that we drop (the st
 def _rms(pcm: bytes) -> float:
     x = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype="<i2").astype(np.float64)
     return float(np.sqrt(np.mean(x ** 2))) if len(x) else 0.0
+
+
+# One plain sentence per language, spoken in a freshly copied voice and heard back by Prisma, to judge the sample.
+GPU_CHECK_LINES = {
+    "hi-IN": "आज मौसम बहुत अच्छा है और हम सब यहाँ बहुत खुश हैं",
+    "ta-IN": "இன்று வானிலை மிகவும் நன்றாக இருக்கிறது, நாங்கள் எல்லோரும் மகிழ்ச்சியாக இருக்கிறோம்",
+    "te-IN": "ఈ రోజు వాతావరణం చాలా బాగుంది, మేమందరం చాలా సంతోషంగా ఉన్నాము",
+    "bn-IN": "আজ আবহাওয়া খুব ভালো, আমরা সবাই এখানে খুব খুশি",
+    "kn-IN": "ಇಂದು ಹವಾಮಾನ ತುಂಬಾ ಚೆನ್ನಾಗಿದೆ, ನಾವೆಲ್ಲರೂ ತುಂಬಾ ಸಂತೋಷವಾಗಿದ್ದೇವೆ",
+    "ml-IN": "ഇന്ന് കാലാവസ്ഥ വളരെ നല്ലതാണ്, ഞങ്ങൾ എല്ലാവരും വളരെ സന്തോഷത്തിലാണ്",
+    "mr-IN": "आज हवामान खूप छान आहे आणि आम्ही सगळे खूप आनंदी आहोत",
+    "gu-IN": "આજે હવામાન ખૂબ સરસ છે અને અમે બધા ખૂબ ખુશ છીએ",
+    "pa-IN": "ਅੱਜ ਮੌਸਮ ਬਹੁਤ ਵਧੀਆ ਹੈ ਅਤੇ ਅਸੀਂ ਸਾਰੇ ਬਹੁਤ ਖੁਸ਼ ਹਾਂ",
+}
+GPU_MAX_CHECKS = 3         # voice samples tried in one session
+GPU_GOOD_SCORE = 0.85      # a sample this good is kept; below it a later pause may give a better one
+GPU_RECHECK_MS = 12000     # ... but not sooner than this after the last try
+
+
+def _words(text: str) -> list[str]:
+    kept = "".join(c if unicodedata.category(c)[0] in "LMN" else " " for c in text.lower())
+    return kept.split()
+
+
+def words_heard(said: str, heard: str) -> float:
+    """Share of the words in `said` that turn up in `heard` (same word, or the same first four letters)."""
+    want, got = _words(said), set(_words(heard))
+    if not want:
+        return 0.0
+    return sum(1 for w in want if w in got or any(w[:4] == g[:4] for g in got)) / len(want)
 
 
 def speech_cut(frames: list[bytes], want_ms: int = GPU_REF_MS, min_ms: int = GPU_REF_MIN_MS,
@@ -78,6 +109,10 @@ class LivePipeline:
         self._gpu_busy = False
         self._gpu_tries = 0
         self._gpu_fail = 0
+        self._gpu_sid: str | None = None   # the voice on the engine that is in use
+        self._gpu_score: float | None = None  # how well it speaks (share of words heard back), if known
+        self._gpu_checks = 0
+        self._gpu_last_try = 0
         self._gpu_retry_at = 0     # after three failures in a row: session time at which the engine is tried again
         self._ring: deque[tuple[int, bytes]] = deque(maxlen=700)  # ~22 s of the stream's sound, with arrival time
         self._prev_start: int | None = None
@@ -238,8 +273,13 @@ class LivePipeline:
     def _gpu_wanted(self) -> bool:
         """Still looking for a voice sample for the GPU engine: only with the consent given for this stream."""
         consent = self.sess.row.get("voice_from_stream") or {}
-        return bool(self.running and self.gpu.enabled and not self.gpu_ready and self._gpu_tries < 8
-                    and consent.get("consent_at"))
+        if not (self.running and self.gpu.enabled and self._gpu_tries < 8 and consent.get("consent_at")):
+            return False
+        if not self.gpu_ready:
+            return True
+        # It has a voice. A sample that did not score well may be replaced by a better one from a later pause.
+        return (self._gpu_checks < GPU_MAX_CHECKS and (self._gpu_score or 0.0) < GPU_GOOD_SCORE
+                and self.sess.now_ms() - self._gpu_last_try >= GPU_RECHECK_MS)
 
     def _gpu_planned(self, lang: str) -> bool:
         """This language is, or is about to be, spoken by the GPU engine (so its text is written for it)."""
@@ -285,12 +325,24 @@ class LivePipeline:
                 text = heard
             if len(text.split()) < 4:
                 return  # nothing usable was said in this cut; the next pause tries again
-            await self.gpu.set_ref(self.sess.id, str(wav), text, consent_at=consent.get("consent_at"))
-            log.info("live gpu voice sample: %.1f s, %d words", len(audio) / 16000, len(text.split()))
-            self.gpu_ready = True
-            self._ring.clear()
-            self.voice_ready_ms = self.voice_ready_ms or self.sess.now_ms()
-            self.sess.bus.broadcast({"type": "voice", "cloned": True, "engine": "gpu", "t_ms": self.sess.now_ms()})
+            cand = f"{self.sess.id}-v{self._gpu_tries}"   # each sample is its own voice on the engine
+            await self.gpu.set_ref(cand, str(wav), text, consent_at=consent.get("consent_at"))
+            first = not self.gpu_ready
+            if first:  # speak in it at once; whether it is a good one is found out while it is already in use
+                self._gpu_sid = cand
+                self.gpu_ready = True
+                self.voice_ready_ms = self.voice_ready_ms or self.sess.now_ms()
+                self.sess.bus.broadcast({"type": "voice", "cloned": True, "engine": "gpu", "t_ms": self.sess.now_ms()})
+                self.sess.bus.broadcast({"type": "session", **self.sess.public()})
+            score = await self._gpu_check(cand)
+            self._gpu_checks += 1
+            self._gpu_last_try = self.sess.now_ms()
+            if first:
+                self._gpu_score = score
+            elif score is not None and score > (self._gpu_score or 0.0) + 0.08:
+                self._gpu_sid, self._gpu_score = cand, score   # a clearly better sample: use it from now on
+            log.info("live gpu voice sample %d: %.1f s, %d words, score %s, in use: %s", self._gpu_tries,
+                     len(audio) / 16000, len(text.split()), score, self._gpu_sid == cand)
             self.sess.bus.broadcast({"type": "session", **self.sess.public()})
         except asyncio.CancelledError:
             raise
@@ -298,6 +350,33 @@ class LivePipeline:
             log.warning("live gpu voice sample failed: %s", e)
         finally:
             self._gpu_busy = False
+            wav.unlink(missing_ok=True)
+
+    async def _gpu_check(self, cand: str) -> float | None:
+        """How well a copied voice speaks: one known sentence, heard back by Prisma (share of words, 0-1).
+        A sample is 7 s of whatever was on the stream; this is the only way to know if it made a usable voice
+        (measured 2026-11-14: between 47% and 86% of words heard back, depending on the sample alone)."""
+        lang = next((lg for lg in self.sess.langs if self.gpu.speaks(lg) and lg in GPU_CHECK_LINES), None)
+        if lang is None:
+            return None
+        line = GPU_CHECK_LINES[lang]
+        wav = Path(tempfile.gettempdir()) / f"bd_gpu_check_{cand}.wav"
+        try:
+            pcm, rate = await self.gpu.synth(cand, line, lang)
+            audio = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
+            await asyncio.to_thread(au.write_wav, wav, audio, rate)
+            heard = (await self.stt.transcribe(str(wav), lang)).text
+            score = words_heard(line, heard)
+            per_word = len(audio) / rate * 1000 / max(1, len(line.split()))
+            if not 250 <= per_word <= 1100:   # rushed or dragging speech is a bad sample whatever was understood
+                score = min(score, 0.3)
+            return round(score, 2)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 - no verdict; the voice stays in use
+            log.warning("live gpu voice check failed: %s", e)
+            return None
+        finally:
             wav.unlink(missing_ok=True)
 
     # ---------- voice from the stream ----------
@@ -678,7 +757,7 @@ class LivePipeline:
                     if fit and per_byte and self.s.gpu_voice_native_speedup:
                         speed = max(speed, want_tempo(per_byte * size / speed) * speed)
                         speed = min(speed, self.s.live_fit_max_tempo)
-                    pcm, rate = await self.gpu.synth(self.sess.id, text, lang, speed=speed)
+                    pcm, rate = await self.gpu.synth(self._gpu_sid or self.sess.id, text, lang, speed=speed)
                     spoke_at = speed / self.s.gpu_voice_speed
                     now_per_byte = len(pcm) / 2 / rate * 1000 * speed / size
                     self._gpu_ms_per_byte[lang] = now_per_byte if not per_byte else 0.7 * per_byte + 0.3 * now_per_byte
