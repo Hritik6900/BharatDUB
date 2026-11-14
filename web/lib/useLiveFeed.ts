@@ -16,6 +16,10 @@ export interface Stats {
   /** End of a phrase to the moment a viewer starts hearing its dub (after earlier phrases have played). */
   heard_p50_ms?: number | null;
   heard_p95_ms?: number | null;
+  /** Sync mode: how far behind viewers hold the video, and the share of phrases that started on their moment. */
+  sync_delay_ms?: number;
+  sync_on_time_pct?: number;
+  sync_late_p95_ms?: number;
 }
 
 const JITTER_S = 0.3;
@@ -24,12 +28,19 @@ const JITTER_S = 0.3;
 const CATCHUP_AFTER_S = 2;
 const CATCHUP_RATE = 1.1;
 const MAX_BACKLOG_S = 10;
+// Sync mode: a phrase carries the video time it was spoken at (`media_s`) and is held until the viewer's own
+// player reaches it. Anything further away than this is treated as a clock mix-up and played as it arrives.
+const MAX_SYNC_WAIT_S = 20;
 
 /**
  * Subscribes to /ws/watch/{sid}?lang=. Captions always; audio is decoded and scheduled back-to-back
  * with a 300 ms jitter buffer plus `offsetMs` (sync with the YouTube player) when `audioOn`.
  */
-export function useLiveFeed(sid: string, langCode: string, opts: { audioOn: boolean; offsetMs: number; onEvent?: (m: Record<string, unknown>) => void }) {
+export function useLiveFeed(
+  sid: string,
+  langCode: string,
+  opts: { audioOn: boolean; offsetMs: number; onEvent?: (m: Record<string, unknown>) => void; videoNow?: () => number | null },
+) {
   const [captions, setCaptions] = useState<Caption[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [session, setSession] = useState<LiveSession | null>(null);
@@ -37,6 +48,7 @@ export function useLiveFeed(sid: string, langCode: string, opts: { audioOn: bool
   const ctxRef = useRef<AudioContext | null>(null);
   const nextAt = useRef(0);
   const cur = useRef({ seq: -1, drop: false, rate: 1 });
+  const lastSync = useRef(0); // when the console last reported its video time
   const optsRef = useRef(opts);
   optsRef.current = opts;
 
@@ -82,8 +94,10 @@ export function useLiveFeed(sid: string, langCode: string, opts: { audioOn: bool
           if (m.stats) setStats(m.stats);
         } else if (m.type === "session") setSession(m);
         else if (m.type === "stats") setStats(m);
+        else if (m.type === "sync") lastSync.current = performance.now();
         else if (m.type === "caption") {
-          const delay = m.history ? 0 : Math.max(0, optsRef.current.offsetMs);
+          const wait = m.history ? null : untilVideo(m.media_s);
+          const delay = m.history ? 0 : wait != null ? Math.max(0, wait * 1000) : Math.max(0, optsRef.current.offsetMs);
           // Keep the last 12 captions per language (a global cap would starve the languages that arrive first).
           const add = () =>
             setCaptions((c) => {
@@ -95,18 +109,37 @@ export function useLiveFeed(sid: string, langCode: string, opts: { audioOn: bool
           if (delay) setTimeout(add, delay);
           else add();
         } else if (m.type === "audio" && m.pcm_b64 && optsRef.current.audioOn) {
-          schedule(m.pcm_b64, m.sample_rate, m.seq);
+          schedule(m.pcm_b64, m.sample_rate, m.seq, m.media_s);
         }
       };
     };
 
-    const schedule = (b64: string, rate: number, seq: number) => {
+    /** Seconds until the viewer's video reaches `mediaS` (plus the sync slider), or null when not in sync mode. */
+    const untilVideo = (mediaS: unknown): number | null => {
+      if (typeof mediaS !== "number" || performance.now() - lastSync.current > 5000) return null;
+      const v = optsRef.current.videoNow?.();
+      if (v == null) return null;
+      const wait = mediaS - v + optsRef.current.offsetMs / 1000;
+      return wait > MAX_SYNC_WAIT_S ? null : wait;
+    };
+
+    const schedule = (b64: string, rate: number, seq: number, mediaS?: number) => {
       const ctx = ctxRef.current;
       if (!ctx || ctx.state !== "running") return;
+      let due: number | null = null;
       if (seq !== cur.current.seq) {
         // Decide once per chunk, so a sentence is never cut or sped up halfway.
         const backlog = Math.max(0, nextAt.current - ctx.currentTime);
-        cur.current = { seq, drop: backlog > MAX_BACKLOG_S, rate: backlog > CATCHUP_AFTER_S ? CATCHUP_RATE : 1 };
+        const wait = untilVideo(mediaS);
+        if (wait != null) {
+          // In step with the video: the server already fits each phrase to its moment, so no catch-up here.
+          due = ctx.currentTime + wait;
+          // For checking sync: how long before (or, negative, after) its video moment each phrase arrived.
+          const w = window as unknown as { __bdDue?: { seq: number; wait: number }[] };
+          (w.__bdDue ??= []).push({ seq, wait: Math.round(wait * 1000) });
+          if (w.__bdDue.length > 200) w.__bdDue.shift();
+          cur.current = { seq, drop: false, rate: 1 };
+        } else cur.current = { seq, drop: backlog > MAX_BACKLOG_S, rate: backlog > CATCHUP_AFTER_S ? CATCHUP_RATE : 1 };
       }
       if (cur.current.drop) return;
       const bin = atob(b64);
@@ -121,7 +154,8 @@ export function useLiveFeed(sid: string, langCode: string, opts: { audioOn: bool
         ch[i] = v / 0x8000;
       }
       const earliest = ctx.currentTime + JITTER_S + Math.max(0, optsRef.current.offsetMs) / 1000;
-      const at = nextAt.current > ctx.currentTime ? Math.max(nextAt.current, ctx.currentTime + 0.02) : earliest;
+      const queued = nextAt.current > ctx.currentTime ? Math.max(nextAt.current, ctx.currentTime + 0.02) : null;
+      const at = due != null ? Math.max(due, queued ?? ctx.currentTime + 0.05) : queued ?? earliest;
       const src = ctx.createBufferSource();
       src.buffer = buf;
       src.connect(outRef.current ?? ctx.destination);

@@ -400,6 +400,27 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
   and a wrong port leaves the A/B player without video.
 - Live console can take its sound from a browser tab (`getDisplayMedia`, tab only; window/screen share is refused because it
   carries the dub back in and loops). The YouTube link is only an embed: the browser cannot read a cross-origin player's audio.
+- [x] **Live sync mode** (2026-11-14 afternoon, `live_sync`). The `/live` console embeds the session's YouTube video; with
+  "Sound from: the video on this page" it captures its own tab and sends the player's time on the ingest socket
+  (`{"type":"media","t":<s>,"playing":bool}`, read over postMessage `infoDelivery`, `web/lib/youtubeClock.ts`). The pipeline then
+  tags every caption and audio message with `media_s` (the video time the phrase was spoken at) and broadcasts
+  `{"type":"sync","media_s","delay_ms"}`. `/watch` holds its own player `delay_ms` behind the console's (pause to wait, seek when
+  far off) and starts each phrase when its player reaches `media_s`; if the viewer's video is not playing the dub plays as it
+  arrives. All fields are additive; with mic or another-tab sound nothing changes.
+  The delay starts at 6 s (8.5 s with a copied voice) and grows by what the dub needs when audio keeps arriving after its
+  moment (`live_sync_adapt`, limit 15 s). Measured on the dense 24.9 s reel, stock voice, Tamil, 3 loops: in a fast spell of the
+  APIs delay 8 s, dub behind its video moment p50 0.3 s / p95 1.9 s, 1 of 39 phrases skipped; in a slow spell delay 10 s,
+  p50 0.6 s / p95 2.8 s. Viewer page in Edge: 15 of 18 phrases arrived before their moment, video held within 0.2-2.6 s of target.
+  Not measured: a live YouTube broadcast (only uploaded videos), a phone, a person at a microphone.
+- [x] **Gnani speed varies through the day** (2026-11-14): stock TTS for a 7-word Tamil phrase took 0.9 s in one hour and
+  2.5 s (first chunk 1.2-1.5 s) in another; a call costs about 1.3 s plus 0.25 s per second of audio, so short phrases are the
+  expensive ones. Gemini went from 0.8 s to 1.2-2.3 s a phrase in the same hours.
+- [x] **Copied voice cannot keep up with dense speech** at one Gnani request at a time: in sync mode with the voice learned
+  from the stream only 5 of 21 spoken phrases were in the copied voice and the delay grew to 14.5 s. The copied voice is used
+  when there is at least `live_sync_clone_spare_ms` before the audio is needed, else stock.
+- `live_brief`: while a language's dub is behind (0.5 s), the live prompt asks for a condensed translation (main point, about
+  60% of the words). Without sync mode this cut heard p95 from 5.8 s to 4.6 s (p50 3.4 s unchanged) and speed-ups from 21 to 12
+  phrases of about 26, one run each. `live_warmup` makes one tiny translation and voice call when a session starts.
 - [x] Demucs htdemucs on CPU: **40.3 s for 60 s of audio** (Ryzen 7 7435HS, torch 2.15 CPU, measured 2026-11-13). Silero VAD: 3.5 s for a 14 s clip including model load.
 
 ## 18. Implementation notes (M2)

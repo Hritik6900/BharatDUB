@@ -1,5 +1,5 @@
 "use client";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { Headphones, MessagesSquare, Send, SlidersHorizontal, Tag, Volume2 } from "lucide-react";
 import { DelayBadge } from "@/components/ui/DelayBadge";
@@ -8,6 +8,7 @@ import { Wordmark } from "@/components/layout/Logo";
 import { VoiceBars } from "@/components/voice/VoiceBars";
 import { VoiceOrb } from "@/components/voice/VoiceOrb";
 import { useLiveFeed } from "@/lib/useLiveFeed";
+import { useYouTubeClock } from "@/lib/youtubeClock";
 import { useLocalNumber } from "@/lib/hooks";
 import { lang } from "@/lib/langs";
 
@@ -29,8 +30,70 @@ function Watch() {
   const [offsetTouched, setOffsetTouched] = useState(false);
   const iframe = useRef<HTMLIFrameElement>(null);
   const subscribe = demo ? "*" : choice === "src" ? "src" : choice;
-  const feed = useLiveFeed(id, subscribe || "src", { audioOn: listening && choice !== "src" && !demo, offsetMs: offset });
+  // Sync mode: the console reports its video time; this page holds its own player `delay_ms` behind it and
+  // every dubbed phrase waits for the video moment it belongs to.
+  const sync = useRef<{ media: number; at: number; playing: boolean; delay: number } | null>(null);
+  const [syncDelay, setSyncDelay] = useState(0);
+  const hold = useRef(false); // this page paused the video so the dub can catch up
+  const [hasVideo, setHasVideo] = useState(false);
+  const clock = useYouTubeClock(iframe, hasVideo);
+  const onEvent = useCallback((m: Record<string, unknown>) => {
+    if (m.type !== "sync") return;
+    sync.current = { media: Number(m.media_s), at: performance.now(), playing: Boolean(m.playing), delay: Number(m.delay_ms) };
+    setSyncDelay(Number(m.delay_ms));
+  }, []);
+  // While the video is held, it will resume from where the console's time less the delay says, so that is the
+  // time phrases are scheduled against.
+  const videoNow = useCallback(() => {
+    const v = clock.now();
+    const c = sync.current;
+    // A video that is stuck (buffering, or paused by the viewer) must not hold the dub back: without a
+    // running picture to match, phrases play as they arrive.
+    if (v == null || !c || (!hold.current && !clock.playing())) return null;
+    if (!hold.current) return v;
+    return Math.min(v, c.media + (performance.now() - c.at) / 1000 - c.delay / 1000);
+  }, [clock.now]); // eslint-disable-line react-hooks/exhaustive-deps
+  const feed = useLiveFeed(id, subscribe || "src", { audioOn: listening && choice !== "src" && !demo, offsetMs: offset, onEvent, videoNow });
   const s = feed.session;
+  useEffect(() => setHasVideo(Boolean(s?.youtube_video_id)), [s?.youtube_video_id]);
+  useEffect(() => {
+    if (!hasVideo) return;
+    let lastSeek = 0;
+    const id = setInterval(() => {
+      const c = sync.current;
+      const age = c ? performance.now() - c.at : Infinity;
+      if (!c || age > 5000) {
+        if (c) {
+          sync.current = null;
+          setSyncDelay(0);
+        }
+        return;
+      }
+      const v = clock.now();
+      if (v == null || !c.playing) return;
+      // Where this player should be: the console's video time, less the delay the dub needs.
+      const ahead = v - (c.media + age / 1000 - c.delay / 1000);
+      // For checking sync from the browser console or a test: where the video is against where it should be.
+      (window as unknown as { __bdSync?: unknown }).__bdSync = { v, ahead, hold: hold.current, delay: c.delay, playing: clock.playing() };
+      if (hold.current) {
+        if (ahead <= 0.15) {
+          hold.current = false;
+          clock.cmd("playVideo");
+        }
+      } else if ((ahead > 6 || ahead < -3) && performance.now() - lastSeek > 3000) {
+        // Far off (just joined, or the streamer jumped in the video): go there.
+        lastSeek = performance.now();
+        clock.cmd("seekTo", [Math.max(0, v - ahead - 0.4), true]);
+      } else if (ahead > 0.8 && ahead <= 6) {
+        // A little ahead (the stream has only just begun, or the delay grew): wait for the dub to catch up.
+        hold.current = true;
+        clock.cmd("pauseVideo");
+      } else if (!clock.playing()) clock.cmd("playVideo");
+      // Within those limits nothing is touched: the dub follows this player's real time, so the delay only
+      // has to be roughly right.
+    }, 500);
+    return () => clearInterval(id);
+  }, [hasVideo, clock.now, clock.playing, clock.cmd]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (s && !choice) setChoice(s.target_langs[0] ?? "src");
@@ -65,7 +128,7 @@ function Watch() {
               LIVE
             </span>
           )}
-          <DelayBadge ms={feed.stats?.heard_p50_ms ?? feed.stats?.p50_ms} />
+          {syncDelay ? <DelayBadge ms={syncDelay} label="In step with the video, behind live by" /> : <DelayBadge ms={feed.stats?.heard_p50_ms ?? feed.stats?.p50_ms} />}
         </div>
       </header>
       <main className="relative mx-auto max-w-3xl px-4 pb-16">

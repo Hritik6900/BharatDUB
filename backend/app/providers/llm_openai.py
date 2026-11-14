@@ -77,7 +77,9 @@ class OpenAILLM:
         # Fallback: per-line calls (same order).
         return list(await asyncio.gather(*(self.translate_chunk(line, target, glossary, []) for line in lines)))
 
-    async def translate_chunk(self, text: str, target: str, glossary: list[str], context: list[str]) -> str:
+    async def translate_chunk(self, text: str, target: str, glossary: list[str], context: list[str],
+                              brief: bool = False) -> str:
+        """`brief`: the dub is behind the speaker, so condense like an interpreter would (main point only)."""
         lang = LANG_NAMES.get(target, target)
         system = (
             f"You are a live interpreter for an Indian streamer. Translate the CURRENT line into natural spoken {lang}, "
@@ -95,6 +97,9 @@ class OpenAILLM:
         user += f"CURRENT: {text}"
         system += (f" CURRENT has {len(text.split())} words: your {lang} must not take longer to say than that, "
                    "so prefer the shortest natural wording and do not add address words like bro.")
+        if brief:
+            system += (" The dub is running behind the speaker, so condense: say only the main point, in at most "
+                       f"{max(3, round(len(text.split()) * 0.6))} words, and leave out everything else.")
         fast = bool(self.s.llm_model_fast) and self.s.llm_model_fast != self.s.llm_model
         out = clean_line(await self._chat(system, user, model=self.s.llm_fast, max_tokens=400, timeout=20.0,
                                           effort=(self.s.llm_reasoning_effort_fast or None) if fast else None))

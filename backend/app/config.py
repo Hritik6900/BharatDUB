@@ -72,6 +72,19 @@ class Settings(BaseSettings):
     live_fit_after_ms: int = 600       # ... once more than this much audio is still waiting to be played
     live_fit_max_tempo: float = 1.3    # ... by at most this factor
     live_tts_speed: float = 1.15       # stock voices speak a little faster in Live so the dub keeps pace
+    live_brief: bool = True            # while a language's dub is running behind, ask for a condensed translation
+    live_brief_after_ms: int = 500     # ... once it is this far behind
+    # Sync mode: when the console reports the time of the video it feeds from, every phrase is dubbed for the
+    # moment it was spoken and viewers hold their video this far behind, so picture and dub play together.
+    live_sync: bool = True
+    live_sync_delay_ms: int = 6000        # how far behind viewers hold the video to begin with (stock voices)
+    live_sync_delay_clone_ms: int = 8500  # ... when the session uses a copied voice (a cloned line takes 2-3.5 s)
+    live_sync_adapt: bool = True          # grow the delay by what the dub really needs when phrases keep coming late
+    live_sync_delay_max_ms: int = 15000   # ... up to this
+    live_warmup: bool = True              # one tiny translation when a session starts, so the first phrase is not slow
+    live_sync_slack_ms: int = 400         # a dubbed phrase may run this much longer than the speech before it is sped up
+    live_sync_clone_spare_ms: int = 2000  # the copied voice is used when at least this long is left before the audio is needed
+    live_sync_late_skip_ms: int = 4000    # a phrase that would start this long after its moment is not spoken
     mock_providers: bool = False       # simulate Gnani + LLM for UI work without keys (UI shows a banner)
 
     data_dir: str = ""                 # local working files + cache; default backend/data

@@ -247,8 +247,59 @@ async def test_phrases_waiting_behind_the_voice_are_spoken_in_one_call(tmp_path,
                 with_audio.add(m["seq"])
     await p.stop()
     assert ended == {1, 2, 3, 4}            # every phrase is closed for the viewer
-    assert len(calls) < 4                    # ... with fewer voice calls than phrases
+    assert len([c for c in calls if c != "ok"]) < 4   # ... with fewer voice calls than phrases ("ok" = warm-up)
     rows = {r["seq"]: r["timings"] for r in await store.select("live_chunks", session_id="m1")}
     merged = [seq for seq, t in rows.items() if "merged:ta-IN" in t]
     assert merged and all(rows[s]["merged:ta-IN"] in with_audio for s in merged)
     assert all("t_first_audio:ta-IN" in t and "t_heard:ta-IN" in t for t in rows.values())
+
+
+async def test_sync_mode_tags_phrases_with_video_time_and_measures_lateness(tmp_path, monkeypatch):
+    """Once the console reports the video's time, captions and audio carry the video moment they belong to,
+    the delay is published for viewers, and how late each phrase started is recorded."""
+    store = LocalStore(tmp_path / "db.json")
+    monkeypatch.setattr("app.live.pipeline.get_store", lambda: store)
+    sess = LiveSession({"id": "y1", "target_langs": ["ta-IN"], "src_lang": "hi-IN"})
+    p = LivePipeline(sess, stt=SilentSTT(), llm=MockLLM(), tts=MockTTS())
+    ta = sess.bus.subscribe("ta-IN")
+    await p.start()
+    assert p.sync_delay() == 0 and "media_s" not in p._media_tag(0)   # nothing reported: the old behaviour
+    p.set_media(100.0, True)
+    assert p.sync_delay() == p.s.live_sync_delay_ms
+    assert abs(p._media_at(sess.now_ms() + 2000) - 102.0) < 0.2         # carried forward while the video plays
+    now = sess.now_ms()
+    p._dispatch(p.assembler.make("line one", t_start_ms=now, t_end_ms=now + 10, t_final_ms=now + 10))
+    msgs: list[dict] = []
+    while not any(m["type"] == "audio" and m["last"] for m in msgs):
+        msgs.append(await asyncio.wait_for(ta.get(), 10))
+    await p.stop()
+    sync = next(m for m in msgs if m["type"] == "sync")
+    assert sync["delay_ms"] == p.s.live_sync_delay_ms and sync["media_s"] == 100.0
+    cap = next(m for m in msgs if m["type"] == "caption")
+    aud = next(m for m in msgs if m["type"] == "audio" and m["pcm_b64"])
+    assert abs(cap["media_s"] - 100.0) < 0.5 and aud["media_s"] == cap["media_s"]
+    t = (await store.select("live_chunks", session_id="y1"))[0]["timings"]
+    assert t["late:ta-IN"] == 0                                         # ready long before its moment
+    assert t["t_heard:ta-IN"] == now + p.s.live_sync_delay_ms           # heard exactly then
+    assert p.stats()["sync_on_time_pct"] == 100.0
+
+
+async def test_sync_delay_grows_only_when_audio_keeps_coming_late(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.live.pipeline.get_store", lambda: LocalStore(tmp_path / "db.json"))
+    sess = LiveSession({"id": "y2", "target_langs": ["ta-IN"], "src_lang": "hi-IN"})
+    p = LivePipeline(sess, stt=SilentSTT(), llm=MockLLM(), tts=MockTTS())
+    p.running = True
+    p.set_media(5.0, True)
+    base = p.sync_delay()
+    for late in (0, 900, 100):
+        p._note_late(late)
+    assert p.sync_delay() == base                    # one late phrase is not a pattern
+    for late in (1200, 1300):
+        p._note_late(late)
+    assert p.sync_delay() == base + 1500             # three of the last six: hold viewers back by about that much
+    for _ in range(40):
+        for late in (2900, 2900, 2900):
+            p._note_late(late)
+    assert p.sync_delay() == p.s.live_sync_delay_max_ms   # never beyond the limit
+    p._media.clear()
+    assert p.sync_delay() == 0                       # the console stopped reporting: back to the old behaviour

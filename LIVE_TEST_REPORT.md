@@ -70,6 +70,37 @@ audio piled up in the player and viewers heard it later, not sooner.
 Every one of these has a switch in `backend/app/config.py` (`LIVE_PARTIALS`, `LIVE_FIT`, `LIVE_TRIM_SILENCE`,
 `LIVE_MERGE_MAX`, `LIVE_TTS_ONLY_HEARD`, `LLM_MODEL_FAST`), so any of them can be turned off without touching code.
 
+## Sync mode: picture and dub together (14 Nov, afternoon)
+
+The viewer no longer has to hear the dub a few seconds after the picture. When the console plays the stream's video
+itself (Sound from: the video on this page), it reports the video's time. Each dubbed phrase is tied to the video
+moment it was spoken at, and the viewer page holds its own player a few seconds behind, so a phrase is heard while
+the picture shows the speaker saying it. The delay starts at 6 s and grows by itself to what the dub needs.
+
+Same reel, Tamil, stock voice, three loops (82 s), real APIs. "Behind" is how long after its video moment a phrase
+started; 0 means exactly on it.
+
+| Run | Delay viewers were held at | Behind p50 / p95 / worst | Skipped |
+|---|---|---|---|
+| APIs fast | 8 s | 0.3 s / 1.9 s / 2.2 s | 1 of 39 |
+| APIs slow (voice calls 2.5 to 4 s) | 10 s | 0.6 s / 2.8 s / 3.9 s | 0 of 38 |
+| Voice learned from the stream, APIs slow | 14.5 s | 1.2 s / 2.6 s / 3.2 s | 0 of 38 |
+
+- In a real browser (Edge) the viewer's video stayed 0.1 to 2.6 s behind its target and 15 of 18 phrases arrived
+  before their moment. The console capturing its own tab was checked in a visible Edge window: 11 lines heard in 36 s.
+- What is behind is the dub's length, not its making: this speaker never pauses, and Tamil at 1.3x speed is still as
+  long as the Hindi. While a language is behind, the translator is asked for a shorter version of the next phrase.
+- **The copied voice does not keep up here:** 5 of 21 spoken phrases were in the copied voice. A cloned line takes
+  2 to 3.5 s to make and only one can be made at a time.
+- **Gnani and Gemini were slower in the afternoon** than at night: a short Tamil phrase took 2.5 s to voice instead of
+  0.9 s, translation 1.2 to 2.3 s instead of 0.8 s. The delay grows to cover it; the numbers above move with it.
+- Not tested: a real live YouTube broadcast (only uploaded videos), a phone, a person at a microphone.
+- Without sync mode (mic, or another tab) nothing changed in how the dub is played. With the shorter translations the
+  same single-viewer run gave heard p50 3.4 s / p95 4.6 s (it was 3.4 s / 5.8 s); three phrases at the very start
+  were skipped after the first translation took 4.4 s.
+
+Switches: `LIVE_SYNC`, `LIVE_SYNC_DELAY_MS`, `LIVE_SYNC_ADAPT`, `LIVE_BRIEF`, `LIVE_WARMUP`.
+
 ## Limits that code does not remove
 
 - **One Gnani request at a time.** With viewers on three languages, first audio is about 3.5 to 3.8 s instead of 2.7 s,

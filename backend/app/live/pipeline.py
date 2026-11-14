@@ -26,6 +26,7 @@ ENROL_SPEECH_S = 12.0   # speech collected from the stream before the voice is c
 ENROL_MIN_RMS = 300     # PCM16 units; frames quieter than this are pauses, not voice
 LIVE_FRAME_BYTES = 9600  # audio message size on the watch socket: 0.2 s at 24 kHz
 PLAYER_JITTER_MS = 300   # the web player starts an idle queue this long after the first audio arrives
+SYNC_ARRIVE_MS = 100     # sync mode: audio that arrives after its moment starts this soon
 MAX_QUEUED_AUDIO = 400  # ~13 s of 1024-byte frames; beyond that we drop (the streamer's network is ahead)
 
 
@@ -56,6 +57,14 @@ class LivePipeline:
         self.glossary: list[str] = list(DEFAULT_GLOSSARY)
         self.voice: VoiceSpec | None = None
         self.clone_langs = sess.langs[: self.s.live_clone_langs or self.s.gnani_max_concurrency]
+        # Sync mode: (session ms, video time in s, playing) reported by the console, newest last.
+        self._media: deque[tuple[int, float, bool]] = deque(maxlen=1200)
+        self._sync_delay = 0
+        self._late: dict[str, deque[int]] = {}  # per language: how long after its moment each phrase started
+        self._late_recent: deque[int] = deque(maxlen=6)
+        self._lag: dict[str, int] = {}     # per language: how far behind the dub was at the last phrase (sync mode)
+        self._starts: dict[int, int] = {}  # seq -> when that phrase began (to know how long the one before may run)
+        self.sync_grown: list[tuple[int, int]] = []  # (session ms, new delay) each time the delay grew
 
     # ---------- lifecycle ----------
     async def start(self) -> None:
@@ -69,6 +78,8 @@ class LivePipeline:
         if self.voice is None and consent.get("consent_at"):
             self._enrol = []
         self.tasks = [asyncio.create_task(self._stt_loop()), asyncio.create_task(self._poll_loop())]
+        if self.s.live_warmup and self.sess.langs:
+            self.tasks.append(asyncio.create_task(self._warmup()))
         self.tasks += [asyncio.create_task(self._worker(lg)) for lg in self.sess.langs]
 
     async def stop(self) -> None:
@@ -86,11 +97,83 @@ class LivePipeline:
         for t in pending:
             t.cancel()
 
+    async def _warmup(self) -> None:
+        """Open the connections to the translation model and the voice before the first phrase needs them
+        (measured 2026-11-14: the first voice call of a session took 1.9 s, later ones 0.4 s)."""
+        lang = self.sess.langs[0]
+
+        async def voice() -> None:
+            stock: VoiceSpec = {"kind": "stock", "voice": VOICE_BY_LANG.get(lang, VOICE_BY_LANG["hi-IN"])}
+            async for _ in self.tts.synth_stream("ok", lang, stock, sample_rate=self.s.live_sample_rate):
+                pass
+
+        for job in (self.llm.translate_chunk("नमस्ते", lang, [], []), voice()):
+            try:
+                await asyncio.wait_for(job, TRANSLATE_TIMEOUT_S)
+            except Exception:  # noqa: BLE001 - only a warm-up
+                pass
+
     def feed(self, pcm: bytes) -> None:
         if self.running and self.audio.qsize() < MAX_QUEUED_AUDIO:
             self.audio.put_nowait(pcm)
         if self._enrol is not None and self._speaking and self.running:
             self._collect(pcm)
+
+    # ---------- sync with the video ----------
+    def set_media(self, media_s: float, playing: bool) -> None:
+        """The console reports the current time of the video whose sound it is feeding.
+
+        From then on a phrase is dubbed for the video moment it was spoken at, and viewers hold their own player
+        `delay_ms` behind the console's, which gives translation and voice that long to be ready.
+        """
+        if not self.s.live_sync or not self.running or media_s < 0:
+            return
+        now = self.sess.now_ms()
+        self._media.append((now, media_s, playing))
+        if not self._sync_delay:
+            cloned = self.voice is not None or self._enrol is not None
+            self._sync_delay = self.s.live_sync_delay_clone_ms if cloned else self.s.live_sync_delay_ms
+        self.sess.bus.broadcast({"type": "sync", "t_ms": now, "media_s": round(media_s, 3), "playing": playing,
+                                 "delay_ms": self._sync_delay})
+
+    def _note_late(self, late_ms: int) -> None:
+        """Hold viewers back by what the dub really needs: when phrases keep starting after their moment, the
+        delay grows by about that much (their video waits that long, once) instead of the dub staying behind."""
+        self._late_recent.append(late_ms)
+        late = sorted(v for v in self._late_recent if v > 400)
+        if not self.s.live_sync_adapt or len(late) < 3 or self._sync_delay >= self.s.live_sync_delay_max_ms:
+            return
+        step = min(3000, (late[len(late) // 2] // 500 + 1) * 500)
+        self._sync_delay = min(self.s.live_sync_delay_max_ms, self._sync_delay + step)
+        self._late_recent.clear()
+        self.sync_grown.append((self.sess.now_ms(), self._sync_delay))
+
+    def sync_delay(self) -> int:
+        """The delay viewers hold their video at, or 0 when the console is not reporting video time (any more)."""
+        if not self._media or self.sess.now_ms() - self._media[-1][0] > 5000:
+            return 0
+        return self._sync_delay
+
+    def _media_at(self, t_ms: int) -> float:
+        """Video time at session time `t_ms`, from the nearest report at or before it."""
+        best = self._media[0]
+        for p in reversed(self._media):
+            if p[0] <= t_ms:
+                best = p
+                break
+        t, media_s, playing = best
+        return round(max(0.0, media_s + ((t_ms - t) / 1000 if playing else 0.0)), 3)
+
+    def _media_tag(self, t_ms: int) -> dict[str, float]:
+        return {"media_s": self._media_at(t_ms)} if self.sync_delay() else {}
+
+    def sync_stats(self) -> dict[str, Any]:
+        late = [v for d in self._late.values() for v in d][-300:]
+        if not self._sync_delay or not late:
+            return {}
+        return {"sync_delay_ms": self._sync_delay, "sync_n": len(late), "sync_grown": len(self.sync_grown),
+                "sync_on_time_pct": round(100 * sum(v <= 250 for v in late) / len(late), 1),
+                "sync_late_p95_ms": int(percentile(late, 95) or 0)}
 
     # ---------- voice from the stream ----------
     def _collect(self, pcm: bytes) -> None:
@@ -254,12 +337,14 @@ class LivePipeline:
         ctx = list(self.context)
         self.context.append(chunk.text)
         self.sess.chunk_count += 1
+        self._starts[chunk.seq] = chunk.t_speech_ms
+        self._starts.pop(chunk.seq - 200, None)
         self._pending[chunk.seq] = {"left": len(self.sess.langs), "src_text": chunk.text,
                                     "t_speech_ms": chunk.t_speech_ms,
                                     "timings": {"t_speech_end": chunk.t_speech_end_ms,
                                                 "t_stt_final": chunk.t_stt_final_ms}}
         self.sess.bus.publish("src", {"type": "caption", "seq": chunk.seq, "lang": "src", "text": chunk.text,
-                                      "t_speech_ms": chunk.t_speech_ms})
+                                      "t_speech_ms": chunk.t_speech_ms, **self._media_tag(chunk.t_speech_ms)})
         for lang, q in self.queues.items():
             # Translation starts now for every language (the LLM is not rate-limited like Gnani); only the
             # speaking is queued. A slow voice therefore never holds back the next caption's translation.
@@ -273,7 +358,13 @@ class LivePipeline:
         """Translate one chunk and publish its caption (captions stay in order per language)."""
         bus = self.sess.bus
         try:
-            text = await asyncio.wait_for(self.llm.translate_chunk(chunk.text, lang, self.glossary, ctx),
+            # While this language's dub is behind, a condensed translation lets it catch up (an interpreter does
+            # the same). Decided now, because translation starts before the phrase's turn to be spoken.
+            behind = self._lag.get(lang, 0) if self.sync_delay() else self._playhead.get(lang, 0) - self.sess.now_ms()
+            kw = {"brief": True} if self.s.live_brief and behind > self.s.live_brief_after_ms else {}
+            if kw and chunk.seq in self._pending:
+                self._pending[chunk.seq]["timings"][f"brief:{lang}"] = 1
+            text = await asyncio.wait_for(self.llm.translate_chunk(chunk.text, lang, self.glossary, ctx, **kw),
                                           TRANSLATE_TIMEOUT_S)
             untranslated = False
         except (ProviderError, TimeoutError) as e:
@@ -285,7 +376,8 @@ class LivePipeline:
         if prev is not None and not prev.done():
             await asyncio.wait({prev})
         bus.publish(lang, {"type": "caption", "seq": chunk.seq, "lang": lang, "text": text,
-                           "t_speech_ms": chunk.t_speech_ms, "untranslated": untranslated})
+                           "t_speech_ms": chunk.t_speech_ms, "untranslated": untranslated,
+                           **self._media_tag(chunk.t_speech_ms)})
         return text, untranslated
 
     async def _worker(self, lang: str) -> None:
@@ -352,17 +444,30 @@ class LivePipeline:
         now = self.sess.now_ms()
         waiting = max(0, self._playhead.get(lang, 0) - now)
         lag_ms = now + waiting - chunk.t_speech_end_ms
+        # Sync mode: a viewer's video shows this phrase being spoken at `target` (session clock); the dub is due then.
+        delay = self.sync_delay()
+        target = chunk.t_speech_ms + delay if delay else None
+        tag = self._media_tag(chunk.t_speech_ms)
+        spare = target - now - waiting if target is not None else 0   # time left before it is due
         # With one Gnani request at a time, every line spoken delays the next one. Audio nobody is tuned to,
         # or that would be heard too late to feel live, is not made; its caption has already gone out.
         unheard = self.s.live_tts_only_heard and not bus.listeners(lang)
-        if unheard or lag_ms > self.s.live_skip_after_ms:
+        too_late = -spare > self.s.live_sync_late_skip_ms if target is not None else lag_ms > self.s.live_skip_after_ms
+        if unheard or too_late:
             for t in [timings, *[t for _, t in rest]]:
                 t[f"skipped:{lang}"] = "unheard" if unheard else "late"
             end_of_audio()
             return
-        voice = self._voice_for(lang, lag_ms)
+        if target is not None:
+            # The audio is not needed before its moment, nor before the viewer has played what is queued: if
+            # that leaves time to make a cloned line, use the copied voice.
+            room = max(target - now, waiting)
+            voice = self._voice_for(lang, 0 if room >= self.s.live_sync_clone_spare_ms else 10**9)
+        else:
+            voice = self._voice_for(lang, lag_ms)
         timings[f"clone:{lang}"] = int(voice["kind"] == "clone")
-        fit = self.s.live_fit and waiting > self.s.live_fit_after_ms
+        # In sync mode the phrase is due in the future, so holding it back to fit it costs nothing.
+        fit = self.s.live_fit and (target is not None or waiting > self.s.live_fit_after_ms)
         sent = 0   # bytes published
         lead = True
         held = b""  # audio kept back: the tail (to cut the silence after the last word), or all of it when fitting
@@ -384,7 +489,8 @@ class LivePipeline:
             sent += len(pcm)
             for k in range(0, len(pcm), LIVE_FRAME_BYTES):
                 bus.publish(lang, {"type": "audio", "seq": chunk.seq, "lang": lang, "sample_rate": sr,
-                                   "pcm_b64": base64.b64encode(pcm[k:k + LIVE_FRAME_BYTES]).decode(), "last": False})
+                                   "pcm_b64": base64.b64encode(pcm[k:k + LIVE_FRAME_BYTES]).decode(), "last": False,
+                                   "t_speech_ms": chunk.t_speech_ms, **tag})
 
         async def stream() -> None:
             nonlocal lead, held, carry
@@ -413,7 +519,18 @@ class LivePipeline:
             # shortened (tempo only, pitch kept) by as much as it takes to catch up, within a limit.
             dur_ms = len(held) / 2 / sr * 1000
             still = max(0, self._playhead.get(lang, 0) - self.sess.now_ms())  # the backlog now, not when we began
-            tempo = min(self.s.live_fit_max_tempo, 1 + still / max(dur_ms, 500))
+            if target is not None:
+                # It will start at `begin`. If the next phrase is known, end before that one is due; in any case
+                # make up for whatever it is already late by.
+                begin = max(self.sess.now_ms() + still, target)
+                tempo = 1 + (begin - target) / max(dur_ms, 500)
+                nxt = self._starts.get((rest[-1][0] if rest else chunk).seq + 1)
+                if nxt is not None:
+                    room = nxt + delay + self.s.live_sync_slack_ms - begin
+                    tempo = max(tempo, dur_ms / max(room, 1))
+                tempo = min(self.s.live_fit_max_tempo, tempo)
+            else:
+                tempo = min(self.s.live_fit_max_tempo, 1 + still / max(dur_ms, 500))
             if tempo > 1.03:
                 try:
                     held = await asyncio.to_thread(au.tempo_pcm, held, sr, tempo)
@@ -424,6 +541,12 @@ class LivePipeline:
         if sent:
             # Same rule as the web player: back to back with what is queued, else a jitter buffer after arrival.
             start = max(self._playhead.get(lang, 0), timings[f"t_first_audio:{lang}"] + PLAYER_JITTER_MS)
+            if target is not None:  # the player holds it until the video reaches the phrase
+                start = max(self._playhead.get(lang, 0), timings[f"t_first_audio:{lang}"] + SYNC_ARRIVE_MS, target)
+                timings[f"late:{lang}"] = self._lag[lang] = start - target
+                self._late.setdefault(lang, deque(maxlen=500)).append(start - target)
+                # Only lateness in making the audio grows the delay; audio queued behind a long phrase does not.
+                self._note_late(timings[f"t_first_audio:{lang}"] + SYNC_ARRIVE_MS - target)
             self._playhead[lang] = start + int(sent / 2 / sr * 1000)
             for c, t in [(chunk, timings), *rest]:
                 t[f"t_heard:{lang}"] = start
@@ -455,4 +578,4 @@ class LivePipeline:
         h50, h95 = percentile(heard, 50), percentile(heard, 95)
         return {"p50_ms": int(p50) if p50 is not None else None, "p95_ms": int(p95) if p95 is not None else None,
                 "n": len(all_ms), "heard_p50_ms": int(h50) if h50 is not None else None,
-                "heard_p95_ms": int(h95) if h95 is not None else None}
+                "heard_p95_ms": int(h95) if h95 is not None else None, **self.sync_stats()}

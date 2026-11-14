@@ -17,18 +17,23 @@ export interface MicIngest {
   stop: () => void;
   ctx: AudioContext;
   source: MediaStreamAudioSourceNode;
+  /** A JSON note on the ingest socket (the console reports the video time this way). */
+  send: (msg: Record<string, unknown>) => void;
 }
 
-export type IngestSource = "mic" | "tab";
+/** `player`: the YouTube video embedded in the console itself (this tab), which also gives its time for sync. */
+export type IngestSource = "mic" | "tab" | "player";
 
 /** Sound of a browser tab (or the whole PC), untouched: the mic's echo canceller removes speaker sound, so a
  *  stream playing on this computer has to be captured this way. The video track is not needed and is dropped. */
-async function tabAudio(): Promise<MediaStream> {
+async function tabAudio(self = false): Promise<MediaStream> {
   const s = await navigator.mediaDevices.getDisplayMedia({
     video: { displaySurface: "browser" },
     monitorTypeSurfaces: "exclude",
     systemAudio: "exclude",
-    selfBrowserSurface: "exclude",
+    // `self`: capture this very tab (the console never plays the dub, so nothing loops).
+    selfBrowserSurface: self ? "include" : "exclude",
+    preferCurrentTab: self,
     // suppressLocalAudioPlayback: the shared tab goes silent on the speakers but is still captured,
     // so the streamer hears only the dub (Chromium; ignored elsewhere).
     audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, suppressLocalAudioPlayback: true } as MediaTrackConstraints,
@@ -54,10 +59,10 @@ export async function startMicIngest(
   from: IngestSource = "mic",
 ): Promise<MicIngest> {
   onStatus("connecting");
-  const stream = from === "tab" ? await tabAudio() : await navigator.mediaDevices.getUserMedia({
+  const stream = from !== "mic" ? await tabAudio(from === "player") : await navigator.mediaDevices.getUserMedia({
     audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
   });
-  stream.getAudioTracks()[0]?.addEventListener("ended", () => onStatus("closed", from === "tab" ? "Sharing stopped." : undefined));
+  stream.getAudioTracks()[0]?.addEventListener("ended", () => onStatus("closed", from !== "mic" ? "Sharing stopped." : undefined));
   const ctx = new AudioContext({ sampleRate: 16000 }); // browser resamples the mic for us
   const url = URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" }));
   await ctx.audioWorklet.addModule(url);
@@ -92,6 +97,9 @@ export async function startMicIngest(
   return {
     ctx,
     source,
+    send: (msg) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+    },
     stop: () => {
       tap.port.onmessage = null;
       ws.close();

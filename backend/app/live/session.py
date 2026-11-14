@@ -57,7 +57,8 @@ class LiveSession:
                 "status": r.get("status") or "idle", "created_at": r.get("created_at"),
                 "voice_profile_id": r.get("voice_profile_id"), "viewers": self.bus.viewer_count(),
                 "voice_from_stream": bool((r.get("voice_from_stream") or {}).get("consent_at")),
-                "clone_langs": list(self.pipeline.clone_langs) if self.pipeline else None}
+                "clone_langs": list(self.pipeline.clone_langs) if self.pipeline else None,
+                "sync_delay_ms": self.pipeline.sync_delay() if self.pipeline else 0}
 
 
 class SessionManager:

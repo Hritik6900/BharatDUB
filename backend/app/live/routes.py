@@ -142,7 +142,7 @@ async def session_metrics(sid: str) -> dict[str, Any]:
     heard = [x for d in s.heard.values() for x in d]
     return {"chunks": s.chunk_count, "p50_ms": percentile(all_ms, 50), "p95_ms": percentile(all_ms, 95),
             "n": len(all_ms), "heard_p50_ms": percentile(heard, 50), "heard_p95_ms": percentile(heard, 95),
-            "per_lang": per_lang}
+            "per_lang": per_lang, **(s.pipeline.sync_stats() if s.pipeline else {})}
 
 
 # ---------- WebSockets ----------
@@ -162,6 +162,12 @@ async def ws_ingest(ws: WebSocket, sid: str, token: str = Query("")) -> None:
                 break
             if msg.get("bytes") and s.pipeline:
                 s.pipeline.feed(msg["bytes"])
+            elif msg.get("text") and s.pipeline:
+                # The console says where the video it is feeding from is: {"type":"media","t":<s>,"playing":bool}
+                with contextlib.suppress(ValueError, TypeError):
+                    data = json.loads(msg["text"])
+                    if data.get("type") == "media":
+                        s.pipeline.set_media(float(data["t"]), bool(data.get("playing", True)))
     except WebSocketDisconnect:
         pass
 

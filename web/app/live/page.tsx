@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Captions, Check, Copy, ExternalLink, Headphones, MessagesSquare, Mic, MonitorPlay, Plus, Presentation, Radio, Square, Terminal, Timer, Users } from "lucide-react";
 import { Shell } from "@/components/layout/Shell";
 import { Button } from "@/components/ui/Button";
@@ -15,6 +15,7 @@ import { API_BASE, api, type LiveSession, type VoiceProfile } from "@/lib/api";
 import { startMicIngest, type IngestSource, type MicIngest } from "@/lib/micIngest";
 import { useAnalyser } from "@/lib/useMic";
 import { useLiveFeed } from "@/lib/useLiveFeed";
+import { useYouTubeClock } from "@/lib/youtubeClock";
 import { TARGET_LANGS, lang } from "@/lib/langs";
 
 const KEY = "bd-live-session";
@@ -205,6 +206,26 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
   const chat = useChat(sid, "hi-IN");
   const analyser = useAnalyser(mic?.source ?? null, mic?.ctx ?? null);
   const session = feed.session ?? info;
+  // The stream's video, played here: its sound is the source and its time is sent along, so viewers get
+  // picture and dub in step (their player is held a few seconds behind this one).
+  const player = useRef<HTMLIFrameElement>(null);
+  const ytId = session?.youtube_video_id ?? null;
+  const clock = useYouTubeClock(player, Boolean(ytId));
+  const picked = useRef(false);
+  useEffect(() => {
+    if (ytId && !picked.current) {
+      picked.current = true;
+      setFrom("player");
+    }
+  }, [ytId]);
+  useEffect(() => {
+    if (!mic || from !== "player") return;
+    const id = setInterval(() => {
+      const t = clock.now();
+      if (t != null) mic.send({ type: "media", t, playing: clock.playing() });
+    }, 500);
+    return () => clearInterval(id);
+  }, [mic, from, clock.now, clock.playing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     api<LiveSession>(`/api/live/sessions/${sid}`).then(setInfo).catch(() => onNew());
@@ -232,7 +253,7 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
       setMic(m);
     } catch (e) {
       setMicState("error");
-      setErrors((x) => [`${from === "tab" ? "Tab sound" : "Microphone"}: ${(e as Error).message}`, ...x].slice(0, 3));
+      setErrors((x) => [`${from === "mic" ? "Microphone" : "Tab sound"}: ${(e as Error).message}`, ...x].slice(0, 3));
     }
   };
   const stop = async () => {
@@ -290,6 +311,13 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
           </ul>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          {feed.stats?.sync_delay_ms ? (
+            <span className="inline-flex items-center gap-2 rounded-chip border border-line bg-surface px-3 py-1.5 text-sm">
+              <span className="text-muted">In step with the video</span>
+              <span className="tnum font-semibold">{feed.stats.sync_on_time_pct}% on time</span>
+              <span className="text-muted">viewers {(feed.stats.sync_delay_ms / 1000).toFixed(1)} s behind</span>
+            </span>
+          ) : null}
           <DelayBadge ms={feed.stats?.heard_p50_ms ?? feed.stats?.p50_ms} label="Median delay" />
           {feed.stats?.p95_ms != null && <span className="tnum font-mono text-xs text-muted">p95 {((feed.stats.heard_p95_ms ?? feed.stats.p95_ms) / 1000).toFixed(1)} s</span>}
           {isLive ? (
@@ -303,6 +331,7 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
               <span className="text-muted">Sound from</span>
               <select value={from} onChange={(e) => setFrom(e.target.value as IngestSource)} className="h-10 rounded-chip border border-line bg-surface px-3">
                 <option value="mic">My microphone</option>
+                {ytId && <option value="player">The video on this page (dub in step with it)</option>}
                 <option value="tab">A browser tab (stream playing on this PC)</option>
               </select>
             </label>
@@ -340,6 +369,23 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
 
       <div className="mt-8 grid grid-cols-1 gap-5 lg:grid-cols-[1fr_1fr_340px]">
         <section className="card flex flex-col p-5 sm:p-6 lg:self-start" aria-labelledby="src-h">
+          {ytId && (
+            <div className="mb-5">
+              <div className="relative aspect-video overflow-hidden rounded-panel bg-black">
+                <iframe
+                  ref={player}
+                  title="Stream video"
+                  className="absolute inset-0 size-full"
+                  src={`https://www.youtube-nocookie.com/embed/${ytId}?enablejsapi=1&playsinline=1`}
+                  allow="autoplay; encrypted-media; picture-in-picture"
+                  allowFullScreen
+                />
+              </div>
+              <p className="mt-2 text-xs text-muted">
+                Set Sound from to the video on this page, press Go live, allow this tab, then play the video. Viewers see it a few seconds later with the dub in step.
+              </p>
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <h2 id="src-h" className="eyebrow flex items-center gap-2"><Mic aria-hidden className="size-3.5" />You said</h2>
             <span className="text-sm text-muted">{isLive ? (speaking ? "Hearing you" : "Listening") : "Mic off"}</span>
