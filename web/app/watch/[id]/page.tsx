@@ -59,9 +59,18 @@ function Watch() {
     if (!hold.current) return v;
     return Math.min(v, c.media + (performance.now() - c.at) / 1000 - c.delay / 1000);
   }, [clock.now]); // eslint-disable-line react-hooks/exhaustive-deps
-  const feed = useLiveFeed(id, subscribe || "src", { audioOn: listening && choice !== "src" && !demo, offsetMs: offset, onEvent, videoNow });
+  // A streamer's own stream: the dub is timed to YouTube's delay (`offset`), not played as it arrives.
+  const [mine, setMine] = useState(false);
+  const feed = useLiveFeed(id, subscribe || "src", {
+    audioOn: listening && choice !== "src" && !demo,
+    offsetMs: mine ? 0 : offset,
+    onEvent,
+    videoNow,
+    speechOffsetMs: mine ? offset : null,
+  });
   const s = feed.session;
   useEffect(() => setHasVideo(Boolean(s?.youtube_video_id)), [s?.youtube_video_id]);
+  useEffect(() => setMine(Boolean(s?.streamer_id)), [s?.streamer_id]);
   useEffect(() => {
     if (!hasVideo) return;
     let lastSeek = 0;
@@ -105,7 +114,8 @@ function Watch() {
 
   useEffect(() => {
     if (s && !choice) setChoice(s.target_langs[0] ?? "src");
-    if (s && !offsetTouched && s.offset_ms && offset === 0) setOffset(s.offset_ms);
+    // A streamer sets how long YouTube runs behind them; a viewer who has not moved the slider follows it.
+    if (s && !offsetTouched && s.offset_ms && (offset === 0 || s.streamer_id) && offset !== s.offset_ms) setOffset(s.offset_ms);
   }, [s]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const yt = (cmd: "mute" | "unMute") =>
@@ -230,8 +240,8 @@ function Watch() {
             </span>
             <input
               type="range"
-              min={-5000}
-              max={10000}
+              min={mine ? 0 : -5000}
+              max={mine ? 40000 : 10000}
               step={250}
               value={offset}
               onChange={(e) => {
@@ -241,7 +251,7 @@ function Watch() {
               className="mt-3 w-full"
               aria-describedby="sync-hint"
             />
-            <span id="sync-hint" className="mt-1 block text-xs text-muted">If the dub runs ahead of the video, move right to delay it. Values below 0 cannot play earlier than the dub arrives.</span>
+            <span id="sync-hint" className="mt-1 block text-xs text-muted">{mine ? "How long after the streamer speaks you hear the dub. It should match how far behind your video is: move right if the dub comes before the picture." : "If the dub runs ahead of the video, move right to delay it. Values below 0 cannot play earlier than the dub arrives."}</span>
           </label>
         </div>
 

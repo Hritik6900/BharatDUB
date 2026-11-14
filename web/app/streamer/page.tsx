@@ -370,7 +370,8 @@ function GoLive({ me }: { me: Streamer }) {
     try {
       const r = await api<{ session_id: string; ingest_token: string }>("/api/live/sessions", {
         method: "POST",
-        body: JSON.stringify({ youtube_video_id: yt, target_langs: langs, src_lang: me.src_lang, streamer_id: me.id, voice_mode: mode }),
+        // 8 s: a usual YouTube "Low latency" delay. The console has a slider to match it to the real stream.
+        body: JSON.stringify({ youtube_video_id: yt, target_langs: langs, src_lang: me.src_lang, streamer_id: me.id, voice_mode: mode, offset_ms: 8000 }),
       });
       localStorage.setItem(LIVE_KEY, JSON.stringify({ sid: r.session_id, token: r.ingest_token }));
       localStorage.setItem(INPUT_KEY, device);

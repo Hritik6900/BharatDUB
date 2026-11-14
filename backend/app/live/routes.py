@@ -18,6 +18,8 @@ from app.live.session import LiveSession, parse_youtube_id, sessions
 from app.shared.metrics import percentile
 
 router = APIRouter()
+# A streamer's own mic is real time while YouTube shows it 5-30 s later: the dub waits that long (the offset).
+MAX_OFFSET_MS = 40000
 # Shown next to the checkbox on /live; stored on the voice profile the stream creates.
 STREAM_VOICE_CONSENT = ("The voice on this stream is mine, or I have the speaker's permission, and I agree that "
                         "Bharat Dub may make a copy of it to dub this stream.")
@@ -79,7 +81,7 @@ async def create_session(body: CreateSession) -> dict[str, Any]:
     if body.voice_from_stream and not body.voice_profile_id:
         from_stream = {"consent_at": now_iso(), "consent_text": STREAM_VOICE_CONSENT}
     sess, token = await sessions.create(yt, list(dict.fromkeys(body.target_langs)), body.voice_profile_id,
-                                        max(-5000, min(10000, body.offset_ms)), from_stream, body.src_lang)
+                                        max(-5000, min(MAX_OFFSET_MS, body.offset_ms)), from_stream, body.src_lang)
     if streamer:
         await sessions.update(sess, streamer_id=streamer["id"], voice_mode=body.voice_mode)
     return {"session_id": sess.id, "ingest_token": token, **sess.public()}
@@ -107,7 +109,7 @@ async def patch_session(sid: str, body: PatchSession) -> dict[str, Any]:
     s = await _sess(sid)
     fields: dict[str, Any] = {}
     if body.offset_ms is not None:
-        fields["offset_ms"] = max(-5000, min(10000, body.offset_ms))
+        fields["offset_ms"] = max(-5000, min(MAX_OFFSET_MS, body.offset_ms))
     if body.youtube_video_id is not None:
         yt = parse_youtube_id(body.youtube_video_id)
         if not yt:
@@ -214,8 +216,15 @@ async def ws_watch(ws: WebSocket, sid: str, lang: str = Query("ta-IN")) -> None:
         pump = asyncio.create_task(_pump(ws, q))
         try:
             while True:
-                if (await ws.receive())["type"] == "websocket.disconnect":
+                msg = await ws.receive()
+                if msg["type"] == "websocket.disconnect":
                     break
+                # A viewer reports how late each phrase really started for them: {"type":"played","late_ms":n}
+                if msg.get("text") and s.pipeline:
+                    with contextlib.suppress(ValueError, TypeError, KeyError):
+                        data = json.loads(msg["text"])
+                        if data.get("type") == "played":
+                            s.pipeline.viewer_played(lang, int(data["late_ms"]))
         finally:
             pump.cancel()
     except WebSocketDisconnect:

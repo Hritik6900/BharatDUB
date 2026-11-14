@@ -431,6 +431,7 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
         </section>
 
         <aside className="grid content-start gap-5">
+          {session?.streamer_id && <YouTubeDelay sid={sid} sessionMs={session.offset_ms} onTimePct={feed.stats?.viewer_on_time_pct} reports={feed.stats?.viewer_n} />}
           <section className="card p-5">
             <h2 className="eyebrow flex items-center gap-2"><Timer aria-hidden className="size-3.5" />Delay, last 60 chunks</h2>
             <p className="mt-1.5 text-xs text-muted">{langs[0] ? `${lang(langs[0]).name}: speech end to first dubbed audio` : ""}</p>
@@ -450,5 +451,27 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
 python client.py --server ${API_BASE.replace(/^http/, "ws")} --session ${sid} --token ${token}`}</pre>
       </details>
     </div>
+  );
+}
+
+/** A streamer speaks in real time; YouTube shows it some seconds later. The dub waits that long, so it lands on the picture. */
+function YouTubeDelay({ sid, sessionMs, onTimePct, reports }: { sid: string; sessionMs: number; onTimePct?: number; reports?: number }) {
+  const [ms, setMs] = useState(sessionMs);
+  useEffect(() => setMs(sessionMs), [sessionMs]);
+  const save = (v: number) => void api(`/api/live/sessions/${sid}`, { method: "PATCH", body: JSON.stringify({ offset_ms: v }) }).catch(() => {});
+  return (
+    <section className="card p-5">
+      <h2 className="eyebrow flex items-center gap-2"><Timer aria-hidden className="size-3.5" />YouTube delay</h2>
+      <label className="mt-3 block">
+        <span className="flex justify-between text-sm">
+          <span>Viewers hear the dub</span>
+          <span className="tnum font-mono">{(ms / 1000).toFixed(1)} s after you speak</span>
+        </span>
+        <input type="range" min={0} max={40000} step={500} value={ms} onChange={(e) => setMs(Number(e.target.value))}
+          onPointerUp={() => save(ms)} onKeyUp={() => save(ms)} className="mt-3 w-full" />
+      </label>
+      <p className="mt-2 text-xs text-muted">Set it to how far your YouTube stream runs behind you (Low latency is about 5 to 10 s): open your viewer link, and move this until the dub lands on your lips.</p>
+      {reports ? <p className="mt-3 text-sm"><span className="tnum font-semibold">{onTimePct}%</span> <span className="text-muted">of the last {reports} phrases started within 1 s of their moment (measured on viewers&apos; players).</span></p> : null}
+    </section>
   );
 }

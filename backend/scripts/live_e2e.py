@@ -45,6 +45,7 @@ async def main() -> None:
     ap.add_argument("--listen", default="", help="languages a viewer is tuned to (default: all of --langs)")
     ap.add_argument("--loops", type=int, default=2)
     ap.add_argument("--yt", default="")
+    ap.add_argument("--offset", type=int, default=0, help="session offset_ms (a streamer's YouTube delay)")
     ap.add_argument("--streamer", default="", help="Streamer Mode: this streamer's id; the session uses their recorded voice")
     ap.add_argument("--sync", type=float, default=-1, help="report video time like the console does, starting at this many seconds (sync mode)")
     ap.add_argument("--api", default="http://localhost:8010")
@@ -71,6 +72,8 @@ async def main() -> None:
         if a.streamer:
             body = {k: v for k, v in body.items() if k not in ("voice_from_stream", "voice_consent", "voice_profile_id")}
             body |= {"streamer_id": a.streamer, "voice_mode": "stock" if a.voice == "stock" else "clone"}
+        if a.offset:
+            body["offset_ms"] = a.offset
         r = await http.post("/api/live/sessions", json=body)
         r.raise_for_status()
         s = r.json()

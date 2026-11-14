@@ -116,7 +116,7 @@ def test_live_rest_and_ws_flow():
     assert body["youtube_video_id"] == "dQw4w9WgXcQ"
     info = c.get(f"/api/live/sessions/{sid}").json()
     assert "ingest_token" not in info
-    assert c.patch(f"/api/live/sessions/{sid}", json={"offset_ms": 99999}).json()["offset_ms"] == 10000
+    assert c.patch(f"/api/live/sessions/{sid}", json={"offset_ms": 99999}).json()["offset_ms"] == 40000  # YouTube delay
 
     with c.websocket_connect(f"/ws/watch/{sid}?lang=ta-IN") as ws:
         hello = json.loads(ws.receive_text())
@@ -507,3 +507,34 @@ async def test_streamer_session_speaks_in_the_stored_voice_from_the_first_phrase
     await p2.start()
     assert not p2.gpu_ready and not gpu2.refs and not p2._gpu_planned("ta-IN")
     await p2.stop()
+
+
+async def test_streamer_mic_session_times_the_dub_to_the_youtube_delay(tmp_path, monkeypatch):
+    store = LocalStore(tmp_path / "db.json")
+    monkeypatch.setattr("app.live.pipeline.get_store", lambda: store)
+    sess = LiveSession({"id": "o1", "target_langs": ["ta-IN"], "src_lang": "hi-IN", "streamer_id": "s1",
+                        "voice_mode": "stock", "offset_ms": 8000})
+    p = LivePipeline(sess, stt=SilentSTT(), llm=MockLLM(), tts=MockTTS())
+    ta = sess.bus.subscribe("ta-IN")
+    await p.start()
+    assert p.offset_delay() == 8000 and p.sync_delay() == 8000
+    now = sess.now_ms()
+    p._dispatch(p.assembler.make("pehli line", t_start_ms=now, t_end_ms=now + 10, t_final_ms=now + 10))
+    msgs: list[dict] = []
+    while not any(m["type"] == "audio" and m["last"] for m in msgs):
+        msgs.append(await asyncio.wait_for(ta.get(), 10))
+    aud = next(m for m in msgs if m["type"] == "audio" and m["pcm_b64"])
+    assert aud["t_speech_ms"] == now and "media_s" not in aud      # timed by the session clock, not a video's
+    for late in (0, 300, 2500):
+        p.viewer_played("ta-IN", late)
+    for _ in range(40):                                              # the pipeline stays in step for a whole stream
+        p._note_late(3000)
+    assert p.sync_delay() == 8000                                    # YouTube's delay is not ours to stretch
+    st = p.stats()
+    assert st["sync_delay_ms"] == 8000 and st["viewer_n"] == 3 and st["viewer_on_time_pct"] == 66.7
+    await p.stop()
+    rows = await store.select("live_chunks", session_id="o1")
+    assert rows[0]["timings"]["t_heard:ta-IN"] == now + 8000 and rows[0]["timings"]["late:ta-IN"] == 0
+    # a session without a streamer keeps the old behaviour: its offset is only the viewer's slider default
+    plain = LiveSession({"id": "o2", "target_langs": ["ta-IN"], "src_lang": "hi-IN", "offset_ms": 8000})
+    assert LivePipeline(plain, stt=SilentSTT(), llm=MockLLM(), tts=MockTTS()).sync_delay() == 0

@@ -179,6 +179,8 @@ class LivePipeline:
         self._sync_delay = 0
         self._late: dict[str, deque[int]] = {}  # per language: how long after its moment each phrase started
         self._late_recent: deque[int] = deque(maxlen=6)
+        self._viewer_late: deque[int] = deque(maxlen=500)  # reported by viewers' players
+        self._ticks = 0
         self._lag: dict[str, int] = {}     # per language: how far behind the dub was at the last phrase (sync mode)
         self._starts: dict[int, int] = {}  # seq -> when that phrase began (to know how long the one before may run)
         self.sync_grown: list[tuple[int, int]] = []  # (session ms, new delay) each time the delay grew
@@ -289,6 +291,8 @@ class LivePipeline:
         delay grows by about that much (their video waits that long, once) instead of the dub staying behind."""
         self._late_recent.append(late_ms)
         late = sorted(v for v in self._late_recent if v > 400)
+        if self.offset_delay():   # the offset is YouTube's delay, not ours to change
+            return
         if not self.s.live_sync_adapt or len(late) < 3 or self._sync_delay >= self.s.live_sync_delay_max_ms:
             return
         step = min(3000, (late[len(late) // 2] // 500 + 1) * 500)
@@ -296,10 +300,22 @@ class LivePipeline:
         self._late_recent.clear()
         self.sync_grown.append((self.sess.now_ms(), self._sync_delay))
 
+    # ---------- a streamer's own mic: the dub waits for YouTube ----------
+    def offset_delay(self) -> int:
+        """Streamer Mode with a mic: speech arrives here in real time, YouTube shows it `offset_ms` later, so every
+        phrase is due that long after it was spoken. 0 = not that kind of session."""
+        row = self.sess.row
+        return int(row.get("offset_ms") or 0) if row.get("streamer_id") and not self._media else 0
+
+    def viewer_played(self, lang: str, late_ms: int) -> None:
+        """What a viewer's player measured: how long after its moment a phrase really started (0 = on it)."""
+        if 0 <= late_ms < 120000:
+            self._viewer_late.append(late_ms)
+
     def sync_delay(self) -> int:
         """The delay viewers hold their video at, or 0 when the console is not reporting video time (any more)."""
         if not self._media or self.sess.now_ms() - self._media[-1][0] > 5000:
-            return 0
+            return self.offset_delay()
         return self._sync_delay
 
     def _media_at(self, t_ms: int) -> float:
@@ -313,13 +329,19 @@ class LivePipeline:
         return round(max(0.0, media_s + ((t_ms - t) / 1000 if playing else 0.0)), 3)
 
     def _media_tag(self, t_ms: int) -> dict[str, float]:
-        return {"media_s": self._media_at(t_ms)} if self.sync_delay() else {}
+        # Only while the console is reporting a video's time (a streamer's mic session has a delay but no video time).
+        fresh = bool(self._media) and self.sess.now_ms() - self._media[-1][0] <= 5000
+        return {"media_s": self._media_at(t_ms)} if fresh and self._sync_delay else {}
 
     def sync_stats(self) -> dict[str, Any]:
         late = [v for d in self._late.values() for v in d][-300:]
-        if not self._sync_delay or not late:
-            return {}
-        return {"sync_delay_ms": self._sync_delay, "sync_n": len(late), "sync_grown": len(self.sync_grown),
+        seen = list(self._viewer_late)[-300:]
+        viewers = {"viewer_n": len(seen), "viewer_on_time_pct": round(100 * sum(v <= 1000 for v in seen) / len(seen), 1),
+                   "viewer_late_p95_ms": int(percentile(seen, 95) or 0)} if seen else {}
+        delay = self._sync_delay or self.offset_delay()
+        if not delay or not late:
+            return viewers
+        return {**viewers, "sync_delay_ms": delay, "sync_n": len(late), "sync_grown": len(self.sync_grown),
                 "sync_on_time_pct": round(100 * sum(v <= 250 for v in late) / len(late), 1),
                 "sync_late_p95_ms": int(percentile(late, 95) or 0)}
 
@@ -572,6 +594,9 @@ class LivePipeline:
     async def _poll_loop(self) -> None:
         while self.running:
             await asyncio.sleep(0.1)
+            self._ticks += 1
+            if self._ticks % 10 == 0:   # the session clock, so viewers can place `t_speech_ms` on their own
+                self.sess.bus.broadcast({"type": "clock", "t_ms": self.sess.now_ms(), "offset_ms": self.offset_delay()})
             chunk = self.assembler.poll(self.sess.now_ms())
             if chunk:
                 self._dispatch(chunk)
