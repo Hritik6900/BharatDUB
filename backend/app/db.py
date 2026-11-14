@@ -15,7 +15,7 @@ from app.config import get_settings
 
 Row = dict[str, Any]
 TABLES = ("jobs", "segments", "translations", "renders", "voice_profiles", "glossary_terms",
-          "live_sessions", "live_chunks", "chat_messages")
+          "live_sessions", "live_chunks", "chat_messages", "streamers")
 
 
 def now_iso() -> str:
@@ -59,7 +59,7 @@ class LocalStore:
     def _defaults(self, table: str, row: Row) -> Row:
         row = dict(row)
         row.setdefault("id", self._new_id(table))
-        if table in ("jobs", "renders", "live_sessions", "chat_messages", "voice_profiles"):
+        if table in ("jobs", "renders", "live_sessions", "chat_messages", "voice_profiles", "streamers"):
             row.setdefault("created_at", now_iso())
         if table == "jobs":
             row.setdefault("status", "queued")

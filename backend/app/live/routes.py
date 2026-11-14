@@ -30,6 +30,8 @@ class CreateSession(BaseModel):
     voice_from_stream: bool = False   # learn the speaker's voice from the first seconds of the stream
     voice_consent: bool = False
     src_lang: str = "hi-IN"            # language the streamer speaks; `indic-auto` to detect
+    streamer_id: str | None = None     # Streamer Mode: the session belongs to this streamer
+    voice_mode: str = "clone"          # with a streamer: `clone` = their recorded voice, `stock` = never clone
     offset_ms: int = 0
 
 
@@ -55,6 +57,18 @@ async def create_session(body: CreateSession) -> dict[str, Any]:
     yt = parse_youtube_id(body.youtube_video_id) if body.youtube_video_id else None
     if body.youtube_video_id and not yt:
         raise HTTPException(400, "Could not read a YouTube video id from that link.")
+    streamer = None
+    if body.streamer_id:
+        streamer = await get_store().get("streamers", body.streamer_id)
+        if not streamer:
+            raise HTTPException(404, "streamer not found")
+        if body.voice_mode not in ("clone", "stock"):
+            raise HTTPException(400, "voice_mode is clone or stock")
+        # The streamer's own recorded voice (consent was taken when it was recorded), or none at all.
+        body.voice_profile_id = streamer.get("voice_profile_id") if body.voice_mode == "clone" else None
+        body.voice_from_stream = False
+        if body.voice_mode == "clone" and not body.voice_profile_id:
+            raise HTTPException(403, "Record your voice with consent before going live in your own voice.")
     if body.voice_profile_id:
         p = await get_store().get("voice_profiles", body.voice_profile_id)
         if not p or not p.get("consent_at") or p.get("deleted_at"):
@@ -66,6 +80,8 @@ async def create_session(body: CreateSession) -> dict[str, Any]:
         from_stream = {"consent_at": now_iso(), "consent_text": STREAM_VOICE_CONSENT}
     sess, token = await sessions.create(yt, list(dict.fromkeys(body.target_langs)), body.voice_profile_id,
                                         max(-5000, min(10000, body.offset_ms)), from_stream, body.src_lang)
+    if streamer:
+        await sessions.update(sess, streamer_id=streamer["id"], voice_mode=body.voice_mode)
     return {"session_id": sess.id, "ingest_token": token, **sess.public()}
 
 

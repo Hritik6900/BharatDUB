@@ -69,6 +69,34 @@ def words_heard(said: str, heard: str) -> float:
     return sum(1 for w in want if w in got or any(w[:4] == g[:4] for g in got)) / len(want)
 
 
+async def score_voice(gpu: Any, stt: Any, voice_id: str, lang: str) -> float | None:
+    """How well a copied voice speaks: one known sentence, heard back by Prisma (share of words, 0-1).
+    The sample decides everything about a copied voice, and this is the only way to know if it made a usable
+    one (measured 2026-11-14: between 47% and 86% of words heard back, depending on the sample alone).
+    None = no verdict (a call failed)."""
+    line = GPU_CHECK_LINES.get(lang)
+    if not line:
+        return None
+    wav = Path(tempfile.gettempdir()) / f"bd_gpu_check_{voice_id}.wav"
+    try:
+        pcm, rate = await gpu.synth(voice_id, line, lang)
+        audio = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
+        await asyncio.to_thread(au.write_wav, wav, audio, rate)
+        heard = (await stt.transcribe(str(wav), lang)).text
+        score = words_heard(line, heard)
+        per_word = len(audio) / rate * 1000 / max(1, len(line.split()))
+        if not 250 <= per_word <= 1100:   # rushed or dragging speech is a bad sample whatever was understood
+            score = min(score, 0.3)
+        return round(score, 2)
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:  # noqa: BLE001 - no verdict
+        log.warning("voice check failed: %s", e)
+        return None
+    finally:
+        wav.unlink(missing_ok=True)
+
+
 def speech_cut(frames: list[bytes], want_ms: int = GPU_REF_MS, min_ms: int = GPU_REF_MIN_MS,
                frame_ms: int = 32, keep_pause_ms: int = 450, hang_ms: int = 200) -> bytes | None:
     """The most recent `want_ms` of speech in `frames`, with long silences shortened to `keep_pause_ms`.
@@ -113,6 +141,8 @@ class LivePipeline:
         self._gpu_score: float | None = None  # how well it speaks (share of words heard back), if known
         self._gpu_checks = 0
         self._gpu_last_try = 0
+        self._gpu_stored = False           # the voice came from the streamer's profile, not from this stream
+        self.stored_voice_ms: int | None = None  # how long sending it to the engines took
         self._gpu_retry_at = 0     # after three failures in a row: session time at which the engine is tried again
         self._ring: deque[tuple[int, bytes]] = deque(maxlen=700)  # ~22 s of the stream's sound, with arrival time
         self._prev_start: int | None = None
@@ -161,6 +191,7 @@ class LivePipeline:
         terms = [t["term"] for t in await get_store().select("glossary_terms")]
         self.glossary = list(dict.fromkeys(DEFAULT_GLOSSARY + terms))
         self.voice = await self._clone_voice()
+        await self._use_stored_voice()
         consent = self.sess.row.get("voice_from_stream") or {}
         gpu_all = self.gpu.enabled and all(self.gpu.speaks(lg) for lg in self.sess.langs)
         if self.voice is None and consent.get("consent_at") and not gpu_all:
@@ -203,6 +234,29 @@ class LivePipeline:
                 await asyncio.wait_for(job, TRANSLATE_TIMEOUT_S)
             except Exception:  # noqa: BLE001 - only a warm-up
                 pass
+
+    async def _use_stored_voice(self) -> None:
+        """Streamer Mode: the voice the streamer recorded (with consent) goes to the GPU engines before the first
+        word, so the first phrase is already in their voice. It is not replaced during the stream."""
+        row = self.sess.row
+        if not (row.get("streamer_id") and row.get("voice_mode") == "clone" and self.gpu.enabled):
+            return
+        p = await get_store().get("voice_profiles", row.get("voice_profile_id") or "")
+        if not (p and p.get("consent_at") and p.get("ref_path") and p.get("ref_text") and not p.get("deleted_at")):
+            return
+        from app.shared.voices import voices_dir
+        vid = f"voice-{p['id']}"
+        t0 = self.sess.now_ms()
+        try:
+            await self.gpu.set_ref(vid, str(voices_dir() / p["ref_path"]), p["ref_text"], consent_at=p["consent_at"])
+        except Exception as e:  # noqa: BLE001 - fail soft: the Gnani copy of the same voice, or stock
+            log.warning("live stored voice: the engines did not take it (%s)", e)
+            return
+        self._gpu_sid, self._gpu_score, self._gpu_stored = vid, p.get("ref_score"), True
+        self.gpu_ready = True
+        self.voice_ready_ms = self.sess.now_ms()
+        self.stored_voice_ms = self.sess.now_ms() - t0
+        self.sess.bus.broadcast({"type": "voice", "cloned": True, "engine": "gpu", "t_ms": self.voice_ready_ms})
 
     def feed(self, pcm: bytes) -> None:
         if self.running and self.audio.qsize() < MAX_QUEUED_AUDIO:
@@ -284,7 +338,7 @@ class LivePipeline:
     def _gpu_planned(self, lang: str) -> bool:
         """This language is, or is about to be, spoken by the GPU engine (so its text is written for it)."""
         consent = self.sess.row.get("voice_from_stream") or {}
-        return bool(self.gpu.enabled and consent.get("consent_at") and self.gpu.speaks(lang)
+        return bool(self.gpu.enabled and (consent.get("consent_at") or self._gpu_stored) and self.gpu.speaks(lang)
                     and self._gpu_up() and (self.gpu_ready or self._gpu_tries < 8))
 
     def _gpu_up(self) -> bool:
@@ -353,31 +407,8 @@ class LivePipeline:
             wav.unlink(missing_ok=True)
 
     async def _gpu_check(self, cand: str) -> float | None:
-        """How well a copied voice speaks: one known sentence, heard back by Prisma (share of words, 0-1).
-        A sample is 7 s of whatever was on the stream; this is the only way to know if it made a usable voice
-        (measured 2026-11-14: between 47% and 86% of words heard back, depending on the sample alone)."""
         lang = next((lg for lg in self.sess.langs if self.gpu.speaks(lg) and lg in GPU_CHECK_LINES), None)
-        if lang is None:
-            return None
-        line = GPU_CHECK_LINES[lang]
-        wav = Path(tempfile.gettempdir()) / f"bd_gpu_check_{cand}.wav"
-        try:
-            pcm, rate = await self.gpu.synth(cand, line, lang)
-            audio = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
-            await asyncio.to_thread(au.write_wav, wav, audio, rate)
-            heard = (await self.stt.transcribe(str(wav), lang)).text
-            score = words_heard(line, heard)
-            per_word = len(audio) / rate * 1000 / max(1, len(line.split()))
-            if not 250 <= per_word <= 1100:   # rushed or dragging speech is a bad sample whatever was understood
-                score = min(score, 0.3)
-            return round(score, 2)
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:  # noqa: BLE001 - no verdict; the voice stays in use
-            log.warning("live gpu voice check failed: %s", e)
-            return None
-        finally:
-            wav.unlink(missing_ok=True)
+        return await score_voice(self.gpu, self.stt, cand, lang) if lang else None
 
     # ---------- voice from the stream ----------
     def _collect(self, pcm: bytes) -> None:

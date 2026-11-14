@@ -472,3 +472,38 @@ async def test_a_better_voice_sample_replaces_a_poor_one(tmp_path, monkeypatch):
     assert p._gpu_sid == "g3-v2" and p._gpu_score == 1.0
     p._gpu_last_try = sess.now_ms() - 60_000
     assert not p._gpu_wanted()                       # good enough: it stays
+
+
+async def test_streamer_session_speaks_in_the_stored_voice_from_the_first_phrase(tmp_path, monkeypatch):
+    store = LocalStore(tmp_path / "db.json")
+    monkeypatch.setattr("app.live.pipeline.get_store", lambda: store)
+    monkeypatch.setattr("app.shared.voices.voices_dir", lambda: tmp_path)
+    (tmp_path / "p1_ref.wav").write_bytes(b"RIFF")
+    await store.insert("voice_profiles", {"id": "p1", "consent_at": "2026-11-15T08:00:00+00:00", "embedding": None,
+                                          "ref_path": "p1_ref.wav", "ref_text": "meri awaaz ka namoona", "ref_score": 0.9})
+    gpu = FakeGpu()
+    sess = LiveSession({"id": "st1", "target_langs": ["ta-IN"], "src_lang": "hi-IN", "streamer_id": "s1",
+                        "voice_mode": "clone", "voice_profile_id": "p1"})
+    p = LivePipeline(sess, stt=SilentSTT(), llm=MockLLM(), tts=MockTTS(), gpu=gpu)
+    ta = sess.bus.subscribe("ta-IN")
+    await p.start()
+    assert p.gpu_ready and p._gpu_sid == "voice-p1" and p._gpu_score == 0.9
+    assert gpu.refs == [("voice-p1", "meri awaaz ka namoona", "2026-11-15T08:00:00+00:00")]
+    assert not p._gpu_wanted()                              # the recorded voice is not replaced from the stream
+    now = sess.now_ms()
+    p._dispatch(p.assembler.make("pehli line", t_start_ms=now, t_end_ms=now, t_final_ms=now))
+    while True:
+        m = await asyncio.wait_for(ta.get(), 10)
+        if m["type"] == "audio" and m["last"]:
+            break
+    await p.stop()
+    assert [lang for lang, _ in gpu.lines] == ["ta-IN"]     # the very first phrase came from the engine
+
+    # voice_mode stock: the same streamer, never a copied voice
+    gpu2 = FakeGpu()
+    sess2 = LiveSession({"id": "st2", "target_langs": ["ta-IN"], "src_lang": "hi-IN", "streamer_id": "s1",
+                         "voice_mode": "stock", "voice_profile_id": None})
+    p2 = LivePipeline(sess2, stt=SilentSTT(), llm=MockLLM(), tts=MockTTS(), gpu=gpu2)
+    await p2.start()
+    assert not p2.gpu_ready and not gpu2.refs and not p2._gpu_planned("ta-IN")
+    await p2.stop()

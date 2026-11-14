@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.db import get_store
 from app.live import routes as live_routes
 from app.shared import dashboard, glossary, voices
+from app.streamer import routes as streamer_routes
 from app.studio import routes as studio_routes
 
 log = logging.getLogger("app")
@@ -57,6 +58,7 @@ app.include_router(voices.router)
 app.include_router(glossary.router)
 app.include_router(live_routes.router)
 app.include_router(dashboard.router)
+app.include_router(streamer_routes.router)
 
 
 @app.get("/health")

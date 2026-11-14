@@ -45,6 +45,7 @@ async def main() -> None:
     ap.add_argument("--listen", default="", help="languages a viewer is tuned to (default: all of --langs)")
     ap.add_argument("--loops", type=int, default=2)
     ap.add_argument("--yt", default="")
+    ap.add_argument("--streamer", default="", help="Streamer Mode: this streamer's id; the session uses their recorded voice")
     ap.add_argument("--sync", type=float, default=-1, help="report video time like the console does, starting at this many seconds (sync mode)")
     ap.add_argument("--api", default="http://localhost:8010")
     ap.add_argument("--chat", default="அண்ணா stream சூப்பர், அடுத்து எந்த game விளையாடப் போறீங்க?")
@@ -67,6 +68,9 @@ async def main() -> None:
     elif a.voice != "stock":
         body["voice_profile_id"] = a.voice
     async with httpx.AsyncClient(base_url=a.api, timeout=60) as http:
+        if a.streamer:
+            body = {k: v for k, v in body.items() if k not in ("voice_from_stream", "voice_consent", "voice_profile_id")}
+            body |= {"streamer_id": a.streamer, "voice_mode": "stock" if a.voice == "stock" else "clone"}
         r = await http.post("/api/live/sessions", json=body)
         r.raise_for_status()
         s = r.json()

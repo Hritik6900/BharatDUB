@@ -60,6 +60,7 @@ class LiveSession:
                 "clone_langs": list(self.pipeline.clone_langs) if self.pipeline else None,
                 "sync_delay_ms": self.pipeline.sync_delay() if self.pipeline else 0,
                 "gpu_voice": bool(self.pipeline and self.pipeline.gpu_ready),
+                "streamer_id": r.get("streamer_id"), "voice_mode": r.get("voice_mode"),
                 "gpu_voice_score": self.pipeline._gpu_score if self.pipeline else None}
 
 
