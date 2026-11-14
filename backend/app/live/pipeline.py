@@ -26,7 +26,8 @@ ENROL_SPEECH_S = 12.0   # speech collected from the stream before the voice is c
 ENROL_MIN_RMS = 300     # PCM16 units; frames quieter than this are pauses, not voice
 LIVE_FRAME_BYTES = 9600  # audio message size on the watch socket: 0.2 s at 24 kHz
 PLAYER_JITTER_MS = 300   # the web player starts an idle queue this long after the first audio arrives
-GPU_REF_MIN_MS, GPU_REF_MS = 4500, 7000  # the voice sample for the GPU engine: the last 7 s before a pause (at least 4.5 s)
+GPU_REF_MIN_MS, GPU_REF_MS = 3500, 7000  # the voice sample for the GPU engine: the last 7 s before a pause (at least 3.5 s)
+GPU_VOICE_LEAD_MS = 2200  # a GPU line takes about this long to make and arrive
 SYNC_ARRIVE_MS = 100     # sync mode: audio that arrives after its moment starts this soon
 MAX_QUEUED_AUDIO = 400  # ~13 s of 1024-byte frames; beyond that we drop (the streamer's network is ahead)
 
@@ -54,7 +55,8 @@ class LivePipeline:
         self.assembler = Assembler()
         self.phraser = Phraser(self.s.live_phrase_min_words, self.s.live_phrase_max_words)
         self._voice_turn = asyncio.Semaphore(max(1, self.s.gnani_max_concurrency))
-        self._gpu_turn = asyncio.Semaphore(max(1, self.s.gpu_voice_concurrency))
+        self._gpu_turn = asyncio.Semaphore(max(1, int(getattr(self.gpu, "capacity", 1))))
+        self._gpu_ms_per_byte: dict[str, float] = {}  # per language: speech the GPU voice makes per byte of text
         self._playhead: dict[str, int] = {}  # per language: session time at which a viewer's queued dub ends
         self._stt_t0: int | None = None   # session clock at the start of the current STT stream
         self.context: deque[str] = deque(maxlen=3)
@@ -91,7 +93,8 @@ class LivePipeline:
         self.glossary = list(dict.fromkeys(DEFAULT_GLOSSARY + terms))
         self.voice = await self._clone_voice()
         consent = self.sess.row.get("voice_from_stream") or {}
-        if self.voice is None and consent.get("consent_at"):
+        gpu_all = self.gpu.enabled and all(self.gpu.speaks(lg) for lg in self.sess.langs)
+        if self.voice is None and consent.get("consent_at") and not gpu_all:
             self._enrol = []
         self.tasks = [asyncio.create_task(self._stt_loop()), asyncio.create_task(self._poll_loop())]
         if self.s.live_warmup and self.sess.langs:
@@ -123,7 +126,10 @@ class LivePipeline:
             async for _ in self.tts.synth_stream("ok", lang, stock, sample_rate=self.s.live_sample_rate):
                 pass
 
-        for job in (self.llm.translate_chunk("नमस्ते", lang, [], []), voice()):
+        jobs = [self.llm.translate_chunk("नमस्ते", lang, [], [])]
+        if not self._gpu_planned(lang):  # with the GPU voice coming, Gnani's one turn is kept free
+            jobs.append(voice())
+        for job in jobs:
             try:
                 await asyncio.wait_for(job, TRANSLATE_TIMEOUT_S)
             except Exception:  # noqa: BLE001 - only a warm-up
@@ -251,6 +257,7 @@ class LivePipeline:
             self._ring.clear()
             self.voice_ready_ms = self.voice_ready_ms or self.sess.now_ms()
             self.sess.bus.broadcast({"type": "voice", "cloned": True, "engine": "gpu", "t_ms": self.sess.now_ms()})
+            self.sess.bus.broadcast({"type": "session", **self.sess.public()})
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001 - fail soft: the Gnani voices carry on
@@ -481,6 +488,12 @@ class LivePipeline:
             # (not inside the provider) means that whatever piled up meanwhile and is already translated is
             # spoken together: one call instead of several, so the queue drains.
             await asyncio.wait({item[1]})  # translated first, so the turn is never held while waiting on the LLM
+            # The copied voice is about to be ready (the sample is taken at the first pause): while this phrase
+            # still has time before it is due, wait for it instead of starting in a stock voice.
+            if self._gpu_planned(lang) and not self.gpu_ready and self.sync_delay():
+                due = item[0].t_speech_ms + self.sync_delay() - GPU_VOICE_LEAD_MS
+                while self.running and not self.gpu_ready and self._gpu_wanted() and self.sess.now_ms() < due:
+                    await asyncio.sleep(0.1)
             # Lines for our GPU engine do not wait behind Gnani's one-at-a-time turn.
             turn = self._gpu_turn if self._gpu_speaks(lang) else self._voice_turn
             await turn.acquire()
@@ -584,11 +597,41 @@ class LivePipeline:
                                    "pcm_b64": base64.b64encode(pcm[k:k + LIVE_FRAME_BYTES]).decode(), "last": False,
                                    "t_speech_ms": chunk.t_speech_ms, **tag})
 
+        def want_tempo(dur_ms: float) -> float:
+            """How much faster a line of `dur_ms` has to be said to be in time (1 = as it is)."""
+            still = max(0, self._playhead.get(lang, 0) - self.sess.now_ms())  # the backlog now, not when we began
+            if target is None:
+                return min(self.s.live_fit_max_tempo, 1 + still / max(dur_ms, 500))
+            # It will start at `begin`. If the next phrase is known, end before that one is due; in any case
+            # make up for whatever it is already late by.
+            begin = max(self.sess.now_ms() + still, target)
+            tempo = 1 + (begin - target) / max(dur_ms, 500)
+            nxt = self._starts.get((rest[-1][0] if rest else chunk).seq + 1)
+            if nxt is not None:
+                room = nxt + delay + self.s.live_sync_slack_ms - begin
+                tempo = max(tempo, dur_ms / max(room, 1))
+            return min(self.s.live_fit_max_tempo, tempo)
+
+        spoke_at = 1.0  # the speed the GPU voice was asked to speak at
+
         async def stream() -> None:
-            nonlocal lead, held, carry
+            nonlocal lead, held, carry, spoke_at
             if self._gpu_speaks(lang):
                 try:
-                    pcm, rate = await self.gpu.synth(self.sess.id, text, lang)
+                    # The engine can speak faster by itself, which sounds better than squeezing the audio afterwards.
+                    # How long the line will be is guessed from the lines before it (ms of speech per byte of text).
+                    size = max(1, len(text.encode("utf-8")))
+                    per_byte = self._gpu_ms_per_byte.get(lang)
+                    speed = self.s.gpu_voice_speed
+                    # Off by default: measured 2026-11-14 on 14 Tamil lines, the engine at 1.3x kept 70% of the
+                    # words (Prisma hearing them back), against 82% for normal speed squeezed afterwards.
+                    if fit and per_byte and self.s.gpu_voice_native_speedup:
+                        speed = max(speed, want_tempo(per_byte * size / speed) * speed)
+                        speed = min(speed, self.s.live_fit_max_tempo)
+                    pcm, rate = await self.gpu.synth(self.sess.id, text, lang, speed=speed)
+                    spoke_at = speed / self.s.gpu_voice_speed
+                    now_per_byte = len(pcm) / 2 / rate * 1000 * speed / size
+                    self._gpu_ms_per_byte[lang] = now_per_byte if not per_byte else 0.7 * per_byte + 0.3 * now_per_byte
                     if rate != sr:
                         x = np.frombuffer(pcm, dtype="<i2").astype(np.float32)
                         n = int(len(x) * sr / rate)
@@ -623,26 +666,16 @@ class LivePipeline:
         if fit and held:
             # The viewer is still playing earlier phrases, so holding this one back costs nothing; it is
             # shortened (tempo only, pitch kept) by as much as it takes to catch up, within a limit.
-            dur_ms = len(held) / 2 / sr * 1000
-            still = max(0, self._playhead.get(lang, 0) - self.sess.now_ms())  # the backlog now, not when we began
-            if target is not None:
-                # It will start at `begin`. If the next phrase is known, end before that one is due; in any case
-                # make up for whatever it is already late by.
-                begin = max(self.sess.now_ms() + still, target)
-                tempo = 1 + (begin - target) / max(dur_ms, 500)
-                nxt = self._starts.get((rest[-1][0] if rest else chunk).seq + 1)
-                if nxt is not None:
-                    room = nxt + delay + self.s.live_sync_slack_ms - begin
-                    tempo = max(tempo, dur_ms / max(room, 1))
-                tempo = min(self.s.live_fit_max_tempo, tempo)
-            else:
-                tempo = min(self.s.live_fit_max_tempo, 1 + still / max(dur_ms, 500))
+            # What the GPU voice already sped up by itself counts towards that limit.
+            tempo = min(self.s.live_fit_max_tempo / spoke_at, want_tempo(len(held) / 2 / sr * 1000))
             if tempo > 1.03:
                 try:
                     held = await asyncio.to_thread(au.tempo_pcm, held, sr, tempo)
-                    timings[f"tempo:{lang}"] = round(tempo, 2)
                 except (au.FFmpegError, OSError) as e:
                     log.warning("live tempo fit failed: %s", e)
+                    tempo = 1.0
+            if tempo * spoke_at > 1.03:
+                timings[f"tempo:{lang}"] = round(tempo * spoke_at, 2)
         publish(held)
         if sent:
             # Same rule as the web player: back to back with what is queued, else a jitter buffer after arrival.

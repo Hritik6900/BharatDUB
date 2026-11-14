@@ -101,6 +101,31 @@ started; 0 means exactly on it.
 
 Switches: `LIVE_SYNC`, `LIVE_SYNC_DELAY_MS`, `LIVE_SYNC_ADAPT`, `LIVE_BRIEF`, `LIVE_WARMUP`.
 
+## The speaker's own voice, live (14 Nov, evening)
+
+The copied voice now comes from our own engine on an A100 (IndicF5), not from Gnani's cloning, for Indian languages.
+Gnani's cloning takes 2 to 3.5 s a line and only one line can be made at a time; the engine takes about a second and
+makes three at once. It is switched on with `GPU_VOICE_URL` and needs the SSH tunnel (`gpu_engine/README.md`);
+without it everything runs on Gnani as before.
+
+Same reel, sync mode, voice learned from the stream, three loops:
+
+| Run | In the copied voice | Delay viewers were held at | Behind p50 / p95 | Skipped | Words heard back by Prisma |
+|---|---|---|---|---|---|
+| Gnani cloning, Tamil (afternoon) | 5 of 21 | 14.5 s | 1.2 s / 2.6 s | 0 of 38 | not checked |
+| GPU engine, Tamil | 31 of 32 | 7.5 s | 1.3 s / 3.2 s | 2 of 37 | 80% |
+| GPU engine, Tamil + Bengali + Telugu at once | 30 to 31 of 31 each | 9 s | 0.4 to 1.1 s / 2.8 to 3.2 s | 1 of 34 | 85% Bengali, 89% Telugu |
+
+- The voice is learned about 9 s into the stream, from the last 7 s before the first pause. Until then the first
+  phrases wait for it when they have time, otherwise they use a stock voice.
+- English words are written in the language's own letters for this engine (it cannot read Latin letters), so captions
+  show "கிரீன் சிக்கன்" instead of "green chicken".
+- English as a target language is not spoken by this engine; it stays on the Gnani voices.
+- Still behind by about a second on this speaker: the dub is longer than the Hindi even at 1.3x. The results moved from
+  run to run (two earlier runs of the same setup skipped 3 and 6 phrases) with the network and the APIs.
+- **I cannot tell how close the voice is to the speaker's.** Listen: `backend/scripts/out/live/G9_gpu_ta/dub_ta-IN.wav`,
+  and `G10_gpu_3/dub_bn-IN.wav`, `dub_te-IN.wav`.
+
 ## Limits that code does not remove
 
 - **One Gnani request at a time.** With viewers on three languages, first audio is about 3.5 to 3.8 s instead of 2.7 s,

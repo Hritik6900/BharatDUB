@@ -75,8 +75,9 @@ class Settings(BaseSettings):
     # Our own GPU voice engine for Live (IndicF5, not a Gnani model): the speaker's copied voice without Gnani's
     # one-request limit. Empty = off. See providers/tts_gpu.py.
     gpu_voice_url: str = ""
-    gpu_voice_timeout_s: float = 8.0
-    gpu_voice_concurrency: int = 3     # lines the engine makes at once (its REPLICAS)
+    gpu_voice_timeout_s: float = 6.0
+    gpu_voice_native_speedup: bool = False  # let the engine itself speak faster when a line must be shortened
+    gpu_voice_format: str = "opus"     # how lines come back: `opus` (a tenth of the bytes) or `pcm`
     gpu_voice_speed: float = 1.0       # < 1 = slower speech; the engine copies the pace of the voice sample
     live_brief: bool = True            # while a language's dub is running behind, ask for a condensed translation
     live_brief_after_ms: int = 500     # ... once it is this far behind

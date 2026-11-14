@@ -298,7 +298,9 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
             ))}
             <li className="inline-flex items-center gap-2 rounded-chip border border-line bg-surface px-3 py-1.5">
               <Mic aria-hidden className="size-4" />
-              {session?.voice_profile_id
+              {session?.gpu_voice
+                ? "Speaker's own voice"
+                : session?.voice_profile_id
                 ? `Speaker's own voice${session.clone_langs?.length && session.clone_langs.length < langs.length ? ` in ${session.clone_langs.map((c) => lang(c).name).join(", ")}` : ""}`
                 : session?.voice_from_stream
                   ? "Learning the voice (stock until then)"

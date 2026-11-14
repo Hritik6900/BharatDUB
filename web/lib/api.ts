@@ -97,6 +97,8 @@ export interface LiveSession {
   voice_profile_id?: string | null;
   voice_from_stream?: boolean;
   clone_langs?: string[] | null;
+  /** Our GPU engine has learned the speaker's voice from this stream. */
+  gpu_voice?: boolean;
   stats?: { p50_ms: number | null; p95_ms: number | null; n: number } | null;
 }
 

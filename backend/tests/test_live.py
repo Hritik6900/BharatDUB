@@ -321,7 +321,7 @@ class FakeGpu:
         self.refs.append((session_id, ref_text, consent_at))
         return {"ok": True}
 
-    async def synth(self, session_id, text, lang):
+    async def synth(self, session_id, text, lang, speed=None):
         self.lines.append((lang, text))
         return (b"\x10\x20" * 12000, 24000)
 

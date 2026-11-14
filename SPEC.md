@@ -421,6 +421,25 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
 - `live_brief`: while a language's dub is behind (0.5 s), the live prompt asks for a condensed translation (main point, about
   60% of the words). Without sync mode this cut heard p95 from 5.8 s to 4.6 s (p50 3.4 s unchanged) and speed-ups from 21 to 12
   phrases of about 26, one run each. `live_warmup` makes one tiny translation and voice call when a session starts.
+- [x] **Live copied voice on our own GPU engine** (2026-11-14 evening; `GPU_VOICE_URL`, `providers/tts_gpu.py`, `gpu_engine/`).
+  The Gnani-only rule is for the Gnani challenge; for Vihaan X the user asked for the best result. IndicF5 on an A100
+  (three engine processes, ports 9001-9003 behind an SSH tunnel) speaks every Indian target language in the speaker's
+  voice; English and any failure go to the Gnani voices. Empty `GPU_VOICE_URL` = Gnani only, as before.
+  - The voice sample is the last 7 s before the first pause (at least 3.5 s, mostly speech), taken only on sessions with
+    the stream-voice consent; Prisma transcribes that exact cut, because the engine copies pace and words from the sample
+    (a text longer than the audio made every phrase twice too fast). Ready about 9 s into the stream.
+  - The engine reads only the language's own letters: "green chicken" in Latin letters came out as noise, in Tamil letters
+    word for word. So for GPU languages the live prompt writes English words in the target script (captions too).
+  - Speed: the engine at 1.3x kept 70% of the words (Prisma hearing 14 Tamil lines back), normal speed squeezed afterwards
+    with `atempo` 82% (untouched: 80%). So the engine speaks at 1.0 and the fit stays with `atempo`.
+  - Separate processes work in parallel, replicas inside one process do not: three lines at once 1.19 s against 2.26 s.
+    One line is 0.91 s on the machine whatever its length; 1.2-1.7 s from the laptop (machine in Seoul, about 0.45 s per
+    request through the tunnel; Opus instead of raw PCM saved about 0.5 s a line).
+  - Measured, same dense reel, sync mode, voice learned from the stream, 3 loops. Tamil only: 31 of 32 spoken phrases in the
+    copied voice (Gnani clone: 5 of 21), delay 7.5 s (Gnani clone: 14.5 s), behind p50 1.3 s / p95 3.2 s, 2 of 37 skipped,
+    80% of words heard back. Tamil + Bengali + Telugu at once: 30-31 of 31 in the copied voice each, delay 9 s, behind
+    p50 0.4-1.1 s / p95 2.8-3.2 s, 1 of 34 skipped, 85-89% of words heard back (Bengali, Telugu).
+  - Not known: how close the voice sounds to the speaker (needs ears), behaviour with game sound under the voice.
 - [x] Demucs htdemucs on CPU: **40.3 s for 60 s of audio** (Ryzen 7 7435HS, torch 2.15 CPU, measured 2026-11-13). Silero VAD: 3.5 s for a 14 s clip including model load.
 
 ## 18. Implementation notes (M2)
