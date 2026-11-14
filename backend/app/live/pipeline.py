@@ -27,6 +27,7 @@ ENROL_MIN_RMS = 300     # PCM16 units; frames quieter than this are pauses, not 
 LIVE_FRAME_BYTES = 9600  # audio message size on the watch socket: 0.2 s at 24 kHz
 PLAYER_JITTER_MS = 300   # the web player starts an idle queue this long after the first audio arrives
 GPU_REF_MIN_MS, GPU_REF_MS = 3500, 7000  # the voice sample for the GPU engine: the last 7 s before a pause (at least 3.5 s)
+GPU_RETRY_MS = 8000        # the engine is tried again this long after it stopped answering
 GPU_VOICE_LEAD_MS = 2200  # a GPU line takes about this long to make and arrive
 SYNC_ARRIVE_MS = 100     # sync mode: audio that arrives after its moment starts this soon
 MAX_QUEUED_AUDIO = 400  # ~13 s of 1024-byte frames; beyond that we drop (the streamer's network is ahead)
@@ -35,6 +36,30 @@ MAX_QUEUED_AUDIO = 400  # ~13 s of 1024-byte frames; beyond that we drop (the st
 def _rms(pcm: bytes) -> float:
     x = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype="<i2").astype(np.float64)
     return float(np.sqrt(np.mean(x ** 2))) if len(x) else 0.0
+
+
+def speech_cut(frames: list[bytes], want_ms: int = GPU_REF_MS, min_ms: int = GPU_REF_MIN_MS,
+               frame_ms: int = 32, keep_pause_ms: int = 160) -> bytes | None:
+    """The most recent `want_ms` of speech in `frames`, with every pause shortened to `keep_pause_ms`.
+
+    A speaker who talks in short lines ("Answer.", "B wala chalo") never gives 3.5 s in one go (measured
+    2026-11-14: the voice was learned 30 s after the first word). Joined like this, a few short lines are enough.
+    Returns None when there is less than `min_ms` of speech.
+    """
+    out: list[bytes] = []
+    voiced = gap = 0
+    for p in reversed(frames):
+        if _rms(p) >= ENROL_MIN_RMS:
+            out.append(p)
+            voiced += frame_ms
+            gap = 0
+        else:
+            gap += frame_ms
+            if gap <= keep_pause_ms:
+                out.append(p)
+        if voiced >= want_ms:
+            break
+    return b"".join(reversed(out)) if voiced >= min_ms else None
 
 
 class LivePipeline:
@@ -47,6 +72,7 @@ class LivePipeline:
         self._gpu_busy = False
         self._gpu_tries = 0
         self._gpu_fail = 0
+        self._gpu_retry_at = 0     # after three failures in a row: session time at which the engine is tried again
         self._ring: deque[tuple[int, bytes]] = deque(maxlen=700)  # ~22 s of the stream's sound, with arrival time
         self._prev_start: int | None = None
         self.stt, self.llm, self.tts = stt or get_stt(), llm or get_llm(), tts or get_tts()
@@ -211,10 +237,14 @@ class LivePipeline:
         """This language is, or is about to be, spoken by the GPU engine (so its text is written for it)."""
         consent = self.sess.row.get("voice_from_stream") or {}
         return bool(self.gpu.enabled and consent.get("consent_at") and self.gpu.speaks(lang)
-                    and self._gpu_fail < 3 and (self.gpu_ready or self._gpu_tries < 8))
+                    and self._gpu_up() and (self.gpu_ready or self._gpu_tries < 8))
+
+    def _gpu_up(self) -> bool:
+        """The engine is answering, or it is time to try it again (the tunnel reconnects by itself)."""
+        return self._gpu_fail < 3 or self.sess.now_ms() >= self._gpu_retry_at
 
     def _gpu_speaks(self, lang: str) -> bool:
-        return self.gpu_ready and self._gpu_fail < 3 and self.gpu.speaks(lang)
+        return self.gpu_ready and self._gpu_up() and self.gpu.speaks(lang)
 
     def _maybe_gpu_ref(self, text: str, now: int) -> None:
         """At a pause, the last few seconds of the stream become the voice sample for the engine, if they are
@@ -222,13 +252,9 @@ class LivePipeline:
         if self._gpu_busy or not self._gpu_wanted():
             return
         t1 = self._t_end if self._t_end is not None else now - STT_SILENCE_MS
-        frames = [p for t, p in self._ring if t1 - GPU_REF_MS <= t <= t1 + 350]  # ends in the pause after the line
-        if len(frames) * 32 < GPU_REF_MIN_MS:
+        pcm = speech_cut([p for t, p in self._ring if t <= t1 + 350])
+        if pcm is None:
             return
-        loud = sum(1 for p in frames if _rms(p) >= ENROL_MIN_RMS)
-        if loud < 0.55 * len(frames):
-            return
-        pcm = b"".join(frames)
         self._gpu_busy = True
         self._gpu_tries += 1
         self.tasks.append(asyncio.create_task(self._gpu_enrol(pcm, text.strip())))
@@ -642,6 +668,7 @@ class LivePipeline:
                     return
                 except Exception as e:  # noqa: BLE001 - fail soft: this line goes to the Gnani voice instead
                     self._gpu_fail += 1
+                    self._gpu_retry_at = self.sess.now_ms() + GPU_RETRY_MS
                     log.warning("live gpu voice failed (%d): %s", self._gpu_fail, e)
             async for pcm in self.tts.synth_stream(text, lang, voice, sample_rate=sr, speed=self.s.live_tts_speed):
                 pcm = carry + pcm

@@ -364,3 +364,29 @@ async def test_gpu_voice_needs_consent_and_speaks_indian_languages_only(tmp_path
                 break
     await p.stop()
     assert [lang for lang, _ in gpu.lines] == ["ta-IN"]   # Tamil from the engine; English stays on the Gnani voice
+
+
+def test_speech_cut_joins_short_lines_and_needs_enough_speech():
+    from app.live.pipeline import speech_cut
+    loud, quiet = b"\x00\x10" * 512, b"\x00\x00" * 512      # 32 ms frames
+    line = [loud] * 30 + [quiet] * 40                        # ~1 s of speech, then a 1.3 s pause
+    assert speech_cut(line * 2) is None                      # 2 s of speech: not enough to copy a voice
+    cut = speech_cut(line * 5)                               # five short lines: 4.8 s of speech
+    assert cut is not None
+    frames = len(cut) // 1024
+    assert 150 <= frames <= 150 + 5 * 5                      # all the speech, each pause cut to 160 ms
+    long = speech_cut([loud] * 600)                          # 19 s without a pause: only the last 7 s
+    assert long is not None and 215 <= len(long) // 1024 <= 222
+
+
+async def test_gpu_voice_comes_back_after_the_engine_was_away(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.live.pipeline.get_store", lambda: LocalStore(tmp_path / "db.json"))
+    sess = LiveSession({"id": "g2", "target_langs": ["ta-IN"], "src_lang": "hi-IN",
+                        "voice_from_stream": {"consent_at": "2026-11-14T10:00:00+00:00", "consent_text": "ok"}})
+    p = LivePipeline(sess, stt=SilentSTT(), llm=MockLLM(), tts=MockTTS(), gpu=FakeGpu())
+    p.gpu_ready = True
+    assert p._gpu_speaks("ta-IN")
+    p._gpu_fail, p._gpu_retry_at = 3, sess.now_ms() + 60_000      # three failures: the Gnani voice carries on
+    assert not p._gpu_speaks("ta-IN")
+    p._gpu_retry_at = sess.now_ms() - 1                           # later the engine gets another try
+    assert p._gpu_speaks("ta-IN")
