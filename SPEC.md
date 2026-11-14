@@ -461,6 +461,9 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
   - `/streamer`: profile (`streamers` table), voice recorded once with the consent sentence read aloud, go-live wizard
     (any audio input incl. virtual cables, level meter, service health). `POST /api/streamers`, `.../voice`,
     `.../voice/preview`, `DELETE .../voice`, `GET /api/streamers/health`.
+    Also `PATCH /api/streamers/{id}` (name, channel, languages; the handle never changes) and `DELETE /api/streamers/{id}`
+    (profile + voice, handle freed). The page has a profile bar (Edit / Exit = forget on this device / Delete), an
+    "open by handle" box, and a banner for a stream this device left open (open its console / end it).
   - The recording becomes a Gnani embedding and a GPU voice: cleaned with Demucs on the GPU machine, up to three
     7 s cuts, each transcribed from the exact cut and scored; the best is stored (`ref_path`, `ref_text`, `ref_score`).
     Measured: 17.6 s for the whole request (11.7 s for the GPU voice), score 1.0 on the first cut, previews 1.6-1.9 s.

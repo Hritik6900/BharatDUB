@@ -474,3 +474,55 @@ body::after {
 .spin-rev {
   animation: spin 44s linear infinite reverse;
 }
+
+/* A border of turning light around the thing that is happening now. */
+@property --glow-a {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+.glow-ring::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(from var(--glow-a), var(--hi), var(--bn), var(--te), var(--en), var(--ta), var(--hi));
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: glow-turn 4s linear infinite;
+  pointer-events: none;
+}
+.glow-ring {
+  box-shadow: 0 0 44px -14px color-mix(in oklab, var(--te) 75%, transparent);
+}
+@keyframes glow-turn {
+  to {
+    --glow-a: 360deg;
+  }
+}
+
+/* A signal running down a line (the signal path, when every link is ready). */
+.flow-line {
+  overflow: hidden;
+}
+.flow-line::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 34%;
+  background: linear-gradient(transparent, var(--te), var(--bn), transparent);
+  animation: flow-down 2.4s linear infinite;
+}
+@keyframes flow-down {
+  from {
+    transform: translateY(-100%);
+  }
+  to {
+    transform: translateY(400%);
+  }
+}

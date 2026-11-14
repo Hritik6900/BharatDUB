@@ -103,3 +103,20 @@ def test_streamer_voice_needs_consent_and_gets_the_best_scored_cut(monkeypatch):
     assert c.delete(f"/api/streamers/{sid}/voice").json() == {"deleted": True}
     assert c.get(f"/api/streamers/{sid}").json()["voice"] is None
     assert c.post(f"/api/streamers/{sid}/voice/preview?lang=ta-IN").status_code == 403
+
+
+def test_streamer_profile_can_be_edited_and_deleted(monkeypatch):
+    setup(monkeypatch)
+    c = TestClient(app)
+    handle = "edit_" + uuid.uuid4().hex[:6]
+    sid = c.post("/api/streamers", json={"handle": handle, "display_name": "Typo", "default_langs": ["ta-IN"]}).json()["id"]
+    r = c.patch(f"/api/streamers/{sid}", json={"display_name": " Asha ", "default_langs": ["bn-IN", "te-IN", "bn-IN"]})
+    assert r.status_code == 200 and r.json()["display_name"] == "Asha" and r.json()["default_langs"] == ["bn-IN", "te-IN"]
+    assert r.json()["handle"] == handle                                      # the handle never changes
+    assert c.patch(f"/api/streamers/{sid}", json={"default_langs": ["xx-XX"]}).status_code == 400
+    assert c.patch(f"/api/streamers/{sid}", json={"display_name": "   "}).status_code == 400
+    assert c.get(f"/api/streamers/{sid}").json()["display_name"] == "Asha"   # a refused edit changed nothing
+
+    assert c.delete(f"/api/streamers/{sid}").json() == {"deleted": True}
+    assert c.get(f"/api/streamers/{sid}").status_code == 404
+    assert c.post("/api/streamers", json={"handle": handle, "display_name": "Again"}).status_code == 201   # handle is free

@@ -1,15 +1,16 @@
 "use client";
 /** Streamer Mode: profile -> voice recorded once with consent -> go live in your own voice. */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AudioLines, Check, CircleAlert, Cpu, Ear, Headphones, Languages, Mic, Play, Radio, RefreshCw, Square, Trash2, UserRound, MonitorPlay, type LucideIcon } from "lucide-react";
+import { ArrowRight, AudioLines, Check, CircleAlert, Cpu, Ear, Headphones, Languages, LogOut, Mic, MonitorPlay, Pencil, Play, Radio, RefreshCw, Square, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
 import { Shell } from "@/components/layout/Shell";
 import { Button } from "@/components/ui/Button";
 import { LanguageChip } from "@/components/ui/LanguageChip";
 import { Notice } from "@/components/ui/Notice";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { VoiceBars } from "@/components/voice/VoiceBars";
+import { VoiceField } from "@/components/voice/VoiceField";
 import { VoiceOrb } from "@/components/voice/VoiceOrb";
-import { API_BASE, api } from "@/lib/api";
+import { API_BASE, api, type LiveSession } from "@/lib/api";
 import { TARGET_LANGS, lang } from "@/lib/langs";
 
 const KEY = "bd-streamer";
@@ -88,10 +89,27 @@ export default function StreamerPage() {
       /* storage blocked */
     }
   };
+  /** Forget this profile on this device (it stays on the server and can be opened again by its handle). */
+  const exit = () => {
+    setMe(null);
+    try {
+      localStorage.removeItem(KEY);
+    } catch {
+      /* storage blocked */
+    }
+  };
   const step = !me ? 0 : !me.voice ? 1 : 2;
   return (
     <Shell dark>
-      <div className="mx-auto max-w-6xl px-5 pb-24 pt-12 sm:px-8 sm:pt-16">
+      {/* The same floor of sound as the landing page, behind the top of this one (illustration). */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-[40rem] opacity-80"
+        style={{ maskImage: "linear-gradient(#000 45%, transparent 95%)", WebkitMaskImage: "linear-gradient(#000 45%, transparent 95%)" }}
+      >
+        <VoiceField />
+      </div>
+      <div className="relative mx-auto max-w-6xl px-5 pb-24 pt-12 sm:px-8 sm:pt-16">
         <PageHeader
           icon={Radio}
           eyebrow="Streamer"
@@ -99,12 +117,17 @@ export default function StreamerPage() {
           lede="Record your voice once. Then go live on YouTube as usual: your viewers hear you in their language, from your first sentence."
         />
         <Stepper step={step} me={me} />
+        {me && <ProfileBar me={me} onChange={save} onExit={exit} />}
+        <LiveBanner />
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
           <div className="min-w-0 space-y-6">
             {!loaded ? (
               <div className="card h-64 animate-pulse" aria-hidden />
             ) : !me ? (
-              <ProfileForm onDone={save} />
+              <>
+                <ProfileForm onDone={save} />
+                <OpenProfile onDone={save} />
+              </>
             ) : !me.voice ? (
               <VoiceRecorder me={me} onDone={save} onAnalyser={setMicAn} />
             ) : (
@@ -136,7 +159,7 @@ function Stepper({ step, me }: { step: number; me: Streamer | null }) {
         const done = i < step;
         const now = i === step;
         return (
-          <li key={s.label} aria-current={now ? "step" : undefined} className={`relative overflow-hidden rounded-panel border p-3 transition-colors sm:p-4 ${now ? "border-fg/60 bg-surface" : "border-line bg-surface/50"}`}>
+          <li key={s.label} aria-current={now ? "step" : undefined} className={`relative overflow-hidden rounded-panel border p-3 transition-colors sm:p-4 ${now ? "glow-ring border-transparent bg-surface" : "border-line bg-surface/50"}`}>
             <span aria-hidden className="absolute inset-x-0 top-0 h-0.5 origin-left transition-transform duration-700" style={{ background: "var(--spectrum)", transform: `scaleX(${done || now ? 1 : 0})`, opacity: done ? 0.55 : 1 }} />
             <span className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3">
               <span className={`grid size-9 shrink-0 place-items-center rounded-full border sm:size-10 ${done ? "border-ok text-ok" : now ? "border-fg bg-fg text-on-fg" : "border-line text-muted"}`}>
@@ -152,6 +175,195 @@ function Stepper({ step, me }: { step: number; me: Streamer | null }) {
         );
       })}
     </ol>
+  );
+}
+
+/** Who is signed in on this device, with the ways out: edit, leave, delete. */
+function ProfileBar({ me, onChange, onExit }: { me: Streamer; onChange: (s: Streamer) => void; onExit: () => void }) {
+  const [mode, setMode] = useState<"view" | "edit" | "delete">("view");
+  const [name, setName] = useState(me.display_name);
+  const [channel, setChannel] = useState(me.youtube_channel);
+  const [langs, setLangs] = useState<string[]>(me.default_langs);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const toggle = (c: string) => setLangs((l) => (l.includes(c) ? l.filter((x) => x !== c) : l.length >= 4 ? l : [...l, c]));
+  const open = () => {
+    setName(me.display_name);
+    setChannel(me.youtube_channel);
+    setLangs(me.default_langs);
+    setErr("");
+    setMode("edit");
+  };
+  const run = async (what: () => Promise<void>) => {
+    setBusy(true);
+    setErr("");
+    try {
+      await what();
+      setMode("view");
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const saveEdit = () => run(async () => onChange(await api<Streamer>(`/api/streamers/${me.id}`, { method: "PATCH", body: JSON.stringify({ display_name: name, youtube_channel: channel, default_langs: langs }) })));
+  const remove = () =>
+    run(async () => {
+      await api(`/api/streamers/${me.id}`, { method: "DELETE" });
+      onExit();
+    });
+  const tool = "inline-flex h-9 items-center gap-2 rounded-chip border border-line bg-surface px-3.5 text-sm transition-colors hover:border-fg disabled:opacity-50";
+  return (
+    <section className="card rise mt-2 p-4 sm:p-5" aria-label="Your profile" style={{ animationDelay: "0.1s" }}>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+        <span aria-hidden className="grid size-11 shrink-0 place-items-center rounded-full text-lg font-semibold text-white" style={{ background: "var(--spectrum)" }}>
+          {me.display_name.trim().charAt(0).toUpperCase() || "?"}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-medium">{me.display_name}</p>
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
+            <span className="font-mono">@{me.handle}</span>
+            <span className="flex items-center gap-1.5">
+              {me.default_langs.map((c) => (
+                <span key={c} className="inline-flex items-center gap-1">
+                  <span aria-hidden className="size-1.5 rounded-full" style={{ background: lang(c).hue }} />
+                  {lang(c).name}
+                </span>
+              ))}
+            </span>
+          </p>
+        </div>
+        {mode === "view" && (
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={open} className={tool}><Pencil aria-hidden className="size-3.5" />Edit profile</button>
+            <button type="button" onClick={onExit} className={tool} title="Forget this profile on this device. It stays saved and can be opened again by its handle."><LogOut aria-hidden className="size-3.5" />Exit</button>
+            <button type="button" onClick={() => setMode("delete")} className={`${tool} hover:border-danger hover:text-danger`}><Trash2 aria-hidden className="size-3.5" />Delete</button>
+          </div>
+        )}
+      </div>
+
+      {mode === "edit" && (
+        <div className="mt-5 space-y-5 border-t border-line pt-5">
+          <div className="grid gap-5 sm:grid-cols-2">
+            <label className="block">
+              <span className="font-medium">Name viewers see</span>
+              <input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} className="input mt-2" />
+              {me.voice && <span className="mt-1.5 block text-sm text-muted">Your recorded voice stays: the consent was yours, whatever the name.</span>}
+            </label>
+            <label className="block">
+              <span className="font-medium">YouTube channel <span className="text-sm font-normal text-muted">optional</span></span>
+              <input value={channel} onChange={(e) => setChannel(e.target.value)} placeholder="https://youtube.com/@…" className="input mt-2" />
+            </label>
+          </div>
+          <LangPicker langs={langs} toggle={toggle} label="Languages you want to be heard in" />
+          <p className="text-sm text-muted">The handle @{me.handle} cannot be changed. For another handle, delete this profile and make a new one.</p>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={saveEdit} disabled={busy || !name.trim() || !langs.length}>{busy ? "Saving…" : "Save"}</Button>
+            <Button variant="secondary" onClick={() => setMode("view")} disabled={busy}><X aria-hidden className="size-4" />Cancel</Button>
+          </div>
+        </div>
+      )}
+      {mode === "delete" && (
+        <div className="mt-5 space-y-4 border-t border-line pt-5">
+          <p>Delete <span className="font-medium">@{me.handle}</span> for good? The profile{me.voice ? ", your recorded voice and its copies" : ""} will be removed, and the handle becomes free.</p>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="danger" onClick={remove} disabled={busy}><Trash2 aria-hidden className="size-4" />{busy ? "Deleting…" : "Yes, delete it"}</Button>
+            <Button variant="secondary" onClick={() => setMode("view")} disabled={busy}>Keep it</Button>
+          </div>
+        </div>
+      )}
+      {err && <div className="mt-4"><Notice tone="error" role="alert">{err}</Notice></div>}
+    </section>
+  );
+}
+
+/** A stream this device started and has not ended: go back to its console, or end it. */
+function LiveBanner() {
+  const [saved, setSaved] = useState<{ sid: string } | null>(null);
+  const [info, setInfo] = useState<LiveSession | null>(null);
+  const [busy, setBusy] = useState(false);
+  const forget = () => {
+    try {
+      localStorage.removeItem(LIVE_KEY);
+    } catch {
+      /* storage blocked */
+    }
+    setSaved(null);
+    setInfo(null);
+  };
+  useEffect(() => {
+    let sid = "";
+    try {
+      sid = JSON.parse(localStorage.getItem(LIVE_KEY) ?? "{}").sid ?? "";
+    } catch {
+      /* storage blocked or not JSON */
+    }
+    if (!sid) return;
+    setSaved({ sid });
+    api<LiveSession>(`/api/live/sessions/${sid}`)
+      .then((x) => (x.status === "ended" ? forget() : setInfo(x)))
+      .catch(forget); // the session is gone
+  }, []);
+  if (!saved || !info) return null;
+  const end = async () => {
+    setBusy(true);
+    await api(`/api/live/sessions/${saved.sid}/stop`, { method: "POST" }).catch(() => {});
+    forget();
+    setBusy(false);
+  };
+  const live = info.status === "live";
+  return (
+    <section className="rise mt-2 flex flex-wrap items-center gap-x-4 gap-y-3 rounded-card border p-4 sm:p-5" style={{ borderColor: "color-mix(in oklab, var(--danger) 55%, var(--line))", background: "color-mix(in oklab, var(--danger) 9%, var(--surface))" }} aria-label="Your open stream">
+      <span className={`size-2.5 shrink-0 rounded-full bg-danger ${live ? "pulse-dot" : ""}`} />
+      <div className="min-w-0 flex-1">
+        <p className="font-medium">{live ? "You are on air" : "You have a stream set up that has not gone live yet"}</p>
+        <p className="text-sm text-muted">
+          {info.target_langs.map((c) => lang(c).name).join(", ")}
+          {live ? ` · ${info.viewers} listening` : ""}. Starting a new stream below replaces it.
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <a href="/live" className="inline-flex h-10 items-center gap-2 rounded-chip bg-fg px-4 text-sm font-medium text-on-fg hover:opacity-90">
+          Open its console
+          <ArrowRight aria-hidden className="size-4" />
+        </a>
+        <button type="button" onClick={end} disabled={busy} className="inline-flex h-10 items-center gap-2 rounded-chip border border-line bg-surface px-4 text-sm hover:border-fg disabled:opacity-50">
+          <Square aria-hidden className="size-3.5 fill-current" />
+          {busy ? "Ending…" : "End this stream"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+/** Already have a profile (made on another device, or after Exit)? Open it by its handle. */
+function OpenProfile({ onDone }: { onDone: (s: Streamer) => void }) {
+  const [handle, setHandle] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const open = async () => {
+    setBusy(true);
+    setErr("");
+    try {
+      onDone(await api<Streamer>(`/api/streamers/@${handle.trim().replace(/^@/, "")}`));
+    } catch {
+      setErr("No profile with that handle.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="card rise p-5 sm:p-6" aria-labelledby="op-h" style={{ animationDelay: "0.08s" }}>
+      <h2 id="op-h" className="eyebrow">Already have a profile?</h2>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <span className="relative block min-w-0 flex-1">
+          <span aria-hidden className="pointer-events-none absolute inset-y-0 left-4 flex items-center text-muted">@</span>
+          <input value={handle} onChange={(e) => setHandle(e.target.value.toLowerCase())} onKeyDown={(e) => e.key === "Enter" && handle.trim() && void open()} placeholder="your_handle" maxLength={25} aria-label="Your handle" className="input" style={{ paddingLeft: "2.25rem" }} />
+        </span>
+        <Button variant="secondary" onClick={open} disabled={busy || !handle.trim()}>{busy ? "Opening…" : "Open it"}</Button>
+      </div>
+      {err && <p role="alert" className="mt-2 text-sm text-danger">{err}</p>}
+    </section>
   );
 }
 
@@ -222,7 +434,7 @@ function SignalPath({ analyser, playing, health, checkedAt, onCheck, hasVoice }:
 
       {health === "down" && <div className="mt-5"><Notice tone="error" role="alert">The backend did not answer, so the services below are unknown.</Notice></div>}
       <ol className="relative mt-6 space-y-1">
-        <span aria-hidden className="absolute bottom-5 left-[19px] top-5 w-px bg-line" />
+        <span aria-hidden className={`absolute bottom-5 left-[19px] top-5 w-px bg-line ${h && h.gnani && h.llm && up > 0 ? "flow-line" : ""}`} />
         {rows.map((r) => (
           <li key={r.label} className="relative flex items-center gap-3 py-1.5">
             <span className={`grid size-10 shrink-0 place-items-center rounded-full border bg-bg ${r.ok ? "border-ok/60" : r.ok === false ? "border-danger/70" : "border-line"}`}>

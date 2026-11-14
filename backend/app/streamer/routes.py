@@ -92,6 +92,43 @@ async def read_streamer(sid: str) -> dict[str, Any]:
     return await public(await get_streamer(sid))
 
 
+class EditStreamer(BaseModel):
+    display_name: str | None = Field(default=None, min_length=1, max_length=60)
+    youtube_channel: str | None = None
+    default_langs: list[str] | None = Field(default=None, min_length=1, max_length=4)
+
+
+@router.patch("/api/streamers/{sid}")
+async def edit_streamer(sid: str, body: EditStreamer) -> dict[str, Any]:
+    """Name, channel and languages. The handle stays, and so does a recorded voice (its consent was the speaker's)."""
+    s = await get_streamer(sid)
+    fields: dict[str, Any] = {}
+    if body.display_name is not None:
+        if not body.display_name.strip():
+            raise HTTPException(400, "A name is needed.")
+        fields["display_name"] = body.display_name.strip()
+    if body.youtube_channel is not None:
+        fields["youtube_channel"] = body.youtube_channel.strip()[:120]
+    if body.default_langs is not None:
+        bad = [lg for lg in body.default_langs if lg not in LANG_NAMES]
+        if bad:
+            raise HTTPException(400, f"unsupported language: {bad}")
+        fields["default_langs"] = list(dict.fromkeys(body.default_langs))
+    if fields:
+        s = await get_store().update("streamers", s["id"], fields) or s
+    return await public(s)
+
+
+@router.delete("/api/streamers/{sid}")
+async def delete_streamer(sid: str) -> dict[str, bool]:
+    """The profile and, with it, the recorded voice and its copies. The handle becomes free again."""
+    s = await get_streamer(sid)
+    if s.get("voice_profile_id"):
+        await _drop_voice(s["voice_profile_id"])
+    await get_store().delete("streamers", id=s["id"])
+    return {"deleted": True}
+
+
 @router.post("/api/streamers/{sid}/voice", status_code=201)
 async def record_voice(
     sid: str,
