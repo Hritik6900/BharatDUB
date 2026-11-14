@@ -13,6 +13,7 @@ import { useLocalNumber } from "@/lib/hooks";
 import { lang } from "@/lib/langs";
 
 const BED_VOLUME = 18; // percent: the original stream under the dub
+const HOLD_MAX_S = 45; // up to this far ahead the video simply waits; beyond it, it is sent to the right place
 
 export default function WatchPage() {
   return (
@@ -30,7 +31,7 @@ function Watch() {
   const [ytAudio, setYtAudio] = useState(false);
   // The stream's own sound, kept quiet under the dub: the room, the game and the laughter stay, which is what
   // makes a dub feel in step with the picture. It is the video's own audio, so it is always in sync with it.
-  const [bed, setBed] = useState(true);
+  const [bed, setBed] = useState(false);
   const [offset, setOffset] = useLocalNumber(`bd-offset-${id}`, 0);
   const [offsetTouched, setOffsetTouched] = useState(false);
   const iframe = useRef<HTMLIFrameElement>(null);
@@ -85,12 +86,14 @@ function Watch() {
           hold.current = false;
           clock.cmd("playVideo");
         }
-      } else if ((ahead > 6 || ahead < -3) && performance.now() - lastSeek > 3000) {
-        // Far off (just joined, or the streamer jumped in the video): go there.
+      } else if ((ahead > HOLD_MAX_S || ahead < -3) && performance.now() - lastSeek > 3000) {
+        // Far off (the streamer jumped in the video, or this player fell behind): go there.
         lastSeek = performance.now();
         clock.cmd("seekTo", [Math.max(0, v - ahead - 0.4), true]);
-      } else if (ahead > 0.8 && ahead <= 6) {
-        // A little ahead (the stream has only just begun, or the delay grew): wait for the dub to catch up.
+      } else if (ahead > 0.8 && ahead <= HOLD_MAX_S) {
+        // Ahead (a viewer joins at the live edge, the stream has only just begun, or the delay grew): wait.
+        // Waiting is the only thing that works on a live stream: measured 2026-11-15, a live YouTube embed
+        // ignores a seek backwards but pauses and resumes fine, and resumes behind by as long as it waited.
         hold.current = true;
         clock.cmd("pauseVideo");
       } else if (!clock.playing()) clock.cmd("playVideo");
