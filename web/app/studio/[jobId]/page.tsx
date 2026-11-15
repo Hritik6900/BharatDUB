@@ -90,7 +90,7 @@ export default function JobPage() {
 
   if (notFound)
     return (
-      <Shell>
+      <Shell dark>
         <div className="mx-auto max-w-3xl px-5 py-24 text-center sm:px-8">
           <h1 className="h-display text-5xl">Video not found</h1>
           <p className="mt-4 text-muted">It may have expired; uploads are deleted after 24 hours.</p>
@@ -104,7 +104,7 @@ export default function JobPage() {
   const reviewLang = track && track !== "src" ? track : outputs[0]?.lang;
   const doneCount = STAGES.filter(([k]) => stageStatus(k) === "done").length;
   return (
-    <Shell>
+    <Shell dark>
       <div className="mx-auto max-w-6xl px-5 pb-24 pt-10 sm:px-8 sm:pt-14">
         <header className="rise">
           <Link href="/studio" className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-fg">

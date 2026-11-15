@@ -13,6 +13,7 @@ import {
   Outfit,
 } from "next/font/google";
 import "./globals.css";
+import { THEME_BOOT } from "@/components/layout/ThemeSwitch";
 
 const outfit = Outfit({ subsets: ["latin"], variable: "--font-outfit" });
 const serif = Instrument_Serif({ subsets: ["latin"], weight: "400", style: ["italic"], variable: "--font-serif" });
@@ -39,7 +40,10 @@ export const viewport: Viewport = { width: "device-width", initialScale: 1, them
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={fontVars}>
+    <html lang="en" className={fontVars} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
+      </head>
       <body className="min-h-dvh">
         <noscript>
           <style>{".gs-hide,[data-reveal]{visibility:visible!important}"}</style>

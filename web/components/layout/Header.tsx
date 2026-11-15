@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { AudioLines, BookA, Clapperboard, LayoutDashboard, Menu, Mic, MonitorPlay, Radio, X, type LucideIcon } from "lucide-react";
 import { useHealth } from "@/lib/hooks";
 import { Wordmark } from "./Logo";
+import { ThemeSwitch } from "./ThemeSwitch";
 
 interface NavItem {
   href: string;
@@ -123,6 +124,9 @@ export function Header() {
                 );
               })}
             </ul>
+            <span className="hidden sm:block">
+              <ThemeSwitch />
+            </span>
             <button
               type="button"
               aria-label={menu ? "Close menu" : "Open menu"}
@@ -138,6 +142,9 @@ export function Header() {
         {menu && (
           <div className="absolute inset-x-3 top-full mt-2 sm:inset-x-5 lg:hidden">
             <ul className="card card-lift rise mx-auto max-h-[75dvh] max-w-6xl overflow-y-auto p-2" style={{ animationDuration: "0.25s" }}>
+              <li className="p-2 sm:hidden">
+                <ThemeSwitch inline />
+              </li>
               {[...PRODUCTS, ...LINKS].map((l) => (
                 <li key={l.href}>
                   <Link href={l.href} onClick={() => setMenu(false)} className="flex items-center gap-3.5 rounded-panel p-3 hover:bg-sunken">

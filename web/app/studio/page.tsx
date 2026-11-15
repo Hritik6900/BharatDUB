@@ -87,7 +87,7 @@ export default function StudioPage() {
     `flex items-start gap-3.5 rounded-panel border p-4 transition-colors ${enabled ? "cursor-pointer" : "opacity-60"} ${on ? "border-fg bg-surface" : "border-line bg-surface/60 hover:border-fg/40"}`;
 
   return (
-    <Shell>
+    <Shell dark>
       <div className="mx-auto max-w-6xl px-5 pb-24 pt-12 sm:px-8 sm:pt-16">
         <PageHeader icon={Clapperboard} eyebrow="Studio" title={<>Dub a <em>video</em></>} lede="A reel, short or clip up to 3 minutes. You get it back dubbed, with subtitles, one video per language." />
 

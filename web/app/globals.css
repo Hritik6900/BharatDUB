@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-@custom-variant dark (&:where(.theme-dark, .theme-dark *));
+@custom-variant dark (&:where(.theme-dark, .theme-dark *, html[data-theme="dark"] *, html:not([data-theme="light"]) .theme-page-dark, html:not([data-theme="light"]) .theme-page-dark *));
 
 /* Bharat Dub design system v2. Warm paper, ink, and one hue per language. */
 :root {
@@ -30,7 +30,11 @@
   color-scheme: light;
 }
 
-.theme-dark {
+/* Dark tokens: a dark panel anywhere (.theme-dark), the whole site when chosen (data-theme on <html>), and the pages
+   that are dark by design (.theme-page-dark on the Shell) unless light was chosen for the whole site. */
+.theme-dark,
+html[data-theme="dark"],
+html:not([data-theme="light"]) .theme-page-dark {
   --bg: #0b0a0f;
   --fg: #f3f0ea;
   --surface: #14131a;
@@ -261,7 +265,9 @@ input[type="range"] {
   top: -520px;
   opacity: 0.38;
 }
-.theme-dark .aura::before {
+.theme-dark .aura::before,
+html[data-theme="dark"] .aura::before,
+html:not([data-theme="light"]) .theme-page-dark .aura::before {
   opacity: 0.32;
 }
 

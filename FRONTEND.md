@@ -7,7 +7,10 @@ the palette, type, orb, layouts and copy here are our own.
 ## Tokens (`web/app/globals.css`)
 
 - Surfaces: warm paper `--bg`, `--surface` (cards), `--sunken`, hairline `--line`, text `--fg` / `--muted`.
-  `.theme-dark` flips all of them; used for `/live`, `/watch`, the footer and dark panels inside light pages.
+  `.theme-dark` flips all of them; used for `/watch`, the footer and dark panels inside light pages.
+- Site theme (`components/layout/ThemeSwitch.tsx`, header button; in the menu sheet on phones): Auto = the three mode pages
+  (`/studio`, `/streamer`, `/live`, `<Shell dark>` -> `.theme-page-dark`) are dark and the rest light; Dark / Light = the whole
+  site. The choice is `data-theme` on `<html>`, kept in `localStorage` (`bd-theme`) and set before first paint.
 - One hue per language: `--hi` saffron, `--ta` teal, `--bn` rose, `--te` violet, `--en` blue. `--spectrum` is the five in a row.
   A hue marks a language (dot, bar, stripe). It never carries text: selected chips are ink-filled, so contrast never depends on a hue.
 - Type: Outfit for headings (`.h-display`, weight 500, tight tracking) and for UI and body. Accent words inside headings are
