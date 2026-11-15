@@ -40,8 +40,9 @@ the palette, type, orb, layouts and copy here are our own.
 - `VoiceBars`: canvas bars. With an `analyser` they show real audio (mic on `/live`, `/voices`, landing; dubbed audio on `/watch`).
   Without one they draw a speech-like illustration, used only inside blocks labelled as illustrations.
 - `Waveform`: single-stroke waveform for the pipeline story.
-- `VoiceWaves`: canvas behind the landing headline. Five ribbons, one per language hue, calm behind the text and wide at the
-  sides, swelling near the pointer; pauses off-screen; small and behind the headline only on phones. An illustration.
+- `VoiceField`: canvas behind the landing hero. A floor of dots in perspective that moves like sound: ripples leave the
+  voice under the headline, the floor runs through the language hues left to right, three lights swell as it speaks, and
+  the pointer makes its own ripple. Dimmer behind the text; pauses off-screen. An illustration.
 - `lib/useMic.ts`: `useMic` (local mic, visuals only, nothing sent) and `useAnalyser` (tap an existing audio node).
 
 ## Landing sections (`components/home/`)
