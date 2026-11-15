@@ -8,7 +8,7 @@ import { LinkButton } from "@/components/ui/Button";
 import { LanguageChip } from "@/components/ui/LanguageChip";
 import { VoiceBars } from "@/components/voice/VoiceBars";
 import { VoiceOrb } from "@/components/voice/VoiceOrb";
-import { HeroOrb } from "@/components/voice/HeroOrb";
+import { VoiceField } from "@/components/voice/VoiceField";
 import { useReducedMotion } from "@/lib/hooks";
 import { HEADLINE, lang } from "@/lib/langs";
 
@@ -61,14 +61,14 @@ export function Hero() {
   const s = lang(SCRIPTS[script]);
   return (
     <section ref={root} className="relative px-5 pb-16 pt-14 sm:px-8 sm:pt-20">
-      {/* The voice: one large living orb behind the headline (illustration). It fades out where the console begins. */}
+      {/* A floor of sound behind the whole hero (illustration). It fades out where the console begins. */}
       <div
         data-h="waves"
         aria-hidden
-        className="gs-hide pointer-events-none absolute inset-x-0 -top-24 h-[52rem] overflow-hidden sm:h-[58rem]"
-        style={{ maskImage: "linear-gradient(#000 70%, transparent 98%)", WebkitMaskImage: "linear-gradient(#000 70%, transparent 98%)" }}
+        className="gs-hide pointer-events-none absolute inset-x-0 top-0 h-[46rem] sm:h-[52rem]"
+        style={{ maskImage: "linear-gradient(#000 62%, transparent 96%)", WebkitMaskImage: "linear-gradient(#000 62%, transparent 96%)" }}
       >
-        <HeroOrb lift={96} />
+        <VoiceField />
       </div>
       <div className="relative mx-auto max-w-4xl text-center">
         <p data-h="eyebrow" className="gs-hide eyebrow inline-flex items-center gap-2 rounded-chip border border-line bg-surface/70 px-3.5 py-1.5 backdrop-blur">
