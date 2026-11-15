@@ -8,6 +8,7 @@ import { LinkButton } from "@/components/ui/Button";
 import { LanguageChip } from "@/components/ui/LanguageChip";
 import { VoiceBars } from "@/components/voice/VoiceBars";
 import { VoiceOrb } from "@/components/voice/VoiceOrb";
+import { VoiceWaves } from "@/components/voice/VoiceWaves";
 import { useReducedMotion } from "@/lib/hooks";
 import { HEADLINE, lang } from "@/lib/langs";
 
@@ -46,6 +47,7 @@ export function Hero() {
     () => {
       if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
       const tl = gsap.timeline({ defaults: { ease: "power3.out" } });
+      tl.fromTo("[data-h='waves']", { autoAlpha: 0 }, { autoAlpha: 1, duration: 1.8, ease: "power2.out" }, 0);
       tl.fromTo("[data-h='eyebrow']", { autoAlpha: 0, y: 12 }, { autoAlpha: 1, y: 0, duration: 0.6 })
         .fromTo("[data-h='line']", { autoAlpha: 0, yPercent: 110 }, { autoAlpha: 1, yPercent: 0, duration: 1.1, stagger: 0.12, ease: "expo.out" }, "-=0.35")
         .fromTo("[data-h='fade']", { autoAlpha: 0, y: 16 }, { autoAlpha: 1, y: 0, duration: 0.7, stagger: 0.09 }, "-=0.7")
@@ -59,7 +61,16 @@ export function Hero() {
   const s = lang(SCRIPTS[script]);
   return (
     <section ref={root} className="relative px-5 pb-16 pt-14 sm:px-8 sm:pt-20">
-      <div className="mx-auto max-w-4xl text-center">
+      {/* The voice, flowing behind the headline (illustration). Faded at the edges so it never fights the text. */}
+      <div
+        data-h="waves"
+        aria-hidden
+        className="gs-hide pointer-events-none absolute inset-x-0 top-0 h-[40rem] sm:h-[44rem]"
+        style={{ maskImage: "radial-gradient(62% 58% at 50% 54%, #000 30%, transparent 100%)", WebkitMaskImage: "radial-gradient(62% 58% at 50% 54%, #000 30%, transparent 100%)" }}
+      >
+        <VoiceWaves />
+      </div>
+      <div className="relative mx-auto max-w-4xl text-center">
         <p data-h="eyebrow" className="gs-hide eyebrow inline-flex items-center gap-2 rounded-chip border border-line bg-surface/70 px-3.5 py-1.5 backdrop-blur">
           <Sparkles aria-hidden className="size-3.5" />
           Voice AI for Indian creators
