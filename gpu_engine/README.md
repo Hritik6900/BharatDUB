@@ -16,6 +16,11 @@ bash start_sep.sh           # Studio separation on port 9010
 `voice_engine_live.py` is the whole engine (written again on 20 Nov 2026: the first one, and `voice_engine.py` that
 `make_live_engine.py` patched, were lost with the first machine). After a machine restart only the two `start_*.sh` are needed.
 
+**Speed, measured 21 Nov 2026** (bf16, 12 steps): one line 439 ms on the GPU, 0.79 s from the laptop; three at once
+0.97 s. Both halves of the guidance run as one batch (`CFG_BATCH=1`, about twice as fast as the library's two
+passes) and lines come back as MP3 (30 ms to make; Opus took 144 ms). `python bench_cfg.py ref.wav "its words"`
+repeats the comparison.
+
 **MPS matters.** Without it the three processes take turns on the GPU. Measured 20 Nov 2026 on a GCP A100: one line
 1.0 s, two at once 2.1 s, three at once 3.2 s; with MPS 0.9 s / 0.95 s / 1.1 s. `start_live.sh` starts the MPS daemon as
 the login user (`MPS=0` to skip). bf16 is about 10% faster than fp32 with clean output; fp16 gave NaN.

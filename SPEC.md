@@ -541,4 +541,21 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
     Streamer Mode, stored voice, Punjabi + Bengali: 34 of 34 and 29 of 31, first audio p50 3.2-3.3 s, behind p50 0 s /
     p95 1.7-2.8 s.
   - A request through the SSH tunnel costs a median 410 ms although the network round trip is 170 ms; not solved.
+- [x] GPU engine made faster (2026-11-21; A100 40 GB; model = IndicF5 DiT 337.1 M parameters + Vocos vocoder 13.6 M):
+  - In bf16 one engine keeps the GPU only 39% busy: the time is Python overhead, not GPU work. The library calls the
+    network twice per step (with and without the sample and text). `BatchedGuidance` runs both as one batch of two and
+    makes the text embedding once per line: 10 steps 742 ms -> 366 ms, GPU 52% busy. In fp32 the two ways agree to
+    -37..-49 dB; in bf16 the log-mel distance from the fp32 audio is 0.4-1.2 dB (two-pass bf16: 0.5-0.6 dB).
+    `CFG_BATCH=0` restores the library's way. Steps are back at 12 (439 ms; 16 steps 574 ms).
+  - Making Opus took 144 ms a line on the GPU machine's CPU. MP3 (VBR, about 39 kbit/s) is the same size, takes 30 ms and
+    is closer to the line (0.48 dB against 0.73 dB log-mel). `gpu_voice_format` is now `mp3`.
+  - One line from the laptop: 1.33 s -> 0.79 s (engine 0.44 + encode 0.03 + network 0.32); three at once 1.75 s -> 0.97 s.
+    The network part is two trips of 157 ms: a 14 KB answer does not fit the first TCP window after idle.
+    A tunnel with an interactive session (TCP_NODELAY) cut a small request from 359 to 157 ms but a line not at all.
+  - GPU use, engines only, lines as a live session sends them: idle 0% and 13.1 of 40 GB (three engines + Demucs);
+    1 language at a phrase every 2.2 s: 11% average, 70% peak; 3 languages: 19% average, 100% peak, 110 W;
+    3 languages at a phrase every 1.0 s: 54% average, line still 845 ms at the median (slowest 2.6 s).
+  - Not measured end to end: Gnani speech-to-text (REST and realtime) answered every request with a failure during
+    this work ("TRANSCRIPTION_FAILED", also for a clean line made by Gnani's own voice), so no Live run and no
+    words-heard-back check of the new engine were possible.
 

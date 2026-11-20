@@ -78,7 +78,9 @@ class Settings(BaseSettings):
     gpu_voice_timeout_s: float = 6.0
     gpu_separate_url: str = ""         # Studio: Demucs on our GPU machine (gpu_engine/sep_engine.py); empty = this PC's CPU
     gpu_voice_native_speedup: bool = False  # let the engine itself speak faster when a line must be shortened
-    gpu_voice_format: str = "opus"     # how lines come back: `opus` (a tenth of the bytes) or `pcm`
+    # How lines come back from the engine: `mp3` (a tenth of the bytes of `pcm`, 30 ms to make), `opus` (same size,
+    # 144 ms to make on the GPU machine's CPU) or `pcm`.
+    gpu_voice_format: str = "mp3"
     gpu_voice_speed: float = 1.0       # < 1 = slower speech; the engine copies the pace of the voice sample
     # True: only a streamer who recorded their own voice with consent gets a copied voice, and any other Live session
     # speaks in stock voices. False (the user's choice on 15 Nov 2026): /live may also copy the voice on the stream

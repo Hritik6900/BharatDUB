@@ -94,7 +94,7 @@ class GpuVoice:
         except ValueError:
             self.last_synth_ms = None
         rate = int(resp.headers.get("x-sample-rate", "24000"))
-        if resp.headers.get("x-format") == "opus":
+        if resp.headers.get("x-format") in ("mp3", "opus"):   # a compressed file: decode it (libsndfile reads both)
             x, rate = sf.read(io.BytesIO(resp.content), dtype="int16", always_2d=False)
             pcm = np.ascontiguousarray(x).astype("<i2").tobytes()
         else:

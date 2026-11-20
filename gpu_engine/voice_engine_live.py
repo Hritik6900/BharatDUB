@@ -3,8 +3,8 @@
   NFE=12 python -m uvicorn voice_engine_live:app --host 127.0.0.1 --port 9001     (start_live.sh runs three of these)
 
   POST /ref     multipart: session_id, ref_text, audio (3-10 s of speech, any sample rate)  -> the voice to copy
-  POST /tts     json: {session_id, text, lang, speed, fmt}  -> audio (24 kHz mono; raw PCM16, or OGG/Opus with fmt="opus")
-                headers: X-Synth-Ms, X-Sample-Rate, X-Format, X-Ref-Version, X-Speed
+  POST /tts     json: {session_id, text, lang, speed, fmt}  -> audio (24 kHz mono; raw PCM16, or fmt = "mp3" | "opus")
+                headers: X-Synth-Ms, X-Encode-Ms, X-Sample-Rate, X-Format, X-Ref-Version, X-Speed
   GET  /health
 
 One process speaks one line at a time; run several processes for several lines at once (measured: replicas inside one
@@ -33,6 +33,10 @@ REPO = "ai4bharat/IndicF5"
 NFE = int(os.environ.get("NFE", "12"))          # denoising steps: 32 is the model's default, 12 is about 2.5x faster
 # bf16 is about 10% faster than fp32 with clean output; fp16 gave NaN (measured 20 Nov 2026).
 BF16 = os.environ.get("PRECISION", "bf16") == "bf16"
+# 1 = both halves of the guidance in one batch (see BatchedGuidance); 0 = the library's two passes per step.
+# Measured 21 Nov 2026, bf16, 10 steps: one line 742 ms -> 366 ms, GPU busy 39% -> 52%; log-mel distance from the
+# fp32 two-pass audio 0.4-1.2 dB (two-pass bf16: 0.5-0.6 dB). In fp32 the two ways agree to -37..-49 dB.
+BATCH_CFG = os.environ.get("CFG_BATCH", "1") == "1"
 SR = 24000
 REF_DIR = Path(os.environ.get("REF_DIR", "/tmp/voice_refs"))
 
@@ -45,6 +49,48 @@ lock = asyncio.Lock()               # one line at a time on this process
 
 def quiet(*_a, **_k) -> None:
     pass
+
+
+class BatchedGuidance(torch.nn.Module):
+    """Both halves of classifier-free guidance in one pass through the network.
+
+    The library's sampler calls the network twice on every step: once with the voice sample and the text, once with both
+    dropped, and mixes the two results. This wrapper answers the first call by running both as one batch of two and
+    hands the second result back when the sampler asks for it. The text is the same on every step of a line, so its
+    embedding is made once per line instead of twice per step. Same arithmetic, half the network calls.
+    Anything it does not recognise (a batch, a mask, only one of the two dropped) goes to the network unchanged.
+    """
+
+    def __init__(self, dit: torch.nn.Module) -> None:
+        super().__init__()
+        self.dit = dit
+        self._null = None    # the "dropped" half of the last batched call, waiting to be asked for
+        self._text = None    # the text tensor the cached embedding belongs to (kept, so its identity cannot be reused)
+        self._embed = None
+
+    def forward(self, x, cond, text, time, drop_audio_cond, drop_text, mask=None):  # noqa: ANN001, ANN201
+        d = self.dit
+        if drop_audio_cond and drop_text and self._null is not None:
+            out, self._null = self._null, None
+            return out
+        self._null = None
+        if drop_audio_cond or drop_text or mask is not None or x.shape[0] != 1:
+            return d(x=x, cond=cond, text=text, time=time, drop_audio_cond=drop_audio_cond, drop_text=drop_text, mask=mask)
+        seq_len = x.shape[1]
+        t = d.time_embed(time.repeat(2) if time.ndim == 0 else time.expand(2))
+        if self._text is not text or self._embed.shape[1] != seq_len:
+            self._embed = torch.cat([d.text_embed(text, seq_len, drop_text=False), d.text_embed(text, seq_len, drop_text=True)])
+            self._text = text
+        h = d.input_embed(x.expand(2, -1, -1), torch.cat([cond, torch.zeros_like(cond)]), self._embed, drop_audio_cond=False)
+        rope = d.rotary_embed.forward_from_seq_len(seq_len)
+        residual = h
+        for block in d.transformer_blocks:
+            h = block(h, t, mask=None, rope=rope)
+        if d.long_skip_connection is not None:
+            h = d.long_skip_connection(torch.cat((h, residual), dim=-1))
+        out = d.proj_out(d.norm_out(h, t))
+        self._null = out[1:]
+        return out[:1]
 
 
 def _load() -> None:
@@ -61,6 +107,8 @@ def _load() -> None:
         missing, unexpected = target.load_state_dict(part, strict=False)
         print(f"[voice-engine] {prefix} {len(part)} tensors, missing {len(missing)}, unexpected {len(unexpected)}")
     model.eval()
+    if BATCH_CFG:
+        model.transformer = BatchedGuidance(model.transformer)
     # Warm up on one of the repo's own prompts, so the first real line is not the slow one.
     wav = sorted(glob.glob(str(snap / "prompts" / "*.wav")))
     if wav:
@@ -90,10 +138,15 @@ def _encode(wave: np.ndarray, fmt: str) -> bytes:
     if peak > 0.98:
         wave = wave * (0.98 / peak)
     pcm = (wave * 32767.0).astype("<i2")
-    if fmt != "opus":
+    if fmt == "pcm":
         return pcm.tobytes()
     buf = io.BytesIO()
-    sf.write(buf, pcm, SR, format="OGG", subtype="OPUS")
+    if fmt == "mp3":
+        # Measured 21 Nov 2026 on 3 s lines: MP3 at this setting 14.0 KB, 30 ms to make, 0.48 dB from the line on a
+        # log-mel scale; Opus 13.4 KB, 144 ms, 0.73 dB. Same size, so the same trips over the network, 113 ms sooner.
+        sf.write(buf, pcm, SR, format="MP3", subtype="MPEG_LAYER_III", compression_level=0.7, bitrate_mode="VARIABLE")
+    else:
+        sf.write(buf, pcm, SR, format="OGG", subtype="OPUS")
     return buf.getvalue()
 
 
@@ -127,7 +180,7 @@ class Line(BaseModel):
     text: str
     lang: str = ""
     speed: float = 1.0   # > 1 = faster speech
-    fmt: str = "pcm"     # "opus" = OGG/Opus, about a tenth of the bytes
+    fmt: str = "pcm"     # "mp3" or "opus": about a tenth of the bytes of raw PCM
     nfe: int = 0         # 0 = this process's NFE; set only to compare settings
 
 
@@ -146,13 +199,16 @@ async def tts(req: Line) -> Response:
         except Exception as e:  # noqa: BLE001
             raise HTTPException(500, f"synthesis failed: {str(e)[:200]}") from e
         ms = (time.perf_counter() - t0) * 1000
-    fmt = "opus" if req.fmt == "opus" else "pcm"
-    return Response(content=_encode(wave, fmt), media_type="application/octet-stream", headers={
-        "X-Synth-Ms": f"{ms:.0f}", "X-Sample-Rate": str(SR), "X-Format": fmt, "X-Ref-Version": str(ref["version"]),
+    fmt = req.fmt if req.fmt in ("opus", "mp3") else "pcm"
+    t0 = time.perf_counter()
+    body = _encode(wave, fmt)
+    return Response(content=body, media_type="application/octet-stream", headers={
+        "X-Synth-Ms": f"{ms:.0f}", "X-Encode-Ms": f"{(time.perf_counter() - t0) * 1000:.0f}",
+        "X-Sample-Rate": str(SR), "X-Format": fmt, "X-Ref-Version": str(ref["version"]),
         "X-Speed": str(speed), "X-Audio-Ms": f"{wave.size / SR * 1000:.0f}"})
 
 
 @app.get("/health")
 async def health() -> dict:
-    return {"ok": model is not None, "nfe": NFE, "bf16": BF16, "voices": len(refs),
+    return {"ok": model is not None, "nfe": NFE, "bf16": BF16, "batched_guidance": BATCH_CFG, "voices": len(refs),
             "gpu_gb": round(torch.cuda.memory_allocated() / 1e9, 2) if model is not None else 0}
