@@ -7,7 +7,7 @@ behaviour stay; every new behaviour sits behind a setting.
 ## 1. Product
 
 A streamer makes a profile, records their voice once with consent, and goes live on YouTube with OBS as usual.
-Their voice (mic, or a virtual cable carrying OBS audio for demos) goes into our console. Viewers open our
+Their voice (mic, or a virtual cable carrying OBS audio) goes into our console. Viewers open our
 page: the streamer's YouTube live video (muted) + the dub in the streamer's own voice + captions, lined up
 with the video. Viewers chat in their language; the streamer sees it translated. One pipeline per stream.
 
@@ -58,7 +58,7 @@ Do not write a second phraser, limiter, audio bus or player. Do not add binary f
 
 ### C. Go-live wizard and console (`/streamer`)
 - Input: list all audio inputs (virtual ones too) with a level meter; `getUserMedia` with echo cancellation,
-  noise suppression and auto gain OFF. Card "Demo with a recording": VB-Cable + OBS "Monitor and Output".
+  noise suppression and auto gain OFF. Card "Stream a recording": VB-Cable + OBS "Monitor and Output".
 - YouTube live video id with embed preview, languages (GPU languages + English), voice mode.
 - Health before start, all measured live: Prisma, Gemini, Gnani TTS, each GPU engine, the voice's score.
 - Console: reuse `/live` (transcript, captions, delay, chat, overlay link, viewer link + QR, Stop).
@@ -87,7 +87,7 @@ Cloning needs a streamer profile with consent. A session without `streamer_id` u
 | 2 | Sessions with the stored voice (B) + wizard and input devices (C) | A replayed session: first spoken phrase is in the copied voice; engines-down run falls back cleanly |
 | 3 | Offset sync + calibration (D) | Viewer page on a real YouTube live: dub starts within 1 s of the video moment for 80% of phrases |
 | 4 | Safety rule (E) + health panel | No session without a consented streamer can clone; health shows every provider |
-| 5 | `eval/replay_live.py`, README, demo rehearsal | Numbers in `eval/results.csv`, phone demo: QR -> viewer -> Tamil -> chat round trip |
+| 5 | `eval/replay_live.py`, README, end-to-end check on a phone | Numbers in `eval/results.csv`; on a phone: QR -> viewer -> Tamil -> chat round trip |
 
 Stop and report only when a phase misses its "done when".
 

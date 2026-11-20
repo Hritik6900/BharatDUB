@@ -34,7 +34,7 @@ class Store(Protocol):
 
 
 class LocalStore:
-    """Single-process JSON store. Good enough for a laptop demo; not for concurrency across processes."""
+    """Single-process JSON store. Good enough for one machine; not for concurrency across processes."""
 
     def __init__(self, path: Path) -> None:
         self.path = path

@@ -1,7 +1,7 @@
 # GPU voice engine for Live
 
 Our own voice engine (IndicF5 on an A100) gives Live the speaker's copied voice without Gnani's
-one-request-at-a-time limit. It is not a Gnani model; Studio and everything else still use Gnani.
+one-request-at-a-time limit. Speech-to-text, stock voices and Studio's copied voice still come from Gnani.
 
 On a fresh GPU machine (everything goes under `~/voice_engine`, no root needed):
 

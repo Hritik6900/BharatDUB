@@ -70,10 +70,10 @@ function VoiceCard() {
 function StackCard() {
   const h = useHealth();
   const rows = [
-    { icon: Ear, name: "Prisma", role: "speech to text", key: "gnani" as const, ai: true },
-    { icon: AudioLines, name: "Timbre and Vachana", role: "voice and cloning", key: "gnani" as const, ai: true },
-    { icon: Languages, name: "Translation model", role: "Evon or a backup", key: "llm" as const, ai: true },
-    { icon: Database, name: "Supabase", role: "storage", key: "supabase" as const, ai: false },
+    { icon: Ear, name: "Speech to text", role: "Gnani Prisma", key: "gnani" as const, ai: true },
+    { icon: AudioLines, name: "Stock voices", role: "Gnani Timbre", key: "gnani" as const, ai: true },
+    { icon: Languages, name: "Translation", role: "Gemini, or any compatible model", key: "llm" as const, ai: true },
+    { icon: Database, name: "Storage", role: "Supabase", key: "supabase" as const, ai: false },
   ];
   const status = (key: "gnani" | "llm" | "supabase", ai: boolean) => {
     if (h === null) return { label: "Checking", tone: "wait" };
@@ -104,8 +104,8 @@ function StackCard() {
           );
         })}
       </ul>
-      <h3 className="h-display mt-7 text-[1.6rem]">Built on Gnani speech models</h3>
-      <p className="mt-2 text-muted">Prisma listens, Timbre and Vachana speak. The status above is read live from this server.</p>
+      <h3 className="h-display mt-7 text-[1.6rem]">Every part can be swapped</h3>
+      <p className="mt-2 text-muted">Each step sits behind its own interface, and your copied voice runs on our own engine. The status above is read live from this server.</p>
     </article>
   );
 }

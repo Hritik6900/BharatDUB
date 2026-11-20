@@ -47,7 +47,7 @@ function StatusBar() {
       ) : (
         <span>
           Mock mode: speech, translation and voices are simulated
-          <span className="hidden md:inline"> until the Gnani and LLM keys are added. Numbers shown come from the simulation</span>.
+          <span className="hidden md:inline"> until the speech and translation keys are added. Numbers shown come from the simulation</span>.
         </span>
       )}
     </div>

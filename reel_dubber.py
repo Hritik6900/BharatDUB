@@ -9,16 +9,16 @@ Pipeline:
   video -> extract audio -> split vocals | background (Demucs)
         -> speech segments (Silero VAD, each <= 25s because Prisma REST takes max 30s)
         -> Prisma v3.0 STT (indic-auto, handles Hinglish)
-        -> LLM translation (Evon or any OpenAI-compatible endpoint), keeps slang/brand terms
+        -> LLM translation (any OpenAI-compatible endpoint), keeps slang/brand terms
         -> Timbre v2.5 TTS, or cloned creator voice (vachana-vc-v1)
         -> time-fit each line into its original slot -> mix over background music
         -> dubbed MP4 + SRT subtitles per language
 
 Usage:
   export GNANI_API_KEY=...            # from app.gnani.ai
-  export LLM_BASE_URL=...             # OpenAI-compatible, e.g. your Evon endpoint (.../v1)
+  export LLM_BASE_URL=...             # any OpenAI-compatible endpoint
   export LLM_API_KEY=...
-  export LLM_MODEL=...                # e.g. gnani/gnani-evon-v3.3-30B-A3B
+  export LLM_MODEL=...                # e.g. gemini-3.5-flash
   python reel_dubber.py my_reel.mp4 --langs ta-IN,bn-IN --clone --consent
 """
 import argparse
@@ -200,7 +200,7 @@ def main():
     if not GNANI_KEY:
         sys.exit("Set GNANI_API_KEY")
     if not (LLM_BASE_URL and LLM_MODEL):
-        sys.exit("Set LLM_BASE_URL and LLM_MODEL (OpenAI-compatible endpoint, e.g. Evon)")
+        sys.exit("Set LLM_BASE_URL and LLM_MODEL (any OpenAI-compatible endpoint)")
     if a.clone and not a.consent:
         sys.exit("Voice cloning needs the speaker's consent. Re-run with --consent once you have it.")
 

@@ -1,26 +1,54 @@
 # Bharat Dub
 
-One voice, every Indian language. **Studio** dubs your reels and shorts into Tamil, Bengali, Telugu and English in your own
-cloned voice, with the background music kept. **Live** dubs a Hindi/Hinglish stream for viewers in real time.
+One voice, every Indian language. Bharat Dub dubs videos and live streams into nine Indian languages and English,
+in the speaker's own voice.
 
-Built on Gnani AI models: Prisma (speech-to-text), Timbre (text-to-speech) and Vachana voice cloning. Translation uses
-an OpenAI-compatible LLM (Evon or a backup).
+| Mode | What it does |
+|---|---|
+| **Studio** (`/studio`) | Upload a reel, short or video up to 3 minutes. It comes back dubbed in the languages you pick, in your own copied voice, with the background music kept and subtitles. Every line can be edited and re-voiced. |
+| **Streamer** (`/streamer`) | Record your voice once, with consent, and go live. Viewers pick a language and hear you in your own voice from the first sentence, timed to your stream. |
+| **Live** (`/live`, `/watch/[id]`) | Dub any stream that is playing, for its viewers, in real time, with captions and translated chat. |
 
-See [SPEC.md](SPEC.md) for the build spec and [FRONTEND.md](FRONTEND.md) for the design system.
+A voice is copied only with recorded consent, every output is labelled "AI-dubbed", and uploads are deleted after 24 hours.
+
+**Status.** A working product in development. It runs end to end on real services, and every number below was
+measured. It is not open to the public yet: there are no accounts, no hosting and no pricing. The list of what is
+missing is in [SPEC.md](SPEC.md), section 20.
+
+See [SPEC.md](SPEC.md) for the product and build spec, [STREAMER_MODE.md](STREAMER_MODE.md) for Streamer mode and
+[FRONTEND.md](FRONTEND.md) for the design system.
+
+## How it works
+
+Speech is turned into text, translated the way a creator talks, and spoken again in the same voice, timed to the
+video. Each step sits behind an interface in `backend/app/providers/`, so a provider can be replaced without touching
+the pipelines, and each has a fallback.
+
+| Step | What runs today | Fallback |
+|---|---|---|
+| Speech-to-text | Gnani Prisma (REST for Studio, realtime with partial results for Live) | none yet |
+| Translation | Gemini Flash and Flash-Lite through an OpenAI-compatible endpoint | the larger model redoes a reply in the wrong script |
+| Copied voice, Live and Streamer | Our own engine: IndicF5 (337 M parameters) on an A100, three processes ([gpu_engine/](gpu_engine/README.md)) | Gnani Vachana for the first language, stock voices for the rest |
+| Copied voice, Studio | Gnani Vachana | stock voice |
+| Stock voices, English | Gnani Timbre | - |
+| Music and voice separation | Demucs, on the GPU machine when it is reachable | Demucs on the CPU |
+| Speech detection, cutting, mixing | Silero VAD, ffmpeg | fixed windows |
 
 ## Layout
 
 ```
-backend/         FastAPI app (providers, studio, live), tests, scripts/smoke.py
+backend/         FastAPI app (providers, studio, live, streamer), tests, scripts, eval
 web/             Next.js (App Router, TypeScript, Tailwind v4)
-ingest_client/   streamer mic -> backend WebSocket (M3)
+gpu_engine/      our voice engine and separation service for a GPU machine
+ingest_client/   microphone -> backend WebSocket, for a streamer without the browser console
 supabase/        SQL migrations
-reel_dubber.py   single-file Studio prototype (reference)
+reel_dubber.py   the first single-file version of Studio (reference only)
 ```
 
 ## Setup
 
-Requirements: Python 3.11+, Node 20+, ffmpeg on PATH (needed from M2 on), a Supabase project.
+Requirements: Python 3.11+, Node 20+, ffmpeg on PATH. Optional: a Supabase project (without it data stays in local
+files) and a GPU machine for the voice engine (without it Live uses the fallbacks above).
 
 ### Backend
 
@@ -82,10 +110,26 @@ npm run dev                     # http://localhost:3000
 
 ## Results
 
-Measured on the real Gnani and Gemini APIs. Nothing here is estimated. `backend/eval/run.py` (WER on 20 clips,
-slot-fit %) is not written yet, so those numbers are missing.
+Measured on the real services. Nothing here is estimated. Word error rate has not been measured (there are no
+ground-truth clips yet), and how close a copied voice sounds to the speaker needs listeners, not a script.
+`python -m eval.run` in `backend/` rebuilds `eval/results.csv` from stored runs.
 
-### Live (14 Nov 2026)
+### Live and Streamer with our own voice engine (20 Nov 2026)
+
+Source: a dense 24.9 s Hindi reel (one fast speaker, no pauses) played three times in real time, the video and its dub
+kept in step on the viewer's page (in the Live run the viewer's video was held 9 s behind).
+
+| Run | Phrases in the speaker's voice | First audio p50 / p95 | Dub behind its moment in the video p50 / p95 |
+|---|---|---|---|
+| Live, voice learned from the stream, Tamil + Bengali | 33 of 33 and 31 of 31 | 3.1 to 3.2 s / 3.8 to 3.9 s | 0.2 to 0.4 s / 1.8 to 3.5 s |
+| Streamer, voice recorded beforehand, Punjabi + Bengali | 34 of 34 and 29 of 31 | 3.2 to 3.3 s | 0 s / 1.7 to 2.8 s |
+
+The engine has been made faster since (21 Nov 2026): one line takes 439 ms on the GPU and 0.79 s from the laptop
+(before: 742 ms and 1.33 s), three lines at once 0.97 s. One stream in three languages keeps the A100 19% busy on
+average. A full Live run on this faster engine has not been measured yet. Separating 60 s of audio takes 4.0 to 4.8 s
+on the GPU against 40.3 s on the laptop CPU.
+
+### Live with stock voices, no GPU (14 Nov 2026)
 
 Source: a 24.9 s Hindi reel (one fast speaker, no pauses) fed in real time, twice. Stock voices. "Heard" is the time
 from the end of a phrase to the moment a viewer starts hearing its dub, after earlier phrases have played.
@@ -97,15 +141,15 @@ Full report and how to rerun: [LIVE_TEST_REPORT.md](LIVE_TEST_REPORT.md).
 | Tamil, Bengali, English at once | 3.5 to 3.8 s / 4.7 to 5.0 s | 3.9 to 6.0 s / 5.5 to 7.5 s | 0 of 26 |
 | Tamil, voice learned from the stream | 2.6 s / 3.5 s | 3.5 s / 6.7 s | 3 of 38 |
 
-The Gnani account runs one request at a time; that is what separates the first row from the second.
+The speech provider's account runs one request at a time; that is what separates the first row from the second.
 Not measured: a live microphone, a phone on a mobile network, sessions longer than 82 s.
 
-### Streamer Mode (15 Nov 2026)
+### Streamer mode, first measurements (15 Nov 2026)
 
 A streamer records their voice once with consent and goes live from `/streamer`; viewers hear them in their own
 voice from the first sentence. Spec: [STREAMER_MODE.md](STREAMER_MODE.md). The copied voice comes from our own GPU
-engine (IndicF5, see [gpu_engine/README.md](gpu_engine/README.md)), not from a Gnani model; without it the first
-language uses Gnani's copy and the rest stock voices.
+engine (IndicF5, see [gpu_engine/README.md](gpu_engine/README.md)); without it the first language uses the
+provider's copied voice and the rest stock voices.
 
 | What | Measured |
 |---|---|
@@ -127,6 +171,8 @@ OBS to YouTube broadcast, a phone.
 
 ## Credits
 
-FastAPI, Next.js, Tailwind CSS, GSAP, Lenis, Lucide icons, httpx, websockets, Demucs (Meta), Silero VAD, Supabase.
+Models: IndicF5 (AI4Bharat) and Vocos for the copied voice, Demucs (Meta) for separation, Silero VAD, Gnani AI
+(Prisma speech-to-text, Timbre voices, Vachana voice cloning), Gemini for translation.
+Software: FastAPI, Next.js, Tailwind CSS, GSAP, Lenis, Lucide icons, httpx, websockets, PyTorch, ffmpeg, Supabase.
 Typefaces: Instrument Serif, Geist, Anek, Noto.
-Speech models by Gnani AI. AI-dubbed output is labelled "AI-dubbed by Bharat Dub".
+AI-dubbed output is labelled "AI-dubbed by Bharat Dub".

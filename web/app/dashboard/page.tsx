@@ -40,7 +40,7 @@ export default function DashboardPage() {
         {err && <div className="mt-8"><Notice tone="error" role="alert">{err}</Notice></div>}
         {d && (
           <div className="rise">
-            {d.mock_providers && <div className="mt-8"><Notice tone="warn">Mock mode: these numbers come from simulated providers, not Gnani.</Notice></div>}
+            {d.mock_providers && <div className="mt-8"><Notice tone="warn">Mock mode: these numbers come from simulated providers, not the real services.</Notice></div>}
             <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
               <Tile icon={Clapperboard} label="Minutes dubbed" value={d.studio.minutes_dubbed != null ? d.studio.minutes_dubbed.toFixed(1) : null} sub="video minutes × languages" />
               <Tile icon={Hourglass} label="Studio turnaround" value={d.studio.median_turnaround_s != null ? fmtSeconds(d.studio.median_turnaround_s) : null} sub={`median · ${d.studio.jobs_done} of ${d.studio.jobs} jobs finished`} />

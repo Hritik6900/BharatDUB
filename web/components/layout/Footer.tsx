@@ -62,7 +62,7 @@ export function Footer() {
           <div>
             <h2 className="eyebrow">Built with</h2>
             <p className="mt-5 text-sm leading-relaxed text-muted">
-              Speech models by Gnani AI: Prisma, Timbre and Vachana voice cloning. Open source: Demucs, Silero VAD, FastAPI, Next.js, GSAP, Lenis,
+              Models: IndicF5 by AI4Bharat, Demucs, Silero VAD, Gnani AI speech models and Gemini. Open source: FastAPI, Next.js, GSAP, Lenis,
               Lucide, and the Outfit, Instrument Serif, Geist Mono, Anek and Noto typefaces.
             </p>
           </div>
@@ -74,7 +74,7 @@ export function Footer() {
       </div>
       <div className="border-t border-line">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-5 py-5 text-sm text-muted sm:px-8">
-          <p>© 2026 Bharat Dub. Built for the Gnani AI challenge and Vihaan X.</p>
+          <p>© 2026 Bharat Dub. Made in India.</p>
           <p className="font-indic">हिन्दी · தமிழ் · বাংলা · తెలుగు · English</p>
         </div>
       </div>

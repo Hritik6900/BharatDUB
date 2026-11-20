@@ -11,7 +11,7 @@ gsap.registerPlugin(ScrollTrigger, useGSAP);
 
 const STAGES: { title: string; text: string; icon: LucideIcon }[] = [
   { title: "Listen", text: "We lift your voice off the music and game sound, so the background survives the dub.", icon: Ear },
-  { title: "Understand", text: "Prisma turns Hinglish speech into text, word by word, English slang included.", icon: ScanText },
+  { title: "Understand", text: "Speech recognition turns Hinglish into text, word by word, English slang included.", icon: ScanText },
   { title: "Translate", text: "The sentence is rebuilt in Tamil. Word order changes; words like chat and map stay.", icon: Languages },
   { title: "Speak", text: "Your voice says it in Tamil, timed to the same moment in the video.", icon: AudioLines },
 ];

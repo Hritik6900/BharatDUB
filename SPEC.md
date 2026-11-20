@@ -1,34 +1,46 @@
 # SPEC.md — Bharat Dub
 
-> Build spec. Read this whole file before writing code. When something here conflicts with
-> what you find in the official Gnani docs (https://docs.gnani.ai), the docs win: fix the code and update this file.
+> Product and build spec. Read this whole file before writing code. When something here conflicts with a
+> provider's official docs (Gnani: https://docs.gnani.ai), the docs win: fix the code and update this file.
 
 ## 1. What we are building
 
-**Bharat Dub** is one website with two modes that share one backend, one AI-provider layer and one voice profile:
+**Bharat Dub** is a product: one website with three modes that share one backend, one AI-provider layer and one voice profile:
 
 | Mode | Route | What it does | Speed target |
 |---|---|---|---|
 | **Studio** | `/studio` | Creator uploads their own Reel/Short/YouTube video (≤ 3 min). It comes back dubbed into Tamil / Bengali / Telugu / English etc., in the creator's own cloned voice, background music kept, with subtitles. | 60 s reel → 2–3 min |
 | **Live** | `/live` (streamer console) + `/watch/[id]` (viewer) | Streamer streams on YouTube Live in Hindi/Hinglish. Viewers open `/watch/[id]`, pick a language and hear the streamer dubbed live, with captions. Viewers can chat in their language; the streamer sees it translated. | 3–5 s behind the speaker |
+| **Streamer** | `/streamer` | A streamer records their voice once (consent sentence read aloud) and goes live. Viewers hear them in their own voice from the first sentence, timed to the stream. Spec: STREAMER_MODE.md. | same as Live |
 | Shared | `/voices`, `/glossary`, `/dashboard` | Voice profile (with consent), glossary of words never translated, usage + latency stats. | — |
 
-Two deadlines use the same site:
-- **Gnani "Great Indian AI Internship Challenge"**: must use Gnani models (Prisma STT, Timbre TTS; Evon LLM is a bonus). Target submission: 13 Nov 2026 night.
-- **Vihaan X hackathon (IEEE DTU), E-Sports track**: 14–15 Nov 2026, 24 h, live judging.
+**Direction (since 21 Nov 2026): a startup product.** Bharat Dub began as an entry for two events, the Gnani AI
+challenge (submitted 13 Nov 2026) and the Vihaan X hackathon (14-15 Nov 2026). Both are over and no longer shape
+any decision. What that changes:
 
-The demo must be bulletproof and every claim must be backed by a measured number.
+- **No single-vendor rule.** Each capability (speech-to-text, translation, voice) uses the provider that measures best,
+  behind the interfaces in section 7, with a fallback. Today: Gnani Prisma (speech-to-text), Gemini (translation), our
+  own IndicF5 engine on a GPU (copied voice in Indian languages), Gnani Timbre (stock voices, English, fallback) and
+  Gnani Vachana (copied voice in Studio, fallback in Live). Any of them can be replaced when another measures better.
+- **The bar is a stranger using it without us in the room**, not a rehearsed demo: reliability, cost per minute and
+  what happens when a provider is down matter as much as the best-case number.
+- **Every claim is still backed by a measured number.** Sections 16-19 are the measured history; older entries there
+  speak of the events and stay as written.
+
+What a product needs and this code does not have yet is listed in section 20.
 
 ## 2. Golden rules
 
-1. **API-first modular monolith.** One FastAPI backend, one Next.js frontend. No microservices, no Kubernetes, no GPU.
+1. **API-first modular monolith.** One FastAPI backend, one Next.js frontend. No microservices, no Kubernetes. The one
+   separate service is the GPU engine (`gpu_engine/`: copied voice and separation), optional and reached only through
+   `providers/`; with it off everything still runs.
 2. **Providers behind interfaces.** All STT/LLM/TTS calls go through `backend/app/providers/`. Pipelines never call HTTP APIs directly.
 3. **Cache every Studio stage** by `hash(input) + stage settings`. Editing one translated line must re-run only stages 7–10 for that line. Never re-run STT unless audio changed (STT costs credits).
 4. **Consent gates cloning.** No call to the voice-clone endpoint unless the voice profile has `consent_at` set. No exceptions, no debug bypass.
 5. **Measure everything.** Every Studio stage and every Live chunk records timings into `metrics`. The UI shows real numbers, never fake ones.
 6. **Secrets only from env.** Never hardcode keys, never log them, never send them to the browser.
 7. **Small, working increments.** Finish a milestone end-to-end (section 13) before starting the next. Commit after each working step with a clear message.
-8. **Fail soft in demos.** Every external call has a timeout, one retry, and a visible fallback (see per-stage table).
+8. **Fail soft.** Every external call has a timeout, one retry, and a visible fallback (see per-stage table).
 9. Use straight ASCII quotes in code; keep functions small; type-hint Python; TypeScript strict mode.
 
 ## 3. Tech stack
@@ -42,9 +54,10 @@ The demo must be bulletproof and every claim must be backed by a measured number
 | Live audio in browser | Web Audio API (AudioContext, scheduled buffers), WebSocket |
 | YouTube | YouTube IFrame Player API on `/watch/[id]` |
 | Streamer client | Python: `sounddevice` mic capture → WebSocket |
-| Demo exposure | cloudflared or ngrok tunnel |
+| Voice engine (optional) | IndicF5 (337 M parameters) + Vocos on an A100, `gpu_engine/`; Demucs on the same machine |
+| Exposure until hosted | cloudflared or ngrok tunnel |
 
-Do **not** self-host Evon. Use a hosted OpenAI-compatible endpoint.
+Translation runs on a hosted OpenAI-compatible endpoint (Gemini today); we do not host a language model ourselves.
 
 ## 4. Environment variables (`backend/.env`, `web/.env.local`)
 
@@ -53,9 +66,9 @@ Do **not** self-host Evon. Use a hosted OpenAI-compatible endpoint.
 GNANI_API_KEY=
 GNANI_BASE=https://api.vachana.ai
 GNANI_MAX_CONCURRENCY=1  # account limit: "Only 1 active request is allowed at a time" (429 otherwise)
-LLM_BASE_URL=            # OpenAI-compatible, ends with /v1 (Evon endpoint, or backup)
+LLM_BASE_URL=            # OpenAI-compatible (today Gemini: https://generativelanguage.googleapis.com/v1beta/openai)
 LLM_API_KEY=
-LLM_MODEL=               # e.g. gnani/gnani-evon-v3.3-30B-A3B
+LLM_MODEL=               # e.g. gemini-3.5-flash
 LLM_MODEL_FAST=          # optional low-latency model for Live; defaults to LLM_MODEL
 LLM_REASONING_EFFORT=    # optional; `none` for Gemini Flash (hidden thinking otherwise truncates short replies)
 LLM_REASONING_EFFORT_FAST=  # optional; for LLM_MODEL_FAST when it needs another value (`minimal` for flash-lite)
@@ -290,7 +303,7 @@ See FRONTEND.md for the design system. Page list:
 - **`/voices`**: record 20–30 s in-browser or upload; consent text the speaker must read aloud; delete button.
 - **`/live`**: create session (YouTube video id, languages), start/stop, live transcript, per-language captions, latency graph (last 60 chunks), translated chat feed, copy-link to `/watch/[id]`.
 - **`/watch/[id]`**: see section 9. Mobile-first. Big language buttons.
-- **Demo mode** (`/watch/[id]?demo=1`): shows all languages' captions side by side and the latency badge large, for the stage.
+- **Big-screen view** (`/watch/[id]?demo=1`): shows all languages' captions side by side and the latency badge large, for a wall or a second screen.
 - **`/dashboard`**: minutes dubbed, languages used, median Studio turnaround, Live p50/p95.
 - Every AI output carries a small "AI-dubbed" label.
 
@@ -304,7 +317,7 @@ See FRONTEND.md for the design system. Page list:
 | M3 | Live core | `ingest_client` → `/watch` plays Tamil audio + captions for live mic speech; p50 latency measured and shown |
 | M4 | Site | All pages in section 12 working against real backend; review editor partial re-render works |
 | M5 | Live polish | 3 languages in parallel, reverse chat + OBS overlay, sync slider, clone voice live (if 6.4 passed) |
-| M6 | Eval + demo | `eval/run.py` produces `results.csv` (WER on 20 clips, slot-fit %, Studio turnaround, Live p50/p95); README "Results" section filled with measured numbers only; demo script rehearsed |
+| M6 | Eval | `eval/run.py` produces `results.csv` (WER on 20 clips, slot-fit %, Studio turnaround, Live p50/p95); README "Results" section filled with measured numbers only |
 
 Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a team: Studio (M2) and Live (M3) in parallel after M1.
 
@@ -330,7 +343,6 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
 - [x] Prisma realtime partial vs final → **no partials**; each `transcript` event is final (`is_final: true`); `processing` marks end of speech.
 - [x] Supported TTS `sample_rate` → 8000, 16000, 22050, 24000, 44100, 48000 (VC: 8000–44100). We use 44100.
 - [x] Hosted Evon endpoint available? Not on the dashboard; backup LLM is Gemini Flash (see below).
-- [ ] Vihaan X rules on code written before the event.
 - [ ] **New:** real concurrency limit for our Gnani account (docs show 1 active request; check app.gnani.ai). It decides whether Live can do 3 languages in parallel.
 - [x] Measured smoke latencies (2026-11-13, real Gnani key, one run each, ~5 s Hindi clip): TTS REST 1.2 s; TTS SSE first chunk
   0.18-0.24 s; STT REST 0.59 s; STT realtime final arrives ~0.76 s after the audio ends (server `latency` field ~170 ms).
@@ -344,7 +356,7 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
   native script (models answered Hinglish input in romanised Tamil otherwise).
 - [x] VC on the real API (2026-11-13): embedding from a 9.8 s sample in 1.4 s; cloned lines in Tamil, Hindi and English were
   transcribed back by Prisma with the same words (intelligibility check, one line each, synthetic source voice). How close it
-  sounds to a real person's voice still needs a human listening test. Evon bonus: ask on the Gnani Discord for an endpoint.
+  sounds to a real person's voice still needs a human listening test.
 - Studio can copy the voice **from the uploaded video itself** (`voice_from_video=true` + `voice_consent=true` on `POST /api/jobs`,
   403 without consent). The consent sentence is a checkbox at upload, not read aloud. The runner builds a 5-28 s sample from the
   separated vocals, creates a normal voice profile with `consent_at` ("Voice from <file>") and attaches it to the job; under 5 s
@@ -422,7 +434,7 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
   60% of the words). Without sync mode this cut heard p95 from 5.8 s to 4.6 s (p50 3.4 s unchanged) and speed-ups from 21 to 12
   phrases of about 26, one run each. `live_warmup` makes one tiny translation and voice call when a session starts.
 - [x] **Live copied voice on our own GPU engine** (2026-11-14 evening; `GPU_VOICE_URL`, `providers/tts_gpu.py`, `gpu_engine/`).
-  The Gnani-only rule is for the Gnani challenge; for Vihaan X the user asked for the best result. IndicF5 on an A100
+  This is our own engine, not a Gnani model; it was chosen because it measured best (no single-vendor rule, section 1). IndicF5 on an A100
   (three engine processes, ports 9001-9003 behind an SSH tunnel) speaks every Indian target language in the speaker's
   voice; English and any failure go to the Gnani voices. Empty `GPU_VOICE_URL` = Gnani only, as before.
   - The voice sample is the last 7 s before the first pause (at least 3.5 s, mostly speech), taken only on sessions with
@@ -511,12 +523,8 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
 - Language hues fail CVD checks as a chart palette (te/en too close), so charts use ink bars with a hue dot +
   name label; colour never carries meaning alone.
 
-## 17. First prompt
+## 17. Later findings (continues section 16)
 
-> Read SPEC.md fully. Then do M0 and M1 only. Start by creating the monorepo layout, `.env.example` files and the
-> Supabase SQL migration. Implement the three providers behind the protocols in section 7, with retries and timeouts,
-> and `scripts/smoke.py`. Run the smoke script, show me the latencies, then answer the "Known unknowns" you can verify
-> and update section 16. Stop and wait for me before starting M2.
 - [x] A wrong PC clock stops Live (2026-11-15): the dev laptop's clock fell 5 h 30 min behind, Gnani had renewed its
   certificate that night, and every Gnani connection failed with "certificate is not yet valid" (0 phrases, no dub).
   The console now says to sync the clock. Check `date` against a server's `Date` header before blaming the pipeline.
@@ -559,3 +567,27 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
     this work ("TRANSCRIPTION_FAILED", also for a clean line made by Gnani's own voice), so no Live run and no
     words-heard-back check of the new engine were possible.
 
+
+## 20. From event build to product: what is missing (21 Nov 2026)
+
+Checked against the code and the running setup on this date. Nothing here is built; the order is a suggestion.
+
+- [ ] **Accounts.** There is no sign-in. Anyone who reaches the site can start jobs and sessions, see `/voices` and
+  `/dashboard`, and open a streamer profile by its handle. Voice profiles are not tied to a person beyond the consent record.
+- [ ] **Hosting.** Backend and frontend run on one laptop (ports 8010 and 3000). The GPU engines sit on a shared machine
+  behind an SSH tunnel and do not start by themselves after a restart. No domain, no HTTPS, no deploy script.
+- [ ] **Data.** Supabase is not configured on the running setup: jobs, sessions and voices live in one local JSON file
+  (`LocalStore`, single process), outputs on the local disk.
+- [ ] **Speech-to-text has one provider and no fallback.** On 21 Nov 2026 Gnani speech-to-text failed every request
+  (REST and realtime, checked several times through one working session) while its voices worked: Live, Studio
+  transcription and new voice recordings all stop with it. The site's health panel shows "key set", not whether the service answers.
+- [ ] **Capacity.** The Gnani account allows one request at a time: enough for one stream. Whether it allows two
+  realtime speech-to-text sockets at once is not known. One A100 measured 19% average use for one stream in three languages.
+- [ ] **Cost per dubbed minute** is not measured (speech-to-text, translation, voice, GPU hours), so there is no price.
+- [ ] **Usage limits and payment.** No per-user limits, no metering beyond the dashboard totals, no billing.
+- [ ] **Terms, privacy, takedown.** Consent is recorded and voices are deletable, but there are no terms or privacy
+  pages and no way for a third party to report a misused voice or video.
+- [ ] **Never tested:** a person at a real microphone over a long session, a real YouTube Live broadcast with outside
+  viewers, a phone on a mobile network, word error rate on ground-truth clips, how close the copied voice sounds to
+  the speaker (needs listeners).
+- [ ] **Monitoring.** No error tracking or alerts; a failure is seen only when someone looks at the console.

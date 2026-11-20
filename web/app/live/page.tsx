@@ -357,7 +357,7 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
           {copied === "viewer" ? "Copied" : "Copy viewer link"}
         </button>
         <a href={`/watch/${sid}`} target="_blank" className={tool}><ExternalLink aria-hidden className="size-4" />Open viewer</a>
-        <a href={`/watch/${sid}?demo=1`} target="_blank" className={tool}><Presentation aria-hidden className="size-4" />Stage demo view</a>
+        <a href={`/watch/${sid}?demo=1`} target="_blank" className={tool}><Presentation aria-hidden className="size-4" />Big-screen view</a>
         <button onClick={() => copy(`${origin}/overlay/${sid}`, "overlay")} className={tool}>
           {copied === "overlay" ? <Check aria-hidden className="size-4 text-ok" /> : <Copy aria-hidden className="size-4" />}
           {copied === "overlay" ? "Copied" : "Copy OBS overlay link"}

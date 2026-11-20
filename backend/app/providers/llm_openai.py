@@ -1,4 +1,4 @@
-"""OpenAI-compatible chat LLM (hosted Evon, or a backup). See SPEC.md section 7 for prompt rules."""
+"""OpenAI-compatible chat LLM (Gemini today; any compatible endpoint works). See SPEC.md section 7 for prompt rules."""
 import asyncio
 import json
 import re
