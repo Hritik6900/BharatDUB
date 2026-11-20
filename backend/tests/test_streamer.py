@@ -120,3 +120,16 @@ def test_streamer_profile_can_be_edited_and_deleted(monkeypatch):
     assert c.delete(f"/api/streamers/{sid}").json() == {"deleted": True}
     assert c.get(f"/api/streamers/{sid}").status_code == 404
     assert c.post("/api/streamers", json={"handle": handle, "display_name": "Again"}).status_code == 201   # handle is free
+
+
+def test_voice_sample_is_capped_even_when_the_microphone_is_quiet():
+    import struct
+
+    from app.live.pipeline import ENROL_MIN_RMS, speech_cut
+    def frame(level: int) -> bytes:
+        return struct.pack("<512h", *([level, -level] * 256))
+    # 20 s where only every fourth frame is loud enough to count, the rest is quiet speech just under the bar
+    loud, soft = frame(int(ENROL_MIN_RMS * 3) + 50), frame(max(1, int(ENROL_MIN_RMS * 0.9)))
+    frames = [loud if i % 4 == 0 else soft for i in range(625)]
+    cut = speech_cut(frames)
+    assert cut is not None and len(cut) / 2 / 16000 <= 9.1

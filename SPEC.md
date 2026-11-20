@@ -527,4 +527,18 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
   delay 9.5 s, voice step 1.85 s a phrase (first machine: 1.45 s). Separation: 60 s of audio in 4.0-4.8 s.
   A stored voice sample of 15.7 s made lines slow and long (Tamil 9 words -> 18 s of audio, 30% heard back): samples must
   stay near 7 s.
+- [x] Voice engine tuned (2026-11-20, same reel, sync mode, real APIs):
+  - The library sizes a new line by UTF-8 bytes against the sample's text. A sample transcribed in Latin letters
+    (Hinglish, 1 byte a letter) made Indic lines (3 bytes) three times too long: Tamil 9 words -> 18 s, 30% heard back.
+    The engine now corrects the speed to letters, the same in every script: 9.0 s and 100%.
+  - `speech_cut` counted only loud frames, so a quiet microphone gave a 15.7 s sample. It now counts all speech and
+    never returns more than the wanted length + 2 s.
+  - Denoising steps, 10 lines heard back by Prisma: 12 steps 905 ms / 97%, 10 steps 744 ms / 97%, 8 steps 601 ms / 96%,
+    6 steps 455 ms / 89%. The engines run at 10 (`NFE` in `start_live.sh`). How natural 8 sounds was not judged.
+  - Result. Live, voice learned from the stream, Tamil + Bengali: 33 of 33 and 31 of 31 spoken phrases in the copied
+    voice, first audio p50 3.1-3.2 s / p95 3.8-3.9 s (before tuning 3.9 / 4.7), behind p50 0.2-0.4 s / p95 1.8-3.5 s,
+    voice step 1.2-1.3 s a phrase (before 1.85 s; first machine 1.45 s), video held 9 s.
+    Streamer Mode, stored voice, Punjabi + Bengali: 34 of 34 and 29 of 31, first audio p50 3.2-3.3 s, behind p50 0 s /
+    p95 1.7-2.8 s.
+  - A request through the SSH tunnel costs a median 410 ms although the network round trip is 170 ms; not solved.
 

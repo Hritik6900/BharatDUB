@@ -14,7 +14,7 @@ if [ "${MPS:-1}" = "1" ] && command -v nvidia-cuda-mps-control >/dev/null; then
   pgrep -u "$USER" -f nvidia-cuda-mps-control >/dev/null || nvidia-cuda-mps-control -d
 fi
 for p in 9001 9002 9003; do
-  NFE=${NFE:-12} REPLICAS=1 nohup .venv2/bin/python -m uvicorn voice_engine_live:app --host 127.0.0.1 --port $p \
+  NFE=${NFE:-10} nohup .venv2/bin/python -m uvicorn voice_engine_live:app --host 127.0.0.1 --port $p \
     > /tmp/voice_engine_$p.log 2>&1 &
 done
 for i in $(seq 1 60); do

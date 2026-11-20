@@ -110,19 +110,22 @@ def speech_cut(frames: list[bytes], want_ms: int = GPU_REF_MS, min_ms: int = GPU
     """
     loud = [_rms(f) >= ENROL_MIN_RMS for f in frames]
     hang = max(1, hang_ms // frame_ms)
+    # A quiet microphone has few "loud" frames, and the cut then ran to 15.7 s to collect 7 s of them (found 20 Nov
+    # 2026). The engine works on sample + new line together, so the whole cut is capped as well.
+    longest = (want_ms + 2000) // frame_ms
     speech = [any(loud[max(0, i - hang): i + hang + 1]) for i in range(len(frames))]
     out: list[bytes] = []
     voiced = gap = 0
-    for f, sp, ld in zip(reversed(frames), reversed(speech), reversed(loud)):
+    for f, sp in zip(reversed(frames), reversed(speech)):
         if sp:
             out.append(f)
-            voiced += frame_ms if ld else 0
+            voiced += frame_ms   # speech, quiet consonants and breaths included: only loud frames undercounts a soft voice
             gap = 0
         else:
             gap += frame_ms
             if gap <= keep_pause_ms:
                 out.append(f)
-        if voiced >= want_ms:
+        if voiced >= want_ms or len(out) >= longest:
             break
     return b"".join(reversed(out)) if voiced >= min_ms else None
 

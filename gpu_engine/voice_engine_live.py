@@ -68,10 +68,20 @@ def _load() -> None:
         _synth(audio, text, "नमस्ते।", 1.0)
 
 
-def _synth(ref_audio: str, ref_text: str, text: str, speed: float) -> np.ndarray:
+def _letters(text: str) -> int:
+    return max(1, sum(1 for ch in text if not ch.isspace()))
+
+
+def _synth(ref_audio: str, ref_text: str, text: str, speed: float, nfe: int = 0) -> np.ndarray:
+    # The library sizes the new audio by UTF-8 bytes: (sample seconds) x (new bytes / sample bytes). An Indic letter is
+    # 3 bytes and a Latin one is 1, so a sample transcribed in Latin letters (Hinglish) made Tamil lines three times too
+    # long (measured: 9 words -> 18 s). Letters are a fair measure in every script, so the speed is corrected to them.
+    by_bytes = len(text.encode("utf-8")) / max(1, len(ref_text.encode("utf-8")))
+    by_letters = _letters(text) / _letters(ref_text)
+    speed = speed * by_bytes / by_letters
     with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16, enabled=BF16):
         wave, _sr, _spec = infer_process(ref_audio, ref_text, text, model, vocoder, mel_spec_type="vocos",
-                                         nfe_step=NFE, show_info=quiet, speed=speed, device="cuda")
+                                         nfe_step=nfe or NFE, show_info=quiet, speed=speed, device="cuda")
     return np.asarray(wave, dtype=np.float32)
 
 
@@ -118,6 +128,7 @@ class Line(BaseModel):
     lang: str = ""
     speed: float = 1.0   # > 1 = faster speech
     fmt: str = "pcm"     # "opus" = OGG/Opus, about a tenth of the bytes
+    nfe: int = 0         # 0 = this process's NFE; set only to compare settings
 
 
 @app.post("/tts")
@@ -131,7 +142,7 @@ async def tts(req: Line) -> Response:
     async with lock:
         t0 = time.perf_counter()
         try:
-            wave = await asyncio.get_running_loop().run_in_executor(None, _synth, ref["audio"], ref["text"], req.text, speed)
+            wave = await asyncio.get_running_loop().run_in_executor(None, _synth, ref["audio"], ref["text"], req.text, speed, max(0, min(64, req.nfe)))
         except Exception as e:  # noqa: BLE001
             raise HTTPException(500, f"synthesis failed: {str(e)[:200]}") from e
         ms = (time.perf_counter() - t0) * 1000
