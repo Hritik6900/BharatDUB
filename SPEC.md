@@ -520,3 +520,11 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
 - [x] A wrong PC clock stops Live (2026-11-15): the dev laptop's clock fell 5 h 30 min behind, Gnani had renewed its
   certificate that night, and every Gnani connection failed with "certificate is not yet valid" (0 phrases, no dub).
   The console now says to sync the clock. Check `date` against a server's `Date` header before blaming the pipeline.
+- [x] GPU machine replaced (2026-11-20): new address and login, and nothing of the engines was on it. Rebuilt from
+  `gpu_engine/` (`setup_machine.sh`, a new `voice_engine_live.py`, IndicF5 gated on Hugging Face). Three engine processes
+  ran one after another until CUDA MPS was turned on (3 lines at once 3.2 s -> 1.1 s). Same dense reel, voice learned from
+  the stream, Tamil + Bengali: 31 of 33 and 32 of 34 spoken phrases in the copied voice, behind p50 0.1-0.3 s / p95 1.8-2.5 s,
+  delay 9.5 s, voice step 1.85 s a phrase (first machine: 1.45 s). Separation: 60 s of audio in 4.0-4.8 s.
+  A stored voice sample of 15.7 s made lines slow and long (Tamil 9 words -> 18 s of audio, 30% heard back): samples must
+  stay near 7 s.
+

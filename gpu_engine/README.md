@@ -3,13 +3,22 @@
 Our own voice engine (IndicF5 on an A100) gives Live the speaker's copied voice without Gnani's
 one-request-at-a-time limit. It is not a Gnani model; Studio and everything else still use Gnani.
 
-On the GPU machine (`~/voice_engine` holds `voice_engine.py` and its venv `.venv2`):
+On a fresh GPU machine (everything goes under `~/voice_engine`, no root needed):
 
 ```
-python make_live_engine.py      # writes voice_engine_live.py: voice_engine.py + per-request speed and Opus output
-bash start_live.sh              # three engine processes on ports 9001-9003 (they listen on localhost only)
-python bench_mp.py 9001 9002 9003
+mkdir -p ~/voice_engine     # copy this folder's .sh and .py files into it
+bash setup_machine.sh       # uv, Python env `.venv2`, PyTorch (CUDA), the IndicF5 code
+.venv2/bin/hf auth login    # once: the model is gated; accept its terms on huggingface.co/ai4bharat/IndicF5 first
+bash start_live.sh          # three engine processes on ports 9001-9003 (localhost only), under CUDA MPS
+bash start_sep.sh           # Studio separation on port 9010
 ```
+
+`voice_engine_live.py` is the whole engine (written again on 20 Nov 2026: the first one, and `voice_engine.py` that
+`make_live_engine.py` patched, were lost with the first machine). After a machine restart only the two `start_*.sh` are needed.
+
+**MPS matters.** Without it the three processes take turns on the GPU. Measured 20 Nov 2026 on a GCP A100: one line
+1.0 s, two at once 2.1 s, three at once 3.2 s; with MPS 0.9 s / 0.95 s / 1.1 s. `start_live.sh` starts the MPS daemon as
+the login user (`MPS=0` to skip). bf16 is about 10% faster than fp32 with clean output; fp16 gave NaN.
 
 On the PC that runs the backend:
 
@@ -34,6 +43,7 @@ bash start_sep.sh        # on the GPU machine: installs Demucs beside the voice 
 GPU_SEPARATE_URL=http://127.0.0.1:9010
 ```
 
-Measured 15 Nov 2026 on 60 s of audio: 11.5 to 13.8 s through the tunnel (1.5 s on the GPU, the rest is sending
+Measured 20 Nov 2026 on the second machine: 60 s of audio in 4.0 to 4.8 s through the tunnel (1.5 s on the GPU).
+Measured 15 Nov 2026 on the first machine, 60 s of audio: 11.5 to 13.8 s through the tunnel (1.5 s on the GPU, the rest is sending
 2.4 MB and receiving 4.3 MB of FLAC), against 38.9 s on the laptop CPU. The stems match the CPU result
 (difference 40 dB below the signal). On any failure the backend separates on the CPU as before.

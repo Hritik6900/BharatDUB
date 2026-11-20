@@ -8,7 +8,7 @@ param(
 )
 while ($true) {
     Write-Host "$(Get-Date -Format HH:mm:ss) connecting to the voice engines..."
-    ssh -i $Key -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=5 -o ServerAliveCountMax=2 `
+    ssh -i $Key -N -o IdentitiesOnly=yes -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=5 -o ServerAliveCountMax=2 `
         -o ConnectTimeout=8 `
         -L 127.0.0.1:9001:127.0.0.1:9001 -L 127.0.0.1:9002:127.0.0.1:9002 -L 127.0.0.1:9003:127.0.0.1:9003 -L 127.0.0.1:9010:127.0.0.1:9010 $Target
     Write-Host "$(Get-Date -Format HH:mm:ss) tunnel closed (exit $LASTEXITCODE), retrying in 2 s"
