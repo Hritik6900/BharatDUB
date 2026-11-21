@@ -124,10 +124,11 @@ class OpenAILLM:
                 out = again
         return out
 
-    async def shorten(self, text: str, target: str, max_seconds: float) -> str:
+    async def shorten(self, text: str, target: str, max_seconds: float, max_words: int | None = None) -> str:
         lang = LANG_NAMES.get(target, target)
         system = (
             f"Rewrite this {lang} line so it can be spoken naturally in at most {max_seconds:.1f} seconds. "
+            + (f"Use at most {max_words} words. " if max_words else "") +
             "Keep the meaning, the tone and any English words. " + script_rule(target) + "Reply with the rewritten line only."
         )
         return clean_line(await self._chat(system, text, max_tokens=300))

@@ -3,6 +3,7 @@
     cd backend
     python -m scripts.dub_file my_reel.mp4 --langs ta-IN
     python -m scripts.dub_file my_reel.mp4 --langs ta-IN --no-separate   # skip Demucs
+    python -m scripts.dub_file my_reel.mp4 --langs ta-IN --voice <voice profile id>
 
 Prints stage timings and the output paths. Run it twice to see the cache skip STT.
 """
@@ -25,6 +26,7 @@ async def main() -> None:
     ap.add_argument("video")
     ap.add_argument("--langs", default="ta-IN")
     ap.add_argument("--no-separate", action="store_true")
+    ap.add_argument("--voice", default="", help="voice profile id: dub in that recorded voice (the profile must carry consent)")
     a = ap.parse_args()
 
     s = get_settings()
@@ -33,7 +35,8 @@ async def main() -> None:
     runner = StudioRunner(settings=s)
     tmp = Path(tempfile.mkdtemp()) / Path(a.video).name
     shutil.copyfile(a.video, tmp)
-    job = await runner.create_job(tmp, Path(a.video).name, [x.strip() for x in a.langs.split(",") if x.strip()])
+    job = await runner.create_job(tmp, Path(a.video).name, [x.strip() for x in a.langs.split(",") if x.strip()],
+                                  voice_profile_id=a.voice or None)
     print(f"job {job['id']} ({job['duration_s']:.1f} s)")
     await runner.run(job["id"])
     job = await runner.store.get("jobs", job["id"])

@@ -80,10 +80,12 @@ class LocalLLM(OpenAILLM):
             return text
         return out
 
-    async def shorten(self, text: str, target: str, max_seconds: float) -> str:
+    async def shorten(self, text: str, target: str, max_seconds: float, max_words: int | None = None) -> str:
         lang = LANG_NAMES.get(target, target)
-        system = (f"Rewrite this {lang} line so it can be spoken naturally in at most {max_seconds:.1f} seconds. "
-                  "Keep the meaning and the tone." + self._native(target) + " Reply with the rewritten line only.")
+        limit = (f"It has {len(text.split())} words: rewrite it in at most {max_words} words. Keep the main points, "
+                 "drop the rest." if max_words
+                 else f"Rewrite this {lang} line so it can be spoken naturally in at most {max_seconds:.1f} seconds.")
+        system = (f"This is a {lang} line of a dubbed video. " + limit + " Keep the meaning and the tone." + self._native(target) + " Reply with the rewritten line only.")
         return clean_line(await self._chat(system, text, temperature=0.2, max_tokens=300))
 
     async def translate_chunk(self, text: str, target: str, glossary: list[str], context: list[str],

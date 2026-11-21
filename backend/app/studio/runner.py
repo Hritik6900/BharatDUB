@@ -268,13 +268,32 @@ class StudioRunner:
             raw = await voice.synth_line(self.tts, text, lang, vspec, self.s.tts_model, self.s.tts_sample_rate,
                                          ctx.usage, ctx.warnings)
         async with self._stage(ctx, "fit", lang):
+            native = 1.0
+            need = fit.needed_speed(au.duration_s(raw), slot_s)
+            if need > 1.05 and getattr(self.tts, "native_speed", False) and self.tts.engine_speaks(lang, vspec):
+                # Our GPU voice copies the pace of its sample, and a recorded voice at a natural pace can run far
+                # past the slot. It speaks faster by itself with no loss down to about 300 ms a word (measured
+                # 2026-11-21), so it is asked again at the speed that fits, within that floor and 1.5x.
+                per_word = au.duration_s(raw) * 1000 / max(1, len(text.split()))
+                native = min(need, self.s.gpu_voice_pace_max, per_word / 300)
+                if native > 1.05:
+                    raw = await voice.synth_line(self.tts, text, lang, vspec, self.s.tts_model,
+                                                 self.s.tts_sample_rate, ctx.usage, ctx.warnings, speed=native)
+                else:
+                    native = 1.0
             if fit.needed_speed(au.duration_s(raw), slot_s) > fit.MAX_SPEED and not tr.get("edited"):
                 try:
-                    shorter = await self.llm.shorten(text, lang, slot_s * 1.25)
+                    if native > 1.0:
+                        # The voice's pace is known now, so the limit is given in words: what fits the slot at
+                        # the 1.35x squeeze, less a tenth.
+                        fits = int(len(text.split()) * slot_s * fit.MAX_SPEED / au.duration_s(raw) * 0.9)
+                        shorter = await self.llm.shorten(text, lang, slot_s * 1.25, max_words=max(3, fits))
+                    else:
+                        shorter = await self.llm.shorten(text, lang, slot_s * 1.25)
                     if shorter and len(shorter) < len(text):
                         text = shorter
                         raw = await voice.synth_line(self.tts, text, lang, vspec, self.s.tts_model,
-                                                     self.s.tts_sample_rate, ctx.usage, ctx.warnings)
+                                                     self.s.tts_sample_rate, ctx.usage, ctx.warnings, speed=native)
                 except ProviderError as e:
                     self._warn(ctx, f"Could not shorten a {lang} line; sped up to 1.35x ({e})"[:200])
             lines_dir = ctx.dir / "lines"

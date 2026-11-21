@@ -21,15 +21,17 @@ def voice_id(voice: VoiceSpec) -> str:
 
 
 async def synth_line(tts: TTS, text: str, lang: str, voice: VoiceSpec, tts_model: str, sr: int,
-                     usage: dict, warnings: list[str]) -> Path:
-    """Return a cached WAV path. A failing clone falls back to the stock voice for this line."""
-    key = au.cache_key(text, lang, voice_id(voice), tts_model, sr)
+                     usage: dict, warnings: list[str], speed: float = 1.0) -> Path:
+    """Return a cached WAV path. A failing clone falls back to the stock voice for this line.
+    `speed` > 1: only for a provider that can speak faster by itself (`native_speed`, our GPU voice)."""
+    speed = round(speed, 2) if getattr(tts, "native_speed", False) else 1.0
+    key = au.cache_key(text, lang, voice_id(voice), tts_model, sr, *([f"speed{speed}"] if speed != 1.0 else []))
     hit = cache.get_file("voice", key, "wav")
     if hit:
         usage["tts_cache_hits"] = usage.get("tts_cache_hits", 0) + 1
         return hit
     try:
-        audio = await tts.synth(text, lang, voice)
+        audio = await (tts.synth(text, lang, voice, speed=speed) if speed != 1.0 else tts.synth(text, lang, voice))
     except ProviderError as e:
         if voice["kind"] != "clone":
             raise

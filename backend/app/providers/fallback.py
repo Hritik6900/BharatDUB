@@ -31,8 +31,8 @@ class FallbackLLM:
                               **kw: Any) -> str:
         return await self._call("translate_chunk", text, target, glossary, context, **kw)  # type: ignore[no-any-return]
 
-    async def shorten(self, text: str, target: str, max_seconds: float) -> str:
-        return await self._call("shorten", text, target, max_seconds)  # type: ignore[no-any-return]
+    async def shorten(self, text: str, target: str, max_seconds: float, **kw: Any) -> str:
+        return await self._call("shorten", text, target, max_seconds, **kw)  # type: ignore[no-any-return]
 
     @property
     def last_latency_s(self) -> float | None:

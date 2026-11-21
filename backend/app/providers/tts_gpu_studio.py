@@ -68,8 +68,13 @@ class GpuStudioTTS:
                 pass
         return {"embedding": name, "shape": [], "dtype": GPU_REF, **own}
 
-    async def synth(self, text: str, lang: str, voice: VoiceSpec) -> bytes:
-        """Full WAV bytes at `tts_sample_rate`, like the hosted provider."""
+    native_speed = True   # Studio may ask for a line again at a higher engine speed when it does not fit its slot
+
+    def engine_speaks(self, lang: str, voice: VoiceSpec) -> bool:
+        return voice["kind"] == "clone" and bool(dict(voice["embedding"]).get("ref_path")) and self.gpu.speaks(lang)
+
+    async def synth(self, text: str, lang: str, voice: VoiceSpec, speed: float = 1.0) -> bytes:
+        """Full WAV bytes at `tts_sample_rate`, like the hosted provider. `speed` > 1 = faster speech."""
         emb: dict[str, Any] = dict(voice["embedding"]) if voice["kind"] == "clone" else {}
         if not emb.get("ref_path") or not self.gpu.speaks(lang):
             return await self._need_backup("a stock voice, English, or a hosted clone").synth(text, lang, voice)  # type: ignore[no-any-return]
@@ -80,7 +85,7 @@ class GpuStudioTTS:
                 await self.gpu.set_ref(vid, str(voices_dir() / emb["ref_path"]), emb["ref_text"],
                                        consent_at=emb.get("consent_at"))
                 self._sent.add(vid)
-            pcm, rate = await self.gpu.synth(vid, text, lang)
+            pcm, rate = await self.gpu.synth(vid, text, lang, speed=speed * self.s.gpu_voice_speed)
         except ConsentRequired:
             raise
         except Exception as e:  # noqa: BLE001 - the caller falls back to a stock voice for this line
