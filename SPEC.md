@@ -609,7 +609,22 @@ Checked against the code and the running setup on this date. Nothing here is bui
   - `live_stamp_fix` (on): a tail starts when its first word showed up in a partial (`Phraser.tail_start`), and no
     phrase starts before the one before it ended. Replay of the same run with the recorded audio and corrected stamps
     (an estimate: speed-up decisions would change in a real run): Tamil 45% -> 61% on time, 71% -> 81% within 1 s,
-    p90 2.1 s -> 1.2 s; Bengali 48% -> 67%, 70% -> 82%. **Not yet measured in a live run.**
+    p90 2.1 s -> 1.2 s; Bengali 48% -> 67%, 70% -> 82%. Measured live below.
   - What is left is real: on dense speech the dubbed phrase is longer than its slot even at the 1.3x limit (19 of 31
     Tamil phrases were at the limit), because the word budget allows 1.15x the speaker's time when in step and a
     speaker who does not pause leaves no room. Not changed yet.
+  - Second step, same switch: inside one line, phrases share the time since the line began at an even pace
+    (`Phraser._span`; the line's start is the speech start before its first partial). Before, a phrase was stamped
+    with the moment its words showed up, and a first partial brings 6-12 words at once: a whole phrase landed in one
+    instant, up to 2 s after it had begun. A line whose final arrives after the next line has begun keeps its own start.
+  - Measured live: six loops of the dense reel each (about 70 spoken phrases a language), fix off on a second server
+    and fix on, back to back, voice learned from the stream. While the hold was still 6 s in both runs (first 70 s,
+    27-28 phrases a language): Tamil within 0.25 s 41% -> 46%, within 0.5 s 52% -> 68%, within 1 s 59% -> 79%,
+    p90 2.1 s -> 1.3 s; Bengali 67% -> 71%, 70% -> 79%, 81% -> 86%, 1.5 s -> 1.4 s. Whole run: Tamil 49% -> 54%
+    (within 1 s 66% -> 86%), Bengali 59% -> 81% (78% -> 94%); phrases skipped as too late 5 -> 2.
+  - **Correction: the hold matters more than the replay said.** In both runs the hold grew part-way (off: 6 -> 8 s
+    at 100 s; on: 6 -> 9 s at 76 s, in one 3 s step after one long line arrived late in both languages) and more
+    phrases were on time afterwards (fix on at 9 s: Bengali about 87%, Tamil about 59% within 0.25 s). A phrase that
+    arrives late also delays the ones queued behind it, which a replay with fixed audio lengths does not show.
+    One long line adding 3 s for the rest of a session is too much; `_note_late` is not changed yet. How on-time
+    share moves with the hold (6 / 7.5 / 9 s, adapt off) has not been measured.

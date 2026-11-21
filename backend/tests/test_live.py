@@ -598,3 +598,37 @@ def test_the_tail_of_a_line_starts_when_its_first_word_was_heard():
     assert ph.tail_start("u") == 1800 - PARTIAL_LAG_MS      # "d" first showed up at 1800
     assert ph.final("u", "a b c d e.") == "d e."
     assert ph.tail_start("u") is None                       # the utterance is forgotten after its final
+
+
+def test_phrases_share_their_line_at_an_even_pace_when_its_start_is_known():
+    """A first partial brings several words at once. Stamping each word with the moment it showed up put a whole
+    phrase in one instant; with the line's start known, the words heard so far are spread evenly instead."""
+    from app.live.assembler import PARTIAL_LAG_MS, Phraser
+
+    ph = Phraser(min_words=2, max_words=3)
+    # six words heard by 2000 (spoken by 1400), the line began at 200: 200 ms a word
+    assert ph.partial("u", "a b c", "a b c d e f", 2000, t0=200) == ("a b c", 200, 800)
+    # the start given later is ignored: it is the next line's
+    assert ph.partial("u", "a b c d e f", "a b c d e f g h", 2400, t0=999) == ("d e f", 800, 1400)
+    assert ph.start_of("u") == 200
+    ph.final("u", "a b c d e f g h.")
+    assert ph.start_of("u") is None
+    # a start that would mean an impossible pace is not believed: back to when the words showed up
+    far = Phraser(min_words=2, max_words=3)
+    assert far.partial("v", "a b c", "a b c", 100000, t0=0) == ("a b c", 100000 - PARTIAL_LAG_MS, 100000 - PARTIAL_LAG_MS)
+
+
+async def test_a_line_keeps_its_own_start_when_the_next_line_has_already_begun(tmp_path, monkeypatch):
+    """Prisma can report the next line's speech start before the previous line's final transcript. The finished
+    line then began where its own audio began, and the newer start stays on record for the next line."""
+    store = LocalStore(tmp_path / "db.json")
+    monkeypatch.setattr("app.live.pipeline.get_store", lambda: store)
+    sess = LiveSession({"id": "st3", "target_langs": ["ta-IN"], "src_lang": "hi-IN"})
+    p = LivePipeline(sess, stt=SilentSTT(), llm=MockLLM(), tts=MockTTS())
+    await p.start()
+    p._t_start, p._t_end = 5000, 4000           # the next line began at 5000; this one ended at 4000
+    p._on_stt(TranscriptEvent(kind="final", text="यह पूरी लाइन है।", utterance_id="a", audio_duration_ms=1500))
+    await p.stop()
+    seq = max(p._starts)
+    assert p._starts[seq] == 4000 - 1500         # its end less its own length, not the next line's start
+    assert p._t_start == 5000                    # still there for the line being spoken now

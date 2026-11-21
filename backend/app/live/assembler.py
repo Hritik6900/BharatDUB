@@ -80,6 +80,7 @@ CLAUSE_END = frozenset("है हैं था थे थी हूँ हू�
                        "नहीं यार भाई bro ok okay".split())
 CLAUSE_START = frozenset("और लेकिन पर मगर तो कि क्योंकि फिर जो जब अगर या but and so because then".split())
 PARTIAL_LAG_MS = 600   # estimate: a word shows up in a partial about this long after it was spoken
+PACE_MS = (120, 700)   # ms a word: outside this, the utterance's start is not believed
 
 
 def _bare(word: str) -> str:
@@ -102,20 +103,34 @@ class Phraser:
         self._done: dict[str, int] = {}        # words of the utterance already given out
         self._seen: dict[str, list[int]] = {}  # when word i first showed up in a partial (session clock)
         self._last: dict[str, list[str]] = {}  # last two words given out, to find the tail in the final
+        self._t0: dict[str, int] = {}          # when the utterance began, if the caller knows (session clock)
 
     def reset(self) -> None:
         self._done.clear()
         self._seen.clear()
         self._last.clear()
+        self._t0.clear()
+
+    def start_of(self, uid: str | None) -> int | None:
+        """When this utterance began, as given with its first partial. Ask before `final()`."""
+        return self._t0.get(uid or "")
 
     def covered(self, uid: str | None) -> bool:
         """True when phrases of this utterance have already gone out."""
         return self._done.get(uid or "", 0) > 0
 
-    def partial(self, uid: str | None, stable: str, full: str, now_ms: int) -> tuple[str, int, int] | None:
-        """Returns (text, t_start_ms, t_end_ms) for a phrase that is ready, else None."""
+    def partial(self, uid: str | None, stable: str, full: str, now_ms: int,
+                t0: int | None = None) -> tuple[str, int, int] | None:
+        """Returns (text, t_start_ms, t_end_ms) for a phrase that is ready, else None.
+
+        `t0`: when the utterance began (the speech start before its first partial). With it, a phrase's time is
+        its share of the utterance so far at an even pace. Without it, when its words first showed up, which
+        comes in bursts: a first partial brings six words at once and stamps them all with the same moment.
+        """
         uid = uid or ""
         seen = self._seen.setdefault(uid, [])
+        if t0 is not None and not seen and uid not in self._t0:
+            self._t0[uid] = t0
         seen += [now_ms] * max(0, len(full.split()) - len(seen))
         done = self._done.get(uid, 0)
         avail = stable.split()[done:]
@@ -129,7 +144,17 @@ class Phraser:
             self._seen.pop(old, None)
             self._done.pop(old, None)
             self._last.pop(old, None)
-        return " ".join(avail[:k]), self._when(seen, done), self._when(seen, done + k - 1)
+            self._t0.pop(old, None)
+        return " ".join(avail[:k]), *self._span(uid, done, done + k, now_ms)
+
+    def _span(self, uid: str, a: int, b: int, now_ms: int) -> tuple[int, int]:
+        """When words [a, b) of the utterance were spoken."""
+        seen, t0 = self._seen.get(uid, []), self._t0.get(uid)
+        if t0 is not None and seen:
+            per = (now_ms - PARTIAL_LAG_MS - t0) / len(seen)   # the words heard so far, spread evenly
+            if PACE_MS[0] <= per <= PACE_MS[1]:
+                return int(t0 + a * per), int(t0 + b * per)
+        return self._when(seen, a), self._when(seen, b - 1)
 
     def tail_start(self, uid: str | None) -> int | None:
         """When the first word not yet given out was spoken, if a partial ever showed it. Ask before `final()`."""
@@ -147,6 +172,7 @@ class Phraser:
         done = self._done.pop(uid, 0)
         last = self._last.pop(uid, [])
         self._seen.pop(uid, None)
+        self._t0.pop(uid, None)
         words = text.split()
         bare = [_bare(w) for w in words]
         if done and len(last) == 2:

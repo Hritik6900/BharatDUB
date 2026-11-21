@@ -12,7 +12,7 @@ import numpy as np
 
 from app.config import DEFAULT_GLOSSARY, VOICE_BY_LANG, get_settings
 from app.db import get_store
-from app.live.assembler import STT_SILENCE_MS, Assembler, Chunk, Phraser
+from app.live.assembler import PACE_MS, STT_SILENCE_MS, Assembler, Chunk, Phraser
 from app.live.bus import ALL
 from app.live.session import LiveSession
 from app.providers import get_gpu_voice, get_llm, get_stt, get_tts
@@ -566,7 +566,8 @@ class LivePipeline:
             self.sess.bus.publish(ALL, {"type": "vad", "speaking": False}, to_all=False)
         elif ev.kind == "partial":
             self.sess.bus.publish(ALL, {"type": "partial", "text": ev.text, "t_ms": now}, to_all=False)
-            cut = self.phraser.partial(ev.utterance_id, ev.stable_text, ev.text, now)
+            cut = self.phraser.partial(ev.utterance_id, ev.stable_text, ev.text, now,
+                                       t0=self._t_start if self.s.live_stamp_fix else None)
             if cut:
                 held = self.assembler.flush()  # an earlier unfinished line goes out first, in order
                 if held:
@@ -576,9 +577,10 @@ class LivePipeline:
         elif ev.kind == "final" and ev.text and self.phraser.covered(ev.utterance_id):
             # Phrases of this utterance are already being dubbed: only the tail is left.
             heard = self.phraser.tail_start(ev.utterance_id) if self.s.live_stamp_fix else None
+            own = self.phraser.start_of(ev.utterance_id) if self.s.live_stamp_fix else None
             rest = self.phraser.final(ev.utterance_id, ev.text)
             t_end = self._t_end if self._t_end is not None else now - STT_SILENCE_MS
-            self._t_start = self._t_end = None
+            self._utterance_over(own, t_end)
             self._speaking = False
             self.sess.bus.publish(ALL, {"type": "vad", "speaking": False}, to_all=False)
             self.sess.bus.publish(ALL, {"type": "transcript", "text": ev.text, "t_ms": now}, to_all=False)
@@ -587,12 +589,24 @@ class LivePipeline:
                 t_start = min(t_end, now) - int(len(rest.split()) * self._src_ms_per_word)
                 if heard is not None:
                     t_start = min(heard, t_end)
+                total = len(ev.text.split())
+                if own is not None and total and t_end > own:
+                    # Best: the tail's share of the whole line, from where the line began to where it ended.
+                    per = (t_end - own) / total
+                    if PACE_MS[0] <= per <= PACE_MS[1]:
+                        t_start = int(own + max(0, total - len(rest.split())) * per)
                 self._dispatch(self.assembler.make(rest, t_start_ms=t_start, t_end_ms=t_end, t_final_ms=now))
         elif ev.kind == "final" and ev.text:
+            own = self.phraser.start_of(ev.utterance_id) if self.s.live_stamp_fix else None
             self.phraser.final(ev.utterance_id, ev.text)  # no phrase went out: forget the utterance
             t_end = self._t_end if self._t_end is not None else now - STT_SILENCE_MS
             t_start = self._t_start if self._t_start is not None else t_end - (ev.audio_duration_ms or 0)
-            self._t_start = self._t_end = None
+            if self.s.live_stamp_fix:
+                if own is not None:
+                    t_start = own
+                if t_start > t_end:   # that speech start is the next utterance's, which has already begun
+                    t_start = t_end - (ev.audio_duration_ms or 0)
+            self._utterance_over(own, t_end)
             self._speaking = False
             # Observed 2026-11-13: the real API sends no `processing` event, so the final also ends the "speaking" state.
             self.sess.bus.publish(ALL, {"type": "vad", "speaking": False}, to_all=False)
@@ -602,6 +616,15 @@ class LivePipeline:
                 self._dispatch(chunk)
         elif ev.kind == "error":
             self.sess.bus.publish(ALL, {"type": "error", "message": ev.message[:200]}, to_all=False)
+
+    def _utterance_over(self, own: int | None, t_end: int) -> None:
+        """Forget the finished utterance's times. The next utterance can begin before this one's final transcript
+        arrives: then the speech start on record is the next one's, and it is kept."""
+        nxt = self.s.live_stamp_fix and self._t_start is not None and (
+            (own is not None and self._t_start != own) or self._t_start > t_end)
+        if not nxt:
+            self._t_start = None
+        self._t_end = None
 
     async def _poll_loop(self) -> None:
         while self.running:
