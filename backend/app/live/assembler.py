@@ -111,7 +111,7 @@ class Phraser:
         self.min_words, self.max_words = min_words, max_words
         self._done: dict[str, int] = {}        # words of the utterance already given out
         self._seen: dict[str, list[int]] = {}  # when word i first showed up in a partial (session clock)
-        self._last: dict[str, list[str]] = {}  # last two words given out, to find the tail in the final
+        self._last: dict[str, list[str]] = {}  # last three words given out, to find the tail in the final
         self._t0: dict[str, int] = {}          # when the utterance began, if the caller knows (session clock)
 
     def reset(self) -> None:
@@ -147,7 +147,7 @@ class Phraser:
         if not k:
             return None
         self._done[uid] = done + k
-        self._last[uid] = [_bare(w) for w in avail[:k][-2:]]
+        self._last[uid] = [_bare(w) for w in avail[:k][-3:]]
         while len(self._seen) > 8:  # utterances whose final never came
             old = next(iter(self._seen))
             self._seen.pop(old, None)
@@ -184,10 +184,18 @@ class Phraser:
         self._t0.pop(uid, None)
         words = text.split()
         bare = [_bare(w) for w in words]
-        if done and len(last) == 2:
-            near = [i + 2 for i in range(len(bare) - 1) if bare[i:i + 2] == last and abs(i + 2 - done) <= 3]
+        pair = last[-2:]
+        if done and len(pair) == 2:
+            near = [i + 2 for i in range(len(bare) - 1) if bare[i:i + 2] == pair and abs(i + 2 - done) <= 3]
             if near:
                 done = min(near, key=lambda i: abs(i - done))
+        # When the final has a word more or fewer than the partials had, the tail can begin with the words that
+        # were just given out, and they were dubbed twice (seen 2026-11-21 on a real stream, 4 of 270 lines:
+        # "... kisse paya jata hai?" and then "jata hai." again). A tail never starts by repeating them.
+        for k in (3, 2):
+            if done and len(last) >= k and bare[done:done + k] == last[-k:]:
+                done += k
+                break
         rest = " ".join(words[done:])
         return rest if any(ch.isalnum() for ch in rest) else ""
 

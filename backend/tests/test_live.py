@@ -735,3 +735,17 @@ async def test_sessions_left_live_by_a_dead_server_are_closed_at_start(tmp_path,
     assert await main.close_stale_sessions() == 1
     assert (await store.get("live_sessions", a["id"]))["status"] == "ended"
     assert (await store.get("live_sessions", b["id"]))["status"] == "ended"
+
+
+def test_a_tail_does_not_repeat_the_words_just_given_out():
+    from app.live.assembler import Phraser
+    ph = Phraser(min_words=6, max_words=12)
+    got = ph.partial("u1", "se iska answer lagao ye kisse paya jata hai", "", 1000)
+    assert got and got[0].endswith("paya jata hai")
+    # The final has one word fewer than the partials had: the words given out last are not a new tail.
+    assert ph.final("u1", "iska answer lagao ye kisse paya jata hai? jata hai.") == ""
+    got = ph.partial("u2", "haan bilkul theek hai sharing hi hoga", "", 2000)
+    assert got
+    assert ph.final("u2", "haan bilkul theek hai sharing hi hoga. sharing hi hoga chhatai ka kaam") == "chhatai ka kaam"
+    got = ph.partial("u3", "ek do teen chaar paanch chhe hai", "", 3000)
+    assert got and ph.final("u3", "ek do teen chaar paanch chhe hai aur saat aath") == "aur saat aath"   # a normal tail is untouched
