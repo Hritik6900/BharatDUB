@@ -815,3 +815,18 @@ and memory: `gpu_engine/README.md`. Code: `providers/stt_gpu.py`, `llm_local.py`
   - Open, seen in that stream's transcript: the speech-to-text model mishears subject words ("Edward Jenner" ->
     "Adoval janar", "embryo implantation" -> "Android plantation", "zygote" -> "jaggoed", "bhroon garbhashay" ->
     "bhoorn darvaashe"), and the translation then carries the wrong word into the dub.
+- **GPU engine, speech-to-text on hard audio** (21 Nov 2026 night). The quiz-class stream showed subject words
+  misheard. A test set was made: 24 class and stream lines with 80 key words, spoken by two hosted stock voices,
+  clean and "hard" (15% faster, a room's echo, noise 10 dB under the voice). It is made speech, not a real teacher.
+  - Bigger models are not better. Key words right, clean / hard: this model (Whisper-Hindi2Hinglish-Apex) 69 / 48,
+    Whisper large-v3-turbo 67 / 40, large-v3 65 / 50 at four times the decode time (388 ms against 87 ms).
+  - The loss was in the live cutting, not the model. On the hard set streamed live, the decodes of whole utterances
+    had 49 of 80 key words but the settled words that phrases are cut from only 41: the word at the edge of the audio
+    is half spoken, two decodes agree on a wrong word, and a settled word is never taken back. Holding the last
+    agreed word back: 46 (six words settled 0.1 s later); two words 47 (0.35 s later); three 48 (0.65 s later).
+    The engine now holds one word back and decodes with beam 5 (`STT_HOLD_BACK`, `STT_BEAM` in `stt_engine.py`).
+  - Tried and not kept: the utterance before as the model's context (stream finals 49 -> 45); telling the translator
+    that the transcript may hold misheard words (English key words 49 -> 49 of 76 on the hard transcripts); the
+    copied voice's pace following the speaker (Streamer Mode, within 1 s of the moment 61% -> 61%; switch left, off).
+  - Open: the hold does not come back down. A viewer's player leaves a small offset alone, so lowering the hold on
+    the server would not move viewers who are already watching; it needs a change in the viewer page and a browser test.

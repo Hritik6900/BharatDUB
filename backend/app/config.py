@@ -117,6 +117,13 @@ class Settings(BaseSettings):
     # and the translator's word limit for an 8-word phrase 3-4 -> 5 words. Punjabi was already fast and is not touched.
     gpu_voice_pace_ms: int = 450
     gpu_voice_pace_max: float = 1.5
+    # GPU engine only, off: the pace asked of the copied voice follows the speaker (the speaker's own ms a word
+    # times `gpu_voice_pace_follow`, never under `gpu_voice_pace_floor_ms`, never over `gpu_voice_pace_ms`).
+    # Measured 2026-11-21, Streamer Mode, recorded voice, dense reel, off against 1.7: within 1 s of the moment
+    # 61% -> 61%, words heard back 84 / 79% -> 82 / 80%. No gain: the reel's speaker (195 ms a word) is faster
+    # than any pace the voice stays clear at.
+    gpu_voice_pace_follow: float = 0.0
+    gpu_voice_pace_floor_ms: int = 340
     # Denoising steps asked of the engine per line; 0 = the engine's own setting (12, `NFE` in start_live.sh).
     # Measured 2026-11-21 on one stored voice, 8 lines each in Punjabi, Gujarati and Tamil, words heard back by
     # Prisma: 12 steps 79 / 73 / 60%, 16 steps 80 / 89 / 80%, 32 steps 89 / 82 / 80%; a line took 0.15 s longer at 16

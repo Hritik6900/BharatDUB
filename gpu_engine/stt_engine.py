@@ -39,6 +39,18 @@ from silero_vad import load_silero_vad  # noqa: E402
 
 MODEL = os.environ.get("STT_MODEL", "models/apex-ct2")
 MAX_SPEECH_S = float(os.environ.get("MAX_SPEECH_S", "9"))
+# Measured 2026-11-21 on 24 class and stream lines made hard (15% faster, a room's echo, noise 10 dB under the voice),
+# key words written right out of 80.
+# Line by line: greedy 48, beam 5 49, beam 5 with the line before as context 53 (8 ms more a decode); Whisper
+# large-v3 50 at four times the time, large-v3-turbo 40. On the clean lines this model had 69, the others 65-67.
+# As a live stream (what a phrase is cut from): the whole-utterance decodes had 49, the settled words only 41: the
+# word at the edge of the audio is half spoken, two decodes agree on a wrong word, and a settled word is never
+# taken back. Holding the last agreed word back: 46 (6 words settled 0.1 s later); two words 47 (0.35 s later);
+# three 48 (0.65 s later). The context of the utterance before did not help a stream (finals 45 against 49).
+HOLD_BACK = os.environ.get("STT_HOLD_BACK", "1")
+BEAM = int(os.environ.get("STT_BEAM", "5"))
+CONTEXT = os.environ.get("STT_CONTEXT", "0") == "1"   # the utterance before is given to the model as context
+CONTEXT_CHARS = 200
 SR = 16000
 WIN = 512                 # Silero's window: 32 ms
 PRE_ROLL = int(0.3 * SR)  # audio kept from before speech was noticed
@@ -69,7 +81,7 @@ def _load() -> None:
 def _decode(audio: np.ndarray, hint: str) -> str:
     assert model is not None
     t0 = time.perf_counter()
-    segs, _info = model.transcribe(audio, language="hi", beam_size=1, temperature=0.0, without_timestamps=True,
+    segs, _info = model.transcribe(audio, language="hi", beam_size=BEAM, temperature=0.0, without_timestamps=True,
                                    condition_on_previous_text=False, initial_prompt=hint or None,
                                    no_speech_threshold=0.6, log_prob_threshold=-1.0, compression_ratio_threshold=2.4)
     text = " ".join(s.text.strip() for s in segs).strip()
@@ -127,6 +139,11 @@ async def stream(ws: WebSocket) -> None:
     interval = int(q.get("partial_interval_ms", "300")) / 1000
     max_speech = float(q.get("max_speech_s", MAX_SPEECH_S))
     hint = q.get("hint", "")
+    # The last `hold_back` words of what two decodes agree on are not settled yet: the word at the edge of the
+    # audio is often only half spoken, both decodes then agree on a wrong word, and settled words are never taken back.
+    hold_back = int(q.get("hold_back", HOLD_BACK))
+    use_context = q.get("context", "1" if CONTEXT else "0") == "1"
+    said = ""                                 # the utterance before this one, as the model's context
     vad = load_silero_vad()     # its own state per stream; runs on the CPU in under 1 ms a window
     stats["streams"] += 1
 
@@ -149,10 +166,10 @@ async def stream(ws: WebSocket) -> None:
 
     async def partial(audio: np.ndarray, my_uid: str) -> None:
         nonlocal prev, settled
-        words = (await decode(audio, hint)).split()
+        words = (await decode(audio, (hint + " " + said).strip())).split()
         if my_uid != uid or not words:   # the utterance ended while this was decoding
             return
-        k = agreed(prev, words)
+        k = min(agreed(prev, words), len(words) - hold_back)
         prev = words
         if k > len(settled):
             settled = settled + words[len(settled):k]
@@ -160,7 +177,10 @@ async def stream(ws: WebSocket) -> None:
                     "stable_text": " ".join(settled)})
 
     async def finish(audio: np.ndarray, my_uid: str, t_ms: int) -> None:
-        text = await decode(audio, hint)
+        nonlocal said
+        text = await decode(audio, (hint + " " + said).strip())
+        if use_context and text:
+            said = text[-CONTEXT_CHARS:]
         await send({"type": "final_transcript", "utterance_id": my_uid, "text": text, "is_final": True,
                     "audio_duration_ms": round(len(audio) / SR * 1000), "t_ms": t_ms})
 

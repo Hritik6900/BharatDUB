@@ -687,7 +687,11 @@ class LivePipeline:
         pace = self._gpu_ms_per_word.get(lang)
         if not (self.s.gpu_voice_pace_ms > 0 and pace):
             return 1.0
-        return min(max(1.0, self.s.gpu_voice_pace_max), max(1.0, pace / self.s.gpu_voice_pace_ms))
+        want = float(self.s.gpu_voice_pace_ms)
+        if self.engine == "gpu" and self.s.gpu_voice_pace_follow > 0:
+            # GPU engine only: a fast speaker gets a faster dub, down to `gpu_voice_pace_floor_ms` a word.
+            want = min(want, max(float(self.s.gpu_voice_pace_floor_ms), self._src_ms_per_word * self.s.gpu_voice_pace_follow))
+        return min(max(1.0, self.s.gpu_voice_pace_max), max(1.0, pace / want))
 
     def _note_gpu_pace(self, lang: str, ms_at_own_pace: float, words: int) -> None:
         if words < 4 or ms_at_own_pace < 300:
