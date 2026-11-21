@@ -91,11 +91,15 @@ class Settings(BaseSettings):
     gpu_voice_model: str = "f5"
     gpu_mio_url: str = ""              # e.g. http://127.0.0.1:9040
     gpu_mio_lanes: int = 3             # lines the one Indic-Mio engine is given at once
-    # GPU engine only (providers/tts_gpu_guard.py): IndicF5 swallows short lines, so a line of at most
-    # `gpu_voice_short_words` words is spoken by Indic-Mio when `gpu_mio_url` is set, and a line that comes out far
-    # too short is made again. False = lines go to IndicF5 as they are.
+    # GPU engine only (providers/tts_gpu_guard.py): IndicF5 swallows short lines. A line of at most
+    # `gpu_voice_short_words` words is asked for at `gpu_voice_short_speed` of the speed (more time for it), and a
+    # line that still comes out far too short is made again slower. `gpu_voice_short_engine` = `mio` gives such
+    # lines to Indic-Mio instead: clearer, but a second voice between the copied one (heard on a real stream).
+    # `gpu_voice_guard` False = lines go to IndicF5 as they are.
     gpu_voice_guard: bool = True
-    gpu_voice_short_words: int = 4
+    gpu_voice_short_words: int = 3
+    gpu_voice_short_speed: float = 0.75
+    gpu_voice_short_engine: str = "f5"
     gpu_separate_url: str = ""         # Studio: Demucs on our GPU machine (gpu_engine/sep_engine.py); empty = this PC's CPU
     gpu_voice_native_speedup: bool = False  # let the engine itself speak faster when a line must be shortened
     # How lines come back from the engine: `mp3` (a tenth of the bytes of `pcm`, 30 ms to make), `opus` (same size,

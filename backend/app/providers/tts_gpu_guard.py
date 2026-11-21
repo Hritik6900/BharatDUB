@@ -1,4 +1,4 @@
-"""GPU engine only: catches lines the IndicF5 engine swallows and has them spoken by the second voice.
+"""GPU engine only: catches lines the IndicF5 engine swallows, and keeps every line in the one copied voice.
 
 Measured 2026-11-21 on 120 real live phrases, each spoken twice: the bad lines are short ones. The engine gives a
 line time by its length against the sample's, and a line of 2-4 words often gets so little that nothing is spoken
@@ -6,9 +6,11 @@ line time by its length against the sample's, and a line of 2-4 words often gets
 helps (1 of 11). Lines of 2-4 words, words heard back by Prisma, IndicF5 / IndicF5 at speed 0.75 / Indic-Mio:
 Tamil 71 / 78 / 85%, Bengali 33 / 67 / 81%. Lines of 6 and more words are fine on IndicF5 (83-84%).
 
-So: a line of at most `gpu_voice_short_words` words goes to the second voice (when `GPU_MIO_URL` is set and it holds
-the speaker), and any other line whose speech comes out far shorter than this voice usually takes per letter is
-made again there. Without a second voice the line is made again at 0.75 of the speed.
+A first version gave short lines to Indic-Mio. On a real stream a third of the lines were short, and the viewer
+heard a second voice between the copied one (closeness to the sample 0.39 against 0.67). So by default
+(`gpu_voice_short_engine` = f5) a short line stays on IndicF5 and is given more time (speed x
+`gpu_voice_short_speed`), and a line that still comes out far too short is made again slower. `mio` restores the
+second voice for short and swallowed lines.
 """
 import statistics
 from typing import Any
@@ -33,7 +35,7 @@ class GuardedVoice:
 
     async def set_ref(self, session_id: str, wav_path: str, ref_text: str, **kw: Any) -> dict[str, Any]:
         out = await self.main.set_ref(session_id, wav_path, ref_text, **kw)
-        if self.second is not None and self.second.enabled:
+        if self.s.gpu_voice_short_engine == "mio" and self.second is not None and self.second.enabled:
             try:
                 await self.second.set_ref(session_id, wav_path, "", consent_at=kw.get("consent_at"))
                 self._second_has.add(session_id)
@@ -51,26 +53,33 @@ class GuardedVoice:
 
     async def synth(self, session_id: str, text: str, lang: str, speed: float | None = None) -> tuple[bytes, int]:
         words, letters = len(text.split()), max(1, len(text.replace(" ", "")))
-        if 0 < words <= self.s.gpu_voice_short_words and self._second_for(session_id, lang):
+        use_second = self.s.gpu_voice_short_engine == "mio" and self._second_for(session_id, lang)
+        short = 0 < words <= self.s.gpu_voice_short_words
+        if short and use_second:
             try:
                 out = await self.second.synth(session_id, text, lang)
                 self.short_lines += 1
                 return out
             except Exception:  # noqa: BLE001
                 pass
-        pcm, rate = await self.main.synth(session_id, text, lang, speed=speed)
-        per_letter = self._speech_ms(pcm, rate) * (speed or 1.0) / letters
+        ask = (speed or 1.0) * (self.s.gpu_voice_short_speed if short else 1.0)
+        if short:
+            self.short_lines += 1
+        pcm, rate = await self.main.synth(session_id, text, lang, speed=ask)
+        speech = self._speech_ms(pcm, rate)
+        per_letter = speech * ask / letters
         usual = self._usual.setdefault((session_id, lang), [])
         floor = SHORT_AGAINST_USUAL * statistics.median(usual) if len(usual) >= MIN_LINES else 0.0
-        if per_letter * letters / (speed or 1.0) >= MIN_SPEECH_MS and per_letter >= floor:
-            usual.append(per_letter)
-            del usual[:-40]
+        if speech >= MIN_SPEECH_MS and per_letter >= floor:
+            if not short:
+                usual.append(per_letter)
+                del usual[:-40]
             return pcm, rate
         try:
-            if self._second_for(session_id, lang):
+            if use_second:
                 out = await self.second.synth(session_id, text, lang)
             else:
-                out = await self.main.synth(session_id, text, lang, speed=(speed or 1.0) * 0.75)
+                out = await self.main.synth(session_id, text, lang, speed=ask * 0.75)
             self.rescued += 1
             return out
         except Exception:  # noqa: BLE001

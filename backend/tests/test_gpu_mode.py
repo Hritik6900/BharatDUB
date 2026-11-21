@@ -214,7 +214,7 @@ async def test_guard_sends_short_lines_to_the_second_voice_and_rescues_a_swallow
     long_line = "yah ek lambi line hai jo theek bolti hai"
     main = FakeVoice(lambda text, speed: 0.0 if "nigal" in text else 80.0 * len(text.replace(" ", "")))
     second = FakeVoice(rate=44100)
-    g = GuardedVoice(main, second, Settings(gpu_voice_short_words=4))
+    g = GuardedVoice(main, second, Settings(gpu_voice_short_words=4, gpu_voice_short_engine="mio"))
     await g.set_ref("s", "x.wav", "text", consent_at="2026-01-01")
     assert main.refs == ["s"] and second.refs == ["s"]
     assert (await g.synth("s", "do shabd", "ta-IN"))[1] == 44100 and g.short_lines == 1 and not main.calls
@@ -233,7 +233,13 @@ async def test_guard_without_a_second_voice_tries_again_slower():
     main = FakeVoice(lambda text, speed: 0.0 if (speed or 1.0) >= 1.0 else 900.0)
     g = GuardedVoice(main, None, Settings())
     pcm, rate = await g.synth("s", "aur iska", "bn-IN")
-    assert len(pcm) > 0 and g.rescued == 1 and main.calls[-1][1] == 0.75
+    assert len(pcm) > 0 and g.rescued == 0 and main.calls == [("aur iska", 0.75)]   # a short line: more time at once
+    await g.set_ref("s", "x.wav", "t", consent_at="2026-01-01")
+    swallowed = FakeVoice(lambda text, speed: 0.0 if (speed or 1.0) >= 1.0 else 2000.0)
+    g2 = GuardedVoice(swallowed, FakeVoice(rate=44100), Settings())     # a second voice exists but is not used
+    await g2.set_ref("s", "x.wav", "t", consent_at="2026-01-01")
+    assert (await g2.synth("s", "yah lambi line engine ne nigal li thi", "bn-IN"))[1] == 24000 and g2.rescued == 1
+    assert g2.second.refs == [] and g2.second.calls == []
 
 
 def test_guard_is_only_in_the_gpu_engine(monkeypatch):

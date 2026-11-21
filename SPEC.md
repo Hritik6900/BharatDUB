@@ -804,3 +804,14 @@ and memory: `gpu_engine/README.md`. Code: `providers/stt_gpu.py`, `llm_local.py`
     right on 10 lines, same decode time. Not added.
   - Two streams at once on the one GPU and tunnel (a test run beside the user's stream): the stream's first audio
     p50 3.2 s and 56% within 1 s; alone afterwards 2.5 s and 80%. One GPU through this tunnel is one stream.
+  - **Correction the same night, from a real stream.** On the user's stream (a quiz class, Punjabi) a third of the
+    lines were short and the viewer heard a second voice between the copied one. The stream's own lines spoken
+    again: IndicF5 lines 0.67 close to the sample, Indic-Mio lines 0.39. Now every line stays on IndicF5
+    (`gpu_voice_short_engine` = f5): a line of up to 3 words is asked for at 0.75 of the speed, and a swallowed line
+    is made again slower. Same check after the change, 40 lines of that stream: short lines 83% of words heard back
+    (1 of 8 lost: the one-word "Bolo."), other lines 87%, one voice throughout. `mio` restores the second voice.
+  - That stream after the test run beside it had stopped: Punjabi 92% within 0.25 s of the moment, 99% within 1 s,
+    first audio p50 2.3 s, 73 of 73 lines in the copied voice.
+  - Open, seen in that stream's transcript: the speech-to-text model mishears subject words ("Edward Jenner" ->
+    "Adoval janar", "embryo implantation" -> "Android plantation", "zygote" -> "jaggoed", "bhroon garbhashay" ->
+    "bhoorn darvaashe"), and the translation then carries the wrong word into the dub.
