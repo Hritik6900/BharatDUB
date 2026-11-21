@@ -563,9 +563,16 @@ Order if working alone: M0 → M1 → M2 → M3 → M4 → M5 → M6. With a tea
   - GPU use, engines only, lines as a live session sends them: idle 0% and 13.1 of 40 GB (three engines + Demucs);
     1 language at a phrase every 2.2 s: 11% average, 70% peak; 3 languages: 19% average, 100% peak, 110 W;
     3 languages at a phrase every 1.0 s: 54% average, line still 845 ms at the median (slowest 2.6 s).
-  - Not measured end to end: Gnani speech-to-text (REST and realtime) answered every request with a failure during
-    this work ("TRANSCRIPTION_FAILED", also for a clean line made by Gnani's own voice), so no Live run and no
-    words-heard-back check of the new engine were possible.
+  - Gnani speech-to-text (REST and realtime) answered every request with a failure during this work
+    ("TRANSCRIPTION_FAILED", also for a clean line made by Gnani's own voice); it answered again at 06:13 UTC on 21 Nov.
+  - Live on the faster engine, measured then (same dense reel, sync mode, voice learned from the stream, Tamil + Bengali,
+    one run, morning): first audio p50 2.7 s in both languages (20 Nov: 3.1-3.2 s), p95 3.7 s Tamil / 5.3 s Bengali
+    (3.9 / 3.8 s; the first three Bengali phrases of the session took 5-8 s); voice step 0.77 s a phrase (1.2-1.3 s);
+    30 of 32 and 33 of 35 spoken phrases in the copied voice; the video stayed held at 6 s (the 20 Nov run ended at 9 s);
+    dub behind its moment p50 0.3-0.4 s / p95 2.4-2.6 s, 47% of phrases on time.
+  - Words heard back by Prisma (`scripts/live_quality.py`), both runs checked in the same hour: this run 74% Tamil /
+    72% Bengali, the 20 Nov run (two guidance passes, Opus) 69% / 73%, Gnani's stock Tamil voice in this run 69%.
+    So the faster engine is not less clear. On this reel the check reads lower than the 80-89% of earlier reports.
 
 
 ## 20. From event build to product: what is missing (21 Nov 2026)
@@ -580,7 +587,7 @@ Checked against the code and the running setup on this date. Nothing here is bui
   (`LocalStore`, single process), outputs on the local disk.
 - [ ] **Speech-to-text has one provider and no fallback.** On 21 Nov 2026 Gnani speech-to-text failed every request
   (REST and realtime, checked several times through one working session) while its voices worked: Live, Studio
-  transcription and new voice recordings all stop with it. The site's health panel shows "key set", not whether the service answers.
+  transcription and new voice recordings all stop with it. It answered again at 06:13 UTC the same day. The site's health panel shows "key set", not whether the service answers.
 - [ ] **Capacity.** The Gnani account allows one request at a time: enough for one stream. Whether it allows two
   realtime speech-to-text sockets at once is not known. One A100 measured 19% average use for one stream in three languages.
 - [ ] **Cost per dubbed minute** is not measured (speech-to-text, translation, voice, GPU hours), so there is no price.

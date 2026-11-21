@@ -126,8 +126,10 @@ kept in step on the viewer's page (in the Live run the viewer's video was held 9
 
 The engine has been made faster since (21 Nov 2026): one line takes 439 ms on the GPU and 0.79 s from the laptop
 (before: 742 ms and 1.33 s), three lines at once 0.97 s. One stream in three languages keeps the A100 19% busy on
-average. A full Live run on this faster engine has not been measured yet. Separating 60 s of audio takes 4.0 to 4.8 s
-on the GPU against 40.3 s on the laptop CPU.
+average. One Live run on the faster engine (21 Nov, Tamil + Bengali, voice learned from the stream): first audio
+p50 2.7 s in both languages, 30 of 32 and 33 of 35 phrases in the speaker's voice, the viewer's video held 6 s, the dub
+0.3 to 0.4 s behind its moment at the median (p95 2.4 to 2.6 s). Separating 60 s of audio takes 4.0 to 4.8 s on the
+GPU against 40.3 s on the laptop CPU.
 
 ### Live with stock voices, no GPU (14 Nov 2026)
 
