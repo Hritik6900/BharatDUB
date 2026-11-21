@@ -659,3 +659,18 @@ async def test_gpu_voice_asks_for_its_steps_per_voice():
     await gpu.set_ref("s2-v1", __file__, "text", consent_at="2026-11-21", steps=0)
     await gpu.synth("s2-v1", "a", "ta-IN")
     assert [b.get("nfe") for b in seen] == [16, 12, None]
+
+
+def test_a_slow_copied_voice_is_asked_to_speak_faster_up_to_a_limit():
+    sess = LiveSession({"id": "pace", "target_langs": ["ta-IN", "pa-IN"], "src_lang": "hi-IN"})
+    p = LivePipeline(sess, stt=SilentSTT(), llm=MockLLM(), tts=MockTTS(), gpu=FakeGpu())
+    assert p._pace_boost("ta-IN") == 1.0                 # nothing known yet
+    p._note_gpu_pace("ta-IN", 6500, 10)                  # 650 ms a word
+    p._note_gpu_pace("pa-IN", 3500, 10)                  # 350 ms a word: already fast enough
+    p._note_gpu_pace("pa-IN", 2000, 3)                   # too short to say anything about pace
+    assert abs(p._pace_boost("ta-IN") - 650 / p.s.gpu_voice_pace_ms) < 0.01
+    assert p._pace_boost("pa-IN") == 1.0
+    p._gpu_ms_per_word["ta-IN"] = 2000
+    assert p._pace_boost("ta-IN") == p.s.gpu_voice_pace_max
+    p.s = p.s.model_copy(update={"gpu_voice_pace_ms": 0})
+    assert p._pace_boost("ta-IN") == 1.0                 # switched off

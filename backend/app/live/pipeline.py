@@ -159,6 +159,7 @@ class LivePipeline:
         self._src_ms_per_word = 350.0             # how fast the speaker talks (from finished lines)
         self._dub_ms_per_word: dict[str, float] = {}  # per language: how long the dubbing voice takes per word
         self._gpu_ms_per_byte: dict[str, float] = {}  # per language: speech the GPU voice makes per byte of text
+        self._gpu_ms_per_word: dict[str, float] = {}  # per language: the copied voice's own pace (engine speed 1)
         self._playhead: dict[str, int] = {}  # per language: session time at which a viewer's queued dub ends
         self._stt_t0: int | None = None   # session clock at the start of the current STT stream
         self.context: deque[str] = deque(maxlen=3)
@@ -432,6 +433,7 @@ class LivePipeline:
                 self._gpu_score = score
             elif score is not None and score > (self._gpu_score or 0.0) + 0.08:
                 self._gpu_sid, self._gpu_score = cand, score   # a clearly better sample: use it from now on
+                self._gpu_ms_per_word.clear()   # another sample, another pace
             log.info("live gpu voice sample %d: %.1f s, %d words, score %s, in use: %s", self._gpu_tries,
                      len(audio) / 16000, len(text.split()), score, self._gpu_sid == cand)
             self.sess.bus.broadcast({"type": "session", **self.sess.public()})
@@ -674,6 +676,21 @@ class LivePipeline:
             self._last_caption[lang] = task
             q.put_nowait((chunk, task))
 
+    def _pace_boost(self, lang: str) -> float:
+        """How much faster the copied voice is asked to speak in this language so that it reaches
+        `gpu_voice_pace_ms` a word (1 = as the sample speaks). It does not count towards the squeeze limit."""
+        pace = self._gpu_ms_per_word.get(lang)
+        if not (self.s.gpu_voice_pace_ms > 0 and pace):
+            return 1.0
+        return min(max(1.0, self.s.gpu_voice_pace_max), max(1.0, pace / self.s.gpu_voice_pace_ms))
+
+    def _note_gpu_pace(self, lang: str, ms_at_own_pace: float, words: int) -> None:
+        if words < 4 or ms_at_own_pace < 300:
+            return
+        prev = self._gpu_ms_per_word.get(lang)
+        now = ms_at_own_pace / words
+        self._gpu_ms_per_word[lang] = now if not prev else 0.7 * prev + 0.3 * now
+
     async def _translate(self, lang: str, chunk: Chunk, ctx: list[str],
                          prev: "asyncio.Task[tuple[str, bool]] | None") -> tuple[str, bool]:
         """Translate one chunk and publish its caption (captions stay in order per language)."""
@@ -859,14 +876,19 @@ class LivePipeline:
                     # How long the line will be is guessed from the lines before it (ms of speech per byte of text).
                     size = max(1, len(text.encode("utf-8")))
                     per_byte = self._gpu_ms_per_byte.get(lang)
-                    speed = self.s.gpu_voice_speed
+                    base = speed = self.s.gpu_voice_speed * self._pace_boost(lang)
                     # Off by default: measured 2026-11-14 on 14 Tamil lines, the engine at 1.3x kept 70% of the
                     # words (Prisma hearing them back), against 82% for normal speed squeezed afterwards.
                     if fit and per_byte and self.s.gpu_voice_native_speedup:
                         speed = max(speed, want_tempo(per_byte * size / speed) * speed)
                         speed = min(speed, self.s.live_fit_max_tempo)
                     pcm, rate = await self.gpu.synth(self._gpu_sid or self.sess.id, text, lang, speed=speed)
-                    spoke_at = speed / self.s.gpu_voice_speed
+                    spoke_at = speed / base
+                    # The pace is taken from the speech alone: the silence around a short line would read as slow speech.
+                    spoken = au.trim_pcm_silence(au.trim_pcm_silence(pcm, start=True, end=False), start=False, end=True)
+                    self._note_gpu_pace(lang, len(spoken) / 2 / rate * 1000 * speed / self.s.gpu_voice_speed, len(text.split()))
+                    if base > self.s.gpu_voice_speed * 1.03:
+                        timings[f"pace:{lang}"] = round(base / self.s.gpu_voice_speed, 2)
                     now_per_byte = len(pcm) / 2 / rate * 1000 * speed / size
                     self._gpu_ms_per_byte[lang] = now_per_byte if not per_byte else 0.7 * per_byte + 0.3 * now_per_byte
                     if rate != sr:

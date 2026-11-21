@@ -665,3 +665,25 @@ Checked against the code and the running setup on this date. Nothing here is bui
     phrases were at the 1.3x speed limit and 7 were skipped as too late. Its lines are long: in the 8-line check this
     voice took 813 ms a word in Tamil against 455-555 ms for the other recorded voice. Likely cause, not yet proven:
     the engine copies the pace of the sample, and this sample is slow casual speech.
+- [x] **A copied voice that is slow in a language speaks faster** (2026-11-21, `gpu_voice_pace_ms` = 450,
+  `gpu_voice_pace_max` = 1.5; 0 = off). The engine copies the pace of the sample, and that pace differs by language:
+  two recorded voices took 640-650 ms a word in Tamil and 350-360 ms in Punjabi. The pipeline measures the copied
+  voice's pace per language (speech only, lines of 4 words and more) and asks the engine for the speed that brings it
+  to 450 ms a word. This speed-up is the voice's new normal pace: it does not use up the 1.3x squeeze, and the word
+  limit given to the translator is worked out from it.
+  - Engine alone, 16 lines a cell, words heard back: Tamil at speed 1.0 / 1.25 / 1.5 = 84-85 / 83-85 / 82-84%, the
+    same after the 1.3x squeeze. Punjabi under 300 ms a word lost words in one of the two voices (91 -> 85 -> 62%):
+    the rule is a pace, not a factor.
+  - Whole sessions, Streamer Mode, one recorded voice, Tamil + Punjabi, dense reel six loops, hold 6 s, two runs off
+    and two on (the first "on" run still counted silence as speech and so also sped Punjabi up a little).
+    Tamil: within 1 s of the moment 58 / 55% -> 75 / 65%, within 0.5 s 52 / 38% -> 63 / 52%, at the squeeze limit
+    42 / 41 -> 31 / 34 phrases of about 63, words heard back 79 / 73% -> 73 / 74%, word limit for an 8-word phrase
+    3-4 -> 5 words. Punjabi, not sped up in the clean run: within 1 s 56 / 60% and 68%, words 86 / 82% and 79%.
+  - **Two equal runs differ by about 10 points in timing and 6 in words**, so one run each way proves little here.
+  - What this does not fix: on this reel (about 5 words a second) a recorded voice at a natural pace still starts
+    only 57-72% of phrases within 1 s. An earlier finding blamed one streamer's "slow sample"; the other recorded
+    voice, checked the same way, was as late (56-57% within 1 s), so it is the reel's speed against any natural-pace
+    voice, not that sample. A voice learned from the stream copies the fast speaker and keeps up (87% within 1 s).
+    The 20 Nov Streamer Mode numbers (behind p50 0 s) were made while that profile's text was stale and its lines
+    came out twice too fast.
+  - Not measured: a streamer speaking at their own normal pace, which is the real case for Streamer Mode.

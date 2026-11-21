@@ -82,6 +82,17 @@ class Settings(BaseSettings):
     # 144 ms to make on the GPU machine's CPU) or `pcm`.
     gpu_voice_format: str = "mp3"
     gpu_voice_speed: float = 1.0       # < 1 = slower speech; the engine copies the pace of the voice sample
+    # A copied voice that is slow in a language is asked to speak faster, so it reaches this pace (0 = off), by at
+    # most `gpu_voice_pace_max`. The engine copies the sample's pace, and Tamil words are long: two recorded voices
+    # took 640-650 ms a word in Tamil and 350-360 in Punjabi. Measured 2026-11-21, 16 lines a cell, words heard back
+    # by Prisma: Tamil at engine speed 1.0 / 1.25 / 1.5 = 84-85 / 83-85 / 82-84% (424-443 ms a word at 1.5), and the
+    # same after the 1.3x squeeze. Punjabi pushed under 300 ms a word lost words in one voice (91 -> 85 -> 62%),
+    # so the pace is the rule, not a fixed factor.
+    # Whole sessions (recorded voice, dense reel, two runs each way): Tamil phrases starting within 1 s of their
+    # moment 55-58% -> 65-75%, at the squeeze limit 41-42 -> 31-34 of about 63, words heard back 73-79% -> 73-74%,
+    # and the translator's word limit for an 8-word phrase 3-4 -> 5 words. Punjabi was already fast and is not touched.
+    gpu_voice_pace_ms: int = 450
+    gpu_voice_pace_max: float = 1.5
     # Denoising steps asked of the engine per line; 0 = the engine's own setting (12, `NFE` in start_live.sh).
     # Measured 2026-11-21 on one stored voice, 8 lines each in Punjabi, Gujarati and Tamil, words heard back by
     # Prisma: 12 steps 79 / 73 / 60%, 16 steps 80 / 89 / 80%, 32 steps 89 / 82 / 80%; a line took 0.15 s longer at 16
