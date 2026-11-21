@@ -52,3 +52,39 @@ Measured 20 Nov 2026 on the second machine: 60 s of audio in 4.0 to 4.8 s throug
 Measured 15 Nov 2026 on the first machine, 60 s of audio: 11.5 to 13.8 s through the tunnel (1.5 s on the GPU, the rest is sending
 2.4 MB and receiving 4.3 MB of FLAC), against 38.9 s on the laptop CPU. The stems match the CPU result
 (difference 40 dB below the signal). On any failure the backend separates on the CPU as before.
+
+## All-GPU mode: speech-to-text and translation on the same machine (21 Nov 2026)
+
+Off by default. With `AI_MODE=gpu` the backend also takes speech-to-text and translation from this machine, so a
+phrase makes no trip to a hosted service; the hosted ones stay as the fallback when their keys are set.
+
+| Part | Model | Licence | Port | Memory |
+|---|---|---|---|---|
+| Speech-to-text, live partials (`stt_engine.py`) | Oriserve/Whisper-Hindi2Hinglish-Apex, CTranslate2 float16 | Apache-2.0 | 9030 | about 2 GB |
+| Translation (`start_llm.sh`, vLLM) | google/gemma-4-E4B-it, bf16 | Apache-2.0 | 9020 | about 19 GB (`LLM_GPU_SHARE`, 0.5 of the card) |
+| Voice (`voice_engine_live.py`, as before) | ai4bharat/IndicF5 | MIT tag, commercial use unanswered | 9001-9003 | 12 GB |
+
+```
+bash setup_gpu_mode.sh                 # once: two environments beside .venv2 (.venv_stt, .venv_llm) and the models
+bash start_stt.sh && bash start_llm.sh # after every restart of the machine (the model server needs about 2 minutes)
+# backend/.env on the PC (tunnel.ps1 forwards 9020 and 9030 too):
+AI_MODE=gpu
+GPU_STT_URL=http://127.0.0.1:9030
+GPU_LLM_URL=http://127.0.0.1:9020/v1
+```
+
+All five engines together use 34.7 of 40 GB; one stream in two languages keeps the GPU 36% busy on average.
+
+What to know:
+- The speech-to-text model hears **Hindi and Hinglish only** and writes them in Latin letters ("ise ham machine mein
+  dedh ghante pakaate hain"). Other source languages, and hearing a dubbed line back, go to the hosted service.
+  The same reel, another Whisper (large-v3-turbo) wrote wrong words where this one matched the hosted transcript.
+- Whisper does not stream: while somebody speaks the utterance is decoded again every 0.3 s (120 ms a decode), a word
+  counts as settled once two decodes agree, and an utterance with no pause is closed after 9 s.
+- The voice engine wants its sample's text in Devanagari: with the Latin text the same lines were heard back 61% /
+  72% (Bengali / Tamil) against 91% / 87%. The translation model rewrites the sample's text once per sample (0.7 s).
+- The translation model has its own short prompt (`providers/llm_local.py`). On the hosted prompt it left English
+  words in Latin letters in 7-10 of 14 lines, which the voice engine cannot read; on its own prompt 0 of 42.
+- There is no stock voice and no English on the GPU: both stay with the hosted voice service.
+- SraVaani-0.5-live (MIT, a real streaming model) and the Gemma 3 models are gated on Hugging Face and this
+  machine's login has no access; they were not tried.

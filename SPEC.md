@@ -687,3 +687,53 @@ Checked against the code and the running setup on this date. Nothing here is bui
     The 20 Nov Streamer Mode numbers (behind p50 0 s) were made while that profile's text was stale and its lines
     came out twice too fast.
   - Not measured: a streamer speaking at their own normal pace, which is the real case for Streamer Mode.
+
+## 21. All-GPU mode (21 Nov 2026)
+
+`AI_MODE=gpu` (default `cloud`). Speech-to-text and translation run on our GPU machine beside the voice engines, so
+a phrase needs no hosted service; the hosted ones are the fallback when their keys are set. Setup, models, licences
+and memory: `gpu_engine/README.md`. Code: `providers/stt_gpu.py`, `llm_local.py`, `tts_gpu_studio.py`, `fallback.py`,
+`gpu_engine/stt_engine.py`. With the switch off nothing in the hosted path changes.
+
+- **Models.** Speech-to-text: Whisper-Hindi2Hinglish-Apex (Apache-2.0), decoded again every 0.3 s for live partials.
+  Translation: Gemma 4 E4B (Apache-2.0) on vLLM. Voice: IndicF5 as before. Together 34.7 of 40 GB.
+- **Where the time went, hosted mode** (same reel, one line): speech-to-text about 1.0 s, translation 0.85-0.95 s,
+  voice about 1.0 s. All-GPU with the backend on the GPU machine: translation 0.17 s (p95 0.29-0.41 s), translation
+  to first audio 0.62 s.
+- **Live, voice learned from the stream, Tamil + Bengali, dense reel six loops, hold 6 s** (one run each unless said):
+
+  | | Hosted (two runs) | All-GPU, backend on the laptop (tunnel) | All-GPU, backend on the GPU machine, no hosted key |
+  |---|---|---|---|
+  | First audio p50 / p95 | 2.8-2.9 s / 3.9-4.1 s | 2.3 s / 3.0 s | 1.8 s / 2.1 s |
+  | Starts within 0.25 s / 1 s / 2 s of its moment | 61-63% / 87% / 93-97% | 78% / 96% / 100% | 76% / 93% / 100% |
+  | Worst lateness | 3.3-3.7 s | 1.2 s | 1.7 s |
+  | Phrases skipped as too late | 0-1 | 6 | 0 |
+  | In the copied voice | 146-149 of 147-151 | 158 of 160 | 163 of 163 |
+  | Words heard back, Tamil / Bengali | 77-81% / 78-79% | 82% / 73% | 80% / 72% |
+
+  GPU while the machine run was on: 36% busy on average, 100% at peaks.
+  The real site (port 8010) in this mode, one run: first audio p50 2.4 s / p95 3.4 s, 78% on time, no errors.
+- **The hold can come down** when the backend is on the GPU machine: at 4.5 s the run measured 76% / 91% / 99%
+  (within 0.25 / 1 / 2 s), the same as at 6 s; at 4 s 63% / 89% / 98%, which is what hosted mode gives at 6 s.
+  The default stays 6 s (`live_sync_delay_ms`): through the laptop's tunnel the audio arrives 0.5 s later.
+- **Streamer Mode** (recorded voice, Tamil + Punjabi, through the tunnel): 162 of 162 phrases in the recorded voice,
+  words heard back 82% / 78% (hosted, earlier runs: 73-79% / 79-86%), first audio p50 2.8-3.0 s; 57% within 1 s, as
+  in hosted mode: on this reel a recorded voice is late because its lines are long, not because they arrive late.
+- **Studio** (dense reel, one recorded voice with consent, through the tunnel): hosted 88 s for Tamil + Bengali,
+  words heard back 76% / 74%, English words left in Latin letters; all-GPU 43-68 s (two or three languages), words
+  91-93% in Tamil, Bengali and Punjabi, every line inside its slot. One line a language: a small sample.
+  The first all-GPU run put a 37.7 s Tamil line into a 24.9 s slot, because the recorded voice speaks at its own
+  pace; the fit stage now asks the engine again at a higher speed (not under 300 ms a word, at most 1.5x) and
+  gives the shorten step a word count.
+- **Found on the way.** (1) A voice sample whose text is in Latin letters: the same lines were heard back 61% / 72%
+  (Bengali / Tamil) against 91% / 87% with the text in Devanagari, and came out about 20% faster; the first all-GPU
+  run had Bengali at 43%. The sample's text is now rewritten in Devanagari before it goes to the engines.
+  (2) The hosted live prompt on the small model left English words in Latin letters in 7-10 of 14 lines; its own
+  prompt 0 of 42. (3) One translation error seen in 42 lines: "dedh ghante" (an hour and a half) became two hours
+  in Punjabi.
+- **What it does not do.** Source languages other than Hindi/Hinglish, stock voices and English stay with the hosted
+  services; without a hosted key a Live session has captions only until the voice is learned (about 9 s) and the
+  voice sample is not scored. The source caption on the console is Latin Hinglish, not Devanagari. Translation
+  quality was read by eye on 42 lines, not scored. Two streams at once on one GPU were not tried.
+- **Answers two items of section 20:** speech-to-text now has a second provider (each is the other's fallback for
+  Hindi), and the one-request-at-a-time limit of the hosted account no longer bounds a stream in this mode.

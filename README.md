@@ -114,6 +114,20 @@ Measured on the real services. Nothing here is estimated. Word error rate has no
 ground-truth clips yet), and how close a copied voice sounds to the speaker needs listeners, not a script.
 `python -m eval.run` in `backend/` rebuilds `eval/results.csv` from stored runs.
 
+### All-GPU mode (21 Nov 2026)
+
+`AI_MODE=gpu`: speech-to-text (Whisper-Hindi2Hinglish-Apex) and translation (Gemma 4 E4B) also run on our GPU
+machine, hosted services as fallback ([gpu_engine/README.md](gpu_engine/README.md), SPEC.md section 21). Same dense
+reel, Tamil + Bengali, voice learned from the stream, video held 6 s:
+
+| | Hosted services | All-GPU through a tunnel | All-GPU, backend on the GPU machine |
+|---|---|---|---|
+| First audio p50 / p95 | 2.8-2.9 s / 3.9-4.1 s | 2.3 s / 3.0 s | 1.8 s / 2.1 s |
+| Dub starts within 1 s of its moment | 87% | 96% | 93% |
+| Words heard back, Tamil / Bengali | 77-81% / 78-79% | 82% / 73% | 80% / 72% |
+
+Studio on the same reel: 43-68 s against 88 s, 91-93% of words heard back against 74-76% (one line a language).
+
 ### Live and Streamer with our own voice engine (20 Nov 2026)
 
 Source: a dense 24.9 s Hindi reel (one fast speaker, no pauses) played three times in real time, the video and its dub
