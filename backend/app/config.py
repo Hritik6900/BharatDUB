@@ -86,6 +86,11 @@ class Settings(BaseSettings):
     gpu_stt_url: str = ""              # e.g. http://127.0.0.1:9030
     gpu_llm_url: str = ""              # OpenAI-compatible, e.g. http://127.0.0.1:9020/v1
     gpu_llm_model: str = "local"
+    # The GPU engine's voice: `f5` (IndicF5, as in the hosted engine) or `mio` (Indic-Mio, gpu_engine/mio_engine.py;
+    # needs `gpu_mio_url`). The hosted engine always uses IndicF5. See providers/tts_gpu_mio.py.
+    gpu_voice_model: str = "f5"
+    gpu_mio_url: str = ""              # e.g. http://127.0.0.1:9040
+    gpu_mio_lanes: int = 3             # lines the one Indic-Mio engine is given at once
     gpu_separate_url: str = ""         # Studio: Demucs on our GPU machine (gpu_engine/sep_engine.py); empty = this PC's CPU
     gpu_voice_native_speedup: bool = False  # let the engine itself speak faster when a line must be shortened
     # How lines come back from the engine: `mp3` (a tenth of the bytes of `pcm`, 30 ms to make), `opus` (same size,

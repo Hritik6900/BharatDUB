@@ -157,3 +157,32 @@ def test_a_session_or_a_job_cannot_ask_for_the_gpu_engine_when_it_is_not_set_up(
         r = c.post("/api/live/sessions", json={"target_langs": ["ta-IN"]})
         assert r.status_code == 201 and r.json()["engine"] == "cloud"
         assert c.get("/api/streamers/health").json()["gpu_mode"] is False
+
+
+def test_second_voice_is_only_for_the_gpu_engine(monkeypatch):
+    """`GPU_VOICE_MODEL=mio` changes the GPU engine's voice and nothing in the hosted engine."""
+    import app.providers as prov
+    from app.providers.tts_gpu import GpuVoice
+    from app.providers.tts_gpu_mio import MioVoice
+
+    s = Settings(gpu_stt_url="http://127.0.0.1:1", gpu_llm_url="http://127.0.0.1:2/v1", gpu_voice_url="http://127.0.0.1:3",
+                 gpu_voice_model="mio", gpu_mio_url="http://127.0.0.1:4", mock_providers=False)
+    monkeypatch.setattr(prov, "get_settings", lambda: s)
+    prov._gpu_voice.cache_clear()
+    try:
+        mio, f5 = prov.get_gpu_voice("gpu"), prov.get_gpu_voice("cloud")
+        assert isinstance(mio, MioVoice) and mio.urls == ["http://127.0.0.1:4"] and mio.capacity == 3
+        assert mio.speaks("en-IN") and mio.speaks("ta-IN") and mio.ref_text_fix is None
+        assert type(f5) is GpuVoice and f5.urls == ["http://127.0.0.1:3"] and not f5.speaks("en-IN")
+    finally:
+        prov._gpu_voice.cache_clear()
+
+
+async def test_second_voice_refuses_without_consent(tmp_path):
+    from app.providers.tts_gpu_mio import MioVoice
+
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(b"RIFF")
+    mio = MioVoice(Settings(gpu_mio_url="http://127.0.0.1:4"))
+    with pytest.raises(ConsentRequired):
+        await mio.set_ref("s", str(wav), "", consent_at=None)

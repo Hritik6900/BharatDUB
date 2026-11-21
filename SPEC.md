@@ -769,3 +769,22 @@ and memory: `gpu_engine/README.md`. Code: `providers/stt_gpu.py`, `llm_local.py`
     lines ("Kaise?", "Batao?") are dubbed as lines of their own; the health panel asks the engines one after
     another and hangs for seconds when the link is slow. After the fixes, one check run on the site: no errors,
     no one-word lines, no "nan", first audio p50 2.4 s.
+- **A second voice tried in the GPU engine: Indic-Mio** (21 Nov 2026 night; `GPU_VOICE_MODEL=mio` + `GPU_MIO_URL`,
+  `providers/tts_gpu_mio.py`, `gpu_engine/mio_engine.py`; default stays `f5`, the hosted engine never uses it).
+  A 0.6 B language model writes speech tokens and a codec speaks them in the speaker's voice; no sample text needed,
+  English too. All engines together: about 39 of 40 GB.
+  - Lines alone (one recorded voice, 8 lines a language, IndicF5 against Indic-Mio): engine time 605-612 ms against
+    274-378 ms; words heard back Tamil 85 / 81%, Punjabi 91 / 88%, Bengali 93 / 95%; voice against the speaker
+    (ECAPA2, the real person scores 0.86-0.89) 0.54-0.63 against 0.45-0.57. English, Indic-Mio only: 96% of words,
+    voice 0.32. A 3 s sample instead of 9 s: about the same (0.47-0.52). Tamil pace 657 against 406 ms a word.
+  - Live, voice learned from the stream, Tamil + Bengali, dense reel six loops, hold 6 s, one run each: first audio
+    p50 2.6 s -> 2.1 s, words heard back 79 / 75% -> 80 / 79%, but starts within 1 s of the moment 87% -> 50%
+    (Bengali 97% -> 27%) and phrases at the 1.3x limit 37 -> 111 of about 155. IndicF5 copies the pace of the fast
+    speaker on the stream; Indic-Mio speaks at its own pace (about 400 ms a word), so its lines are longer.
+  - Asking its codec for faster speech costs the voice: at 1.0 / 1.25 / 1.5 / 1.75x Tamil words 79 / 80 / 70 / 58%
+    and voice 0.47 / 0.40 / 0.31 / 0.27.
+  - Streamer Mode, recorded voice, Tamil + Punjabi, one run each: first audio p50 2.8 s -> 2.2 s; within 1 s of the
+    moment 54% -> 60%; words Tamil 77 -> 82%, Punjabi 80 -> 75% (all inside what two equal runs differ by).
+  - So: about 0.5-0.7 s earlier first audio and no sample text, against a voice less close to the speaker and, for a
+    voice learned from a fast stream, much worse timing. It stays a switch; IndicF5 stays the GPU engine's voice.
+    Which of the two sounds better was not judged by ear.

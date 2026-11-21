@@ -55,7 +55,7 @@ def _tts(engine: str) -> Any:
         return MockTTS(get_settings().tts_sample_rate)
     from app.providers.tts_gnani import GnaniTTS
     s = get_settings()
-    if engine == "gpu" and s.gpu_voice_url:
+    if engine == "gpu" and (s.gpu_voice_url or (s.gpu_voice_model == "mio" and s.gpu_mio_url)):
         from app.providers.tts_gpu_studio import GpuStudioTTS
         return GpuStudioTTS(_gpu_voice("gpu"), _stt("gpu"), s,
                             backup=GnaniTTS() if s.gnani_api_key.get_secret_value() else None)
@@ -68,6 +68,9 @@ def _gpu_voice(engine: str) -> Any:
     speech-to-text writes Hindi in Latin letters and needs the sample's text rewritten in Devanagari."""
     from app.providers.tts_gpu import GpuVoice
     s = get_settings()
+    if engine == "gpu" and s.gpu_voice_model == "mio" and s.gpu_mio_url and not s.mock_providers:
+        from app.providers.tts_gpu_mio import MioVoice
+        return MioVoice(s)      # takes the speaker from the sound alone: no sample text to rewrite
     gpu = GpuVoice(s.model_copy(update={"gpu_voice_url": ""}) if s.mock_providers else s)
     if engine == "gpu":
         gpu.ref_text_fix = _local_llm().to_devanagari
