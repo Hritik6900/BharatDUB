@@ -737,3 +737,25 @@ and memory: `gpu_engine/README.md`. Code: `providers/stt_gpu.py`, `llm_local.py`
   quality was read by eye on 42 lines, not scored. Two streams at once on one GPU were not tried.
 - **Answers two items of section 20:** speech-to-text now has a second provider (each is the other's fallback for
   Hindi), and the one-request-at-a-time limit of the hosted account no longer bounds a stream in this mode.
+- **A real stream in this mode** (21 Nov 2026 evening, the user's own session: a YouTube quiz class, 67 minutes,
+  1363 phrases, Punjabi heard by the viewer, backend on the laptop, engines through the tunnel). First audio p50
+  2.5 s / p95 5.1 s; started within 0.25 / 1 / 2 s of its moment 81% / 97% / 98%; 1281 of 1327 spoken lines in the
+  copied voice; 14 lines skipped as too late; 94 lines (7%) took more than 4.5 s. Every bad stretch sat on a stall
+  of the laptop-to-machine link (the machine answered in 2 ms and ping was fine meanwhile). Found and fixed:
+  - After a tunnel drop the session stayed on the hosted speech-to-text until that connection's 15-minute cap.
+    Now the engine is asked every 15 s and the hosted stream ends at the next final (`stt_gpu.RETURN_CHECK_S`).
+  - A phrase was cut one word before its sentence ended ("... milta nahin" / "hai?", 19 of 490 phrases): the cutter
+    looks at the unsettled next word. A tail no longer starts with the words just dubbed (4 of 270 lines on the
+    hosted path, when the final had a word more or fewer than the partials).
+  - The speech-to-text model writes "nan" for sound that is not speech (9 of 1000 lines, one was spoken): dropped
+    in the engine and in the provider, also at the start of a line.
+  - Five sessions from 13-15 Nov were still marked "live": a session cut off by a restart is closed at start.
+  - The engine's VAD kept 1.3 CPU cores busy for one stream: one torch thread now (0.2 cores idle-measured).
+  - All engines shared one SSH connection, so one stalled packet held speech-to-text, translation and voice up
+    together: `tunnel.ps1` opens one connection per kind of traffic.
+  - Speech-to-text speed, same stream: end of phrase to text p50 0.69-0.72 s on the GPU engine (556 lines),
+    0.77 s on the hosted service (272 lines); p95 1.7-1.9 s and 1.8 s.
+  - Open: the hold grew from 6 s to 11 s during the stalls and never comes back down; 47 genuine one- or two-word
+    lines ("Kaise?", "Batao?") are dubbed as lines of their own; the health panel asks the engines one after
+    another and hangs for seconds when the link is slow. After the fixes, one check run on the site: no errors,
+    no one-word lines, no "nan", first audio p50 2.4 s.
