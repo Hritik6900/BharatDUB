@@ -186,3 +186,68 @@ async def test_second_voice_refuses_without_consent(tmp_path):
     mio = MioVoice(Settings(gpu_mio_url="http://127.0.0.1:4"))
     with pytest.raises(ConsentRequired):
         await mio.set_ref("s", str(wav), "", consent_at=None)
+
+
+class FakeVoice:
+    """A voice engine that returns what a test tells it to."""
+
+    def __init__(self, speech_ms=lambda text, speed: 80.0 * len(text.replace(" ", "")), rate=24000):
+        self.enabled, self.calls, self.refs, self._ms, self.rate = True, [], [], speech_ms, rate
+
+    def speaks(self, lang):
+        return True
+
+    async def set_ref(self, session_id, wav_path, ref_text, **kw):
+        self.refs.append(session_id)
+        return {"ok": True}
+
+    async def synth(self, session_id, text, lang, speed=None):
+        import numpy as np
+        self.calls.append((text, speed))
+        n = int(self._ms(text, speed) / 1000 * self.rate)
+        return (np.full(n, 8000, dtype="<i2")).tobytes(), self.rate
+
+
+async def test_guard_sends_short_lines_to_the_second_voice_and_rescues_a_swallowed_line():
+    from app.providers.tts_gpu_guard import GuardedVoice
+
+    long_line = "yah ek lambi line hai jo theek bolti hai"
+    main = FakeVoice(lambda text, speed: 0.0 if "nigal" in text else 80.0 * len(text.replace(" ", "")))
+    second = FakeVoice(rate=44100)
+    g = GuardedVoice(main, second, Settings(gpu_voice_short_words=4))
+    await g.set_ref("s", "x.wav", "text", consent_at="2026-01-01")
+    assert main.refs == ["s"] and second.refs == ["s"]
+    assert (await g.synth("s", "do shabd", "ta-IN"))[1] == 44100 and g.short_lines == 1 and not main.calls
+    for _ in range(5):
+        assert (await g.synth("s", long_line, "ta-IN", speed=1.2))[1] == 24000
+    assert g.rescued == 0
+    # A long line the main engine swallows is made again by the second voice.
+    assert (await g.synth("s", "yah line engine nigal jaata hai poori", "ta-IN"))[1] == 44100 and g.rescued == 1
+    # A session the second voice does not hold stays on the main engine, short lines too.
+    assert (await g.synth("other", "do shabd", "ta-IN"))[1] == 24000
+
+
+async def test_guard_without_a_second_voice_tries_again_slower():
+    from app.providers.tts_gpu_guard import GuardedVoice
+
+    main = FakeVoice(lambda text, speed: 0.0 if (speed or 1.0) >= 1.0 else 900.0)
+    g = GuardedVoice(main, None, Settings())
+    pcm, rate = await g.synth("s", "aur iska", "bn-IN")
+    assert len(pcm) > 0 and g.rescued == 1 and main.calls[-1][1] == 0.75
+
+
+def test_guard_is_only_in_the_gpu_engine(monkeypatch):
+    import app.providers as prov
+    from app.providers.tts_gpu import GpuVoice
+    from app.providers.tts_gpu_guard import GuardedVoice
+
+    s = Settings(gpu_stt_url="http://127.0.0.1:1", gpu_llm_url="http://127.0.0.1:2/v1", gpu_voice_url="http://127.0.0.1:3",
+                 gpu_mio_url="http://127.0.0.1:4", mock_providers=False)
+    monkeypatch.setattr(prov, "get_settings", lambda: s)
+    prov._gpu_voice.cache_clear()
+    try:
+        g = prov.get_gpu_voice("gpu")
+        assert isinstance(g, GuardedVoice) and g.second is not None and g.enabled and g.capacity == 1
+        assert type(prov.get_gpu_voice("cloud")) is GpuVoice
+    finally:
+        prov._gpu_voice.cache_clear()

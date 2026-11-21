@@ -74,6 +74,10 @@ def _gpu_voice(engine: str) -> Any:
     gpu = GpuVoice(s.model_copy(update={"gpu_voice_url": ""}) if s.mock_providers else s)
     if engine == "gpu":
         gpu.ref_text_fix = _local_llm().to_devanagari
+        if s.gpu_voice_guard and gpu.enabled:
+            from app.providers.tts_gpu_guard import GuardedVoice
+            from app.providers.tts_gpu_mio import MioVoice
+            return GuardedVoice(gpu, MioVoice(s) if s.gpu_mio_url else None, s)
     return gpu
 
 

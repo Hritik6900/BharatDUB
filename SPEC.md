@@ -788,3 +788,19 @@ and memory: `gpu_engine/README.md`. Code: `providers/stt_gpu.py`, `llm_local.py`
   - So: about 0.5-0.7 s earlier first audio and no sample text, against a voice less close to the speaker and, for a
     voice learned from a fast stream, much worse timing. It stays a switch; IndicF5 stays the GPU engine's voice.
     Which of the two sounds better was not judged by ear.
+- **Lines the voice engine swallows** (21 Nov 2026 night, GPU engine only; `providers/tts_gpu_guard.py`,
+  `gpu_voice_guard`, `gpu_voice_short_words` = 4). 120 real live phrases spoken twice each by IndicF5 and heard back
+  by Prisma: 24 of 216 tries were bad (under half the words), and they are short lines: the engine gives a line time
+  by its length and a line of 2-4 words often gets none (0 ms of speech). In Bengali 12 of 13 tries that came out
+  under 0.6x their usual length per letter were lost. The same line made again was good in 1 of 11 cases, so a
+  plain retry does not help. Lines of 2-4 words, IndicF5 / IndicF5 at speed 0.75 / Indic-Mio: Tamil 71 / 78 / 85%,
+  Bengali 33 / 67 / 81%; lines of 6 and more words 83-84% on IndicF5.
+  - Now a line of up to 4 words is spoken by Indic-Mio (when `GPU_MIO_URL` is set), and a longer line whose speech
+    is under half its usual length per letter is made again there (without Indic-Mio: again at 0.75 speed).
+  - Whole session, dense reel six loops, Tamil + Bengali, guard off -> on, one run each: words heard back Tamil
+    78 -> 80%, Bengali 70 -> 74%; within 1 s of the moment 94% -> 94%; first audio p50 2.4 s both. Inside what two
+    equal runs differ by: this reel has few short lines. Not measured on a stream with many short lines.
+  - Giving the speech-to-text model the glossary as a hint did nothing: 15 -> 16 of 22 game words and names written
+    right on 10 lines, same decode time. Not added.
+  - Two streams at once on the one GPU and tunnel (a test run beside the user's stream): the stream's first audio
+    p50 3.2 s and 56% within 1 s; alone afterwards 2.5 s and 80%. One GPU through this tunnel is one stream.
