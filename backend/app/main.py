@@ -38,8 +38,23 @@ async def _sweeper() -> None:
         await asyncio.sleep(1800)
 
 
+async def close_stale_sessions() -> int:
+    """A Live session runs inside this process only. One still marked "live" when the server starts was cut off
+    by a restart or a crash and would stay "live" for good (found 2026-11-21: five such rows, the oldest eight
+    days old). Local store only: with a shared database another server process could be running the session."""
+    if settings.use_supabase:
+        return 0
+    store, n = get_store(), 0
+    for row in await store.select("live_sessions", status="live"):
+        await store.update("live_sessions", row["id"], {"status": "ended"})
+        n += 1
+    return n
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    with suppress(Exception):
+        await close_stale_sessions()
     task = asyncio.create_task(_sweeper())
     yield
     task.cancel()

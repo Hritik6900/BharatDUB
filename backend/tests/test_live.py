@@ -724,3 +724,14 @@ async def test_gpu_stt_leaves_the_hosted_stream_once_the_engine_is_back(monkeypa
 
     got = [ev.text async for ev in stt.stream(frames(), "hi-IN") if ev.kind == "final"]
     assert got == ["line 0", "line 1"]   # engine back after the third check: the stream ends at the next final
+
+
+async def test_sessions_left_live_by_a_dead_server_are_closed_at_start(tmp_path, monkeypatch):
+    from app import main
+    store = LocalStore(tmp_path / "db.json")
+    a = await store.insert("live_sessions", {"status": "live", "target_langs": ["ta-IN"]})
+    b = await store.insert("live_sessions", {"status": "ended", "target_langs": ["ta-IN"]})
+    monkeypatch.setattr(main, "get_store", lambda: store)
+    assert await main.close_stale_sessions() == 1
+    assert (await store.get("live_sessions", a["id"]))["status"] == "ended"
+    assert (await store.get("live_sessions", b["id"]))["status"] == "ended"
