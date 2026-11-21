@@ -13,6 +13,7 @@ param(
 )
 $groups = [ordered]@{
     "voice"          = @(9001, 9002, 9003)
+    "voice-mio"      = @(9040)
     "separation"     = @(9010)
     "translation"    = @(9020)
     "speech-to-text" = @(9030)
