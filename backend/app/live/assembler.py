@@ -79,6 +79,15 @@ class Assembler:
 CLAUSE_END = frozenset("है हैं था थे थी हूँ हूं हो होगा होगी होंगे गया गई गए दिया दिए लिया करो करें चाहिए ना "
                        "नहीं यार भाई bro ok okay".split())
 CLAUSE_START = frozenset("और लेकिन पर मगर तो कि क्योंकि फिर जो जब अगर या but and so because then".split())
+# The same words as the GPU speech-to-text writes them (Hindi in Latin letters). "to", "par", "the" and "ho" are left
+# out: in Hinglish they are as often English words.
+CLAUSE_END |= frozenset("hai hain tha thi hoon hun hoga hogi honge gaya gayi gaye diya diye liya karo karen karein "
+                        "chahiye na nahin nahi yaar bhai".split())
+CLAUSE_START |= frozenset("aur lekin magar ki kyonki kyunki phir fir jo jab agar ya".split())
+
+
+def _word(w: str) -> str:
+    return w.lower().strip(".,?!।\"'…")
 PARTIAL_LAG_MS = 600   # estimate: a word shows up in a partial about this long after it was spoken
 PACE_MS = (120, 700)   # ms a word: outside this, the utterance's start is not believed
 
@@ -189,6 +198,8 @@ class Phraser:
 
     def _cut(self, avail: list[str]) -> int:
         for k in range(self.min_words, min(len(avail), self.max_words) + 1):
-            if avail[k - 1].lower() in CLAUSE_END or (k < len(avail) and avail[k].lower() in CLAUSE_START):
+            # Punctuation comes only from a recogniser that writes it (the GPU one); a full stop ends a clause.
+            if avail[k - 1].endswith(SENTENCE_END) or _word(avail[k - 1]) in CLAUSE_END \
+                    or (k < len(avail) and _word(avail[k]) in CLAUSE_START):
                 return k
         return self.max_words if len(avail) >= self.max_words else 0

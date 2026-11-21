@@ -674,3 +674,15 @@ def test_a_slow_copied_voice_is_asked_to_speak_faster_up_to_a_limit():
     assert p._pace_boost("ta-IN") == p.s.gpu_voice_pace_max
     p.s = p.s.model_copy(update={"gpu_voice_pace_ms": 0})
     assert p._pace_boost("ta-IN") == 1.0                 # switched off
+
+
+def test_phraser_cuts_latin_hinglish_at_clause_words_and_full_stops():
+    """The GPU speech-to-text writes Hindi in Latin letters, with punctuation."""
+    from app.live.assembler import Phraser
+    ph = Phraser(min_words=6, max_words=12)
+    got = ph.partial("u1", "kahin bhi tandoori khaoge ya fry khaoge usi oil ko baar baar badlate rahte hain aur pakaate", "", 1000)
+    assert got and got[0] == "kahin bhi tandoori khaoge ya fry khaoge usi oil ko baar baar"   # no boundary: the 12-word limit
+    got = ph.partial("u2", "Main ek grill chicken khud khaata hoon aur apne family mein", "", 2000)
+    assert got and got[0] == "Main ek grill chicken khud khaata hoon"          # "hoon" ends a clause, "aur" opens one
+    got = ph.partial("u3", "Is green chicken ki khaas baat. Yah bahut achha", "", 3000)
+    assert got and got[0] == "Is green chicken ki khaas baat."                 # a full stop ends a clause

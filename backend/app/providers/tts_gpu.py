@@ -38,6 +38,8 @@ class GpuVoice:
         self._busy = [0] * len(self.urls)
         self._has_ref: dict[str, set[int]] = {}   # session -> engines that hold its voice
         self._steps: dict[str, int] = {}          # session -> denoising steps for its lines (else gpu_voice_steps)
+        # Set in `AI_MODE=gpu`: turns a sample text in Latin letters into Devanagari before the engines get it.
+        self.ref_text_fix: Any = None
         self.last_synth_ms: float | None = None   # the engine's own time for the last line
         self.last_latency_s: float | None = None  # ... and the whole round trip
 
@@ -62,6 +64,8 @@ class GpuVoice:
             raise ConsentRequired("voice cloning requires recorded consent", status=403)
         if steps is not None:
             self._steps[session_id] = steps
+        if self.ref_text_fix is not None:
+            ref_text = await self.ref_text_fix(ref_text)
         audio = Path(wav_path).read_bytes()
 
         async def one(i: int) -> dict[str, Any]:

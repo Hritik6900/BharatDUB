@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     # one-request limit. Empty = off. See providers/tts_gpu.py.
     gpu_voice_url: str = ""
     gpu_voice_timeout_s: float = 6.0
+    # `gpu`: speech-to-text and translation also run on our own GPU machine (gpu_engine/stt_engine.py and a vLLM
+    # server), and the hosted services are only the fallback, when their keys are set. `cloud` = as before.
+    ai_mode: str = "cloud"
+    gpu_stt_url: str = ""              # e.g. http://127.0.0.1:9030
+    gpu_llm_url: str = ""              # OpenAI-compatible, e.g. http://127.0.0.1:9020/v1
+    gpu_llm_model: str = "local"
     gpu_separate_url: str = ""         # Studio: Demucs on our GPU machine (gpu_engine/sep_engine.py); empty = this PC's CPU
     gpu_voice_native_speedup: bool = False  # let the engine itself speak faster when a line must be shortened
     # How lines come back from the engine: `mp3` (a tenth of the bytes of `pcm`, 30 ms to make), `opus` (same size,
@@ -148,6 +154,14 @@ class Settings(BaseSettings):
     @property
     def gnani_ws_base(self) -> str:
         return self.gnani_base.replace("https://", "wss://").replace("http://", "ws://")
+
+    @property
+    def gpu_stt_on(self) -> bool:
+        return self.ai_mode == "gpu" and bool(self.gpu_stt_url)
+
+    @property
+    def gpu_llm_on(self) -> bool:
+        return self.ai_mode == "gpu" and bool(self.gpu_llm_url)
 
     @property
     def llm_fast(self) -> str:

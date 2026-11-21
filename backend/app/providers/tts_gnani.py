@@ -41,7 +41,9 @@ class GnaniTTS:
                         "encoding": "linear_pcm", "container": container}
         if voice["kind"] == "clone":
             # VC takes no voice/language field (docs 2026-11-13).
-            return {"text": text, "model": VC_MODEL, "speaker_embedding": dict(voice["embedding"]),
+            # Only the three fields of the embedding: a profile made in GPU mode carries our engine's reference too.
+            emb = {k: v for k, v in dict(voice["embedding"]).items() if k in ("embedding", "shape", "dtype")}
+            return {"text": text, "model": VC_MODEL, "speaker_embedding": emb,
                     "audio_config": audio_config}
         return {"text": text, "voice": voice["voice"], "model": self.s.tts_model, "language": lang,
                 "speed": min(1.15, max(0.85, speed)), "audio_config": audio_config}

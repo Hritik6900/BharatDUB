@@ -377,7 +377,11 @@ class StudioRunner:
         if pid:
             p = await self.store.get("voice_profiles", pid)
             if p and p.get("consent_at") and p.get("embedding") and not p.get("deleted_at"):
-                return {"kind": "clone", "embedding": p["embedding"]}
+                emb = p["embedding"]
+                if self.s.ai_mode == "gpu" and p.get("ref_path") and p.get("ref_text") and not emb.get("ref_path"):
+                    # A streamer's recorded voice: our engine speaks it from the stored sample.
+                    emb = {**emb, "ref_path": p["ref_path"], "ref_text": p["ref_text"], "consent_at": p["consent_at"]}
+                return {"kind": "clone", "embedding": emb}
             self._warn(ctx, "Voice profile has no consent or was deleted; using a stock voice.")
         return voice.stock_voice(lang)
 

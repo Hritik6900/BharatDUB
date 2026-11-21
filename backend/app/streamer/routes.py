@@ -65,8 +65,10 @@ async def health() -> dict[str, Any]:
     s, gpu, engines = get_settings(), get_gpu_voice(), []
     if gpu.enabled:
         engines = [{"ok": bool(h.get("ok")), "ms": h.get("ms")} for h in await gpu.health()]
-    return {"gnani": bool(s.gnani_api_key.get_secret_value()) or s.mock_providers,
-            "llm": bool(s.llm_base_url and s.llm_model) or s.mock_providers,
+    # Speech-to-text and translation: the hosted services, or our own GPU engines in `AI_MODE=gpu`.
+    return {"gnani": bool(s.gnani_api_key.get_secret_value()) or s.mock_providers or s.gpu_stt_on,
+            "llm": bool(s.llm_base_url and s.llm_model) or s.mock_providers or s.gpu_llm_on,
+            "ai_mode": s.ai_mode,
             "gpu_engines": engines, "gpu_separate": bool(s.gpu_separate_url)}
 
 
