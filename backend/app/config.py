@@ -96,6 +96,10 @@ class Settings(BaseSettings):
     live_sync_delay_clone_ms: int = 8500  # ... when the session uses a copied voice (a cloned line takes 2-3.5 s)
     live_sync_adapt: bool = True          # grow the delay by what the dub really needs when phrases keep coming late
     live_sync_delay_max_ms: int = 15000   # ... up to this
+    # ... by at most this much at a time. It was 3000: one long line that arrived late in two languages added 3 s
+    # for the rest of a session. Measured 2026-11-21 with the hold fixed at 6 / 7.5 / 9 s: 91 / 90 / 90% of phrases
+    # started within 1 s of their moment, so a longer hold only removes the rare worst cases.
+    live_sync_grow_step_ms: int = 1000
     live_warmup: bool = True              # one tiny translation when a session starts, so the first phrase is not slow
     live_sync_slack_ms: int = 400         # a dubbed phrase may run this much longer than the speech before it is sped up
     live_sync_clone_spare_ms: int = 2000  # the copied voice is used when at least this long is left before the audio is needed

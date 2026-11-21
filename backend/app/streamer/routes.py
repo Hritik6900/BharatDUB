@@ -192,7 +192,9 @@ async def preview_voice(sid: str, lang: str = "ta-IN") -> Response:
     try:
         if p.get("ref_path") and gpu.speaks(lang):
             vid = voice_ref.engine_voice_id(p["id"])
-            await gpu.set_ref(vid, str(voices.voices_dir() / p["ref_path"]), p["ref_text"], consent_at=p["consent_at"])
+            path = voices.voices_dir() / p["ref_path"]
+            text = await voice_ref.sample_text(p, path, s.get("src_lang") or "hi-IN")
+            await gpu.set_ref(vid, str(path), text, consent_at=p["consent_at"])
             pcm, rate = await gpu.synth(vid, line, lang)
             buf = io.BytesIO()
             sf.write(buf, np.frombuffer(pcm, dtype="<i2"), rate, format="WAV", subtype="PCM_16")

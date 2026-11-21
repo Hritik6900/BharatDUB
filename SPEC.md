@@ -626,5 +626,29 @@ Checked against the code and the running setup on this date. Nothing here is bui
     at 100 s; on: 6 -> 9 s at 76 s, in one 3 s step after one long line arrived late in both languages) and more
     phrases were on time afterwards (fix on at 9 s: Bengali about 87%, Tamil about 59% within 0.25 s). A phrase that
     arrives late also delays the ones queued behind it, which a replay with fixed audio lengths does not show.
-    One long line adding 3 s for the rest of a session is too much; `_note_late` is not changed yet. How on-time
-    share moves with the hold (6 / 7.5 / 9 s, adapt off) has not been measured.
+    One long line adding 3 s for the rest of a session is too much.
+  - Hold measured properly (same day, stamp fix on, hold fixed, growth off, six loops each, about 140 spoken phrases
+    over Tamil + Bengali): hold 6 s: 64% within 0.25 s, 91% within 1 s, 96% within 2 s, worst 3.2 s; 7.5 s: 71%,
+    90%, 100%, worst 1.9 s; 9 s: 62%, 90%, 99%, worst 2.0 s. So the hold does not move the bulk: a longer hold only
+    removes the rare worst cases, and the "correction" above overstated it. Bengali sits at 78-80% within 0.25 s at
+    every hold, Tamil at 46-61%: what is left in Tamil is dub length (22-30 of about 70 phrases at the 1.3x limit).
+  - `live_sync_grow_step_ms` = 1000: the hold now grows by at most 1 s at a time (3 s before), and a phrase that is
+    late in several languages counts once. The start stays 6 s.
+- [x] **How good is the copied voice in Streamer Mode** (2026-11-21, `scratchpad/clone_test.py`; 8 stream-style lines
+  a language, translated by the live translator, spoken by the engine from the stored sample exactly as a session
+  sends it). Words: Prisma hears each line back. Voice: cosine similarity of ECAPA2 speaker embeddings; on these
+  recordings the same real person against themselves scores 0.86-0.89, the two streamers against each other 0.67
+  (same microphone and room), an unrelated speaker about 0.
+  - Found: one profile's stored text did not belong to its sample file (text of a 15.7 s cut, file a 9 s cut: an
+    earlier repair script wrote the store while the server was running and the server wrote its old copy back).
+    Effect: lines at 250-300 ms a word instead of 455-555, words heard back 53-73%, voice 0.57-0.58.
+    `voice_ref.sample_text` now checks the stored length against the file wherever a stored voice is sent to the
+    engines, transcribes the file again when they differ and corrects the profile. After that: words 91% Punjabi,
+    87% Tamil, 91% Bengali, 98% Gujarati; voice 0.63-0.70; closer to the own voice than to the other streamer in 32 of 32.
+  - The other profile (7.5 s sample of casual speech), two runs: words 74-89% Punjabi, 68-72% Tamil, 75-88% Bengali,
+    65-82% Gujarati; voice 0.69-0.76; own voice in 64 of 64. The same line can come out well in one run and badly
+    in the next (worst lines 0-29%): the engine draws a new random start each time.
+  - Verdict: the copy carries who is speaking (every line closer to its own speaker), but it is not the same voice
+    (0.63-0.76 against 0.86-0.89 for the real voice), and clear speech depends on the sample: a slowly read sample
+    gave 87-98%, a casual one 65-89%. A different scale from the 0.87 other vendors quote (different model and test).
+  - Never write the local store from a script while the server runs: the server holds its own copy and writes it back.

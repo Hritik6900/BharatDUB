@@ -133,3 +133,31 @@ def test_voice_sample_is_capped_even_when_the_microphone_is_quiet():
     frames = [loud if i % 4 == 0 else soft for i in range(625)]
     cut = speech_cut(frames)
     assert cut is not None and len(cut) / 2 / 16000 <= 9.1
+
+
+async def test_a_voice_sample_whose_text_no_longer_fits_the_file_is_read_again(tmp_path):
+    """The engine takes its pace from the sample and its text together. When the stored text was written for a
+    longer cut than the file on disk, the file is transcribed again and the profile corrected; when they belong
+    together nothing is asked of the speech service."""
+    from app.db import LocalStore
+    from app.streamer.voice_ref import sample_text
+
+    ref = tmp_path / "v_ref.wav"
+    sf.write(str(ref), np.zeros(16000 * 9, dtype=np.float32), 16000, subtype="PCM_16")    # a 9 s cut
+    store = LocalStore(tmp_path / "db.json")
+    asked: list[str] = []
+
+    class Hears:
+        async def transcribe(self, path, lang):
+            asked.append(lang)
+            return STTResult(text="यह नौ सेकंड की आवाज़ है दोस्तों", detected_lang=lang, latency_s=0.1)
+
+    old = await store.insert("voice_profiles", {"ref_path": ref.name, "ref_seconds": 15.7, "consent_at": "2026-11-14T00:00:00Z",
+                                                "ref_text": "a much longer text that was written for a fifteen second cut"})
+    assert await sample_text(old, ref, "hi-IN", stt=Hears(), store=store) == "यह नौ सेकंड की आवाज़ है दोस्तों"
+    fixed = await store.get("voice_profiles", old["id"])
+    assert fixed["ref_seconds"] == 9.0 and fixed["ref_text"].startswith("यह नौ")
+    assert await sample_text(fixed, ref, "hi-IN", stt=Hears(), store=store) == fixed["ref_text"]
+    assert asked == ["hi-IN"]                               # the second time the two belong together: no call
+    gone = {**fixed, "ref_seconds": 3.0}
+    assert await sample_text(gone, tmp_path / "missing.wav", stt=Hears(), store=store) == gone["ref_text"]

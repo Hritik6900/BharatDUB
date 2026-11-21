@@ -181,7 +181,8 @@ class LivePipeline:
         self._media: deque[tuple[int, float, bool]] = deque(maxlen=1200)
         self._sync_delay = 0
         self._late: dict[str, deque[int]] = {}  # per language: how long after its moment each phrase started
-        self._late_recent: deque[int] = deque(maxlen=6)
+        self._late_recent: dict[Any, int] = {}  # the last six phrases: how late their audio arrived (worst language)
+        self._late_n = 0
         self._viewer_late: deque[int] = deque(maxlen=500)  # reported by viewers' players
         self._ticks = 0
         self._lag: dict[str, int] = {}     # per language: how far behind the dub was at the last phrase (sync mode)
@@ -251,10 +252,13 @@ class LivePipeline:
         if not (p and p.get("consent_at") and p.get("ref_path") and p.get("ref_text") and not p.get("deleted_at")):
             return
         from app.shared.voices import voices_dir
+        from app.streamer.voice_ref import sample_text
         vid = f"voice-{p['id']}"
         t0 = self.sess.now_ms()
         try:
-            await self.gpu.set_ref(vid, str(voices_dir() / p["ref_path"]), p["ref_text"], consent_at=p["consent_at"])
+            path = voices_dir() / p["ref_path"]
+            text = await sample_text(p, path, row.get("src_lang") or "hi-IN")
+            await self.gpu.set_ref(vid, str(path), text, consent_at=p["consent_at"])
         except Exception as e:  # noqa: BLE001 - fail soft: the Gnani copy of the same voice, or stock
             log.warning("live stored voice: the engines did not take it (%s)", e)
             return
@@ -290,16 +294,22 @@ class LivePipeline:
         self.sess.bus.broadcast({"type": "sync", "t_ms": now, "media_s": round(media_s, 3), "playing": playing,
                                  "delay_ms": self._sync_delay})
 
-    def _note_late(self, late_ms: int) -> None:
+    def _note_late(self, late_ms: int, seq: int | None = None) -> None:
         """Hold viewers back by what the dub really needs: when phrases keep starting after their moment, the
-        delay grows by about that much (their video waits that long, once) instead of the dub staying behind."""
-        self._late_recent.append(late_ms)
-        late = sorted(v for v in self._late_recent if v > 400)
+        delay grows by about that much (their video waits that long, once) instead of the dub staying behind.
+        A phrase spoken in several languages is one phrase: its worst lateness counts, once."""
+        if seq is None:
+            self._late_n += 1
+        key = seq if seq is not None else ("n", self._late_n)
+        self._late_recent[key] = max(self._late_recent.get(key, late_ms), late_ms)
+        while len(self._late_recent) > 6:
+            self._late_recent.pop(next(iter(self._late_recent)))
+        late = sorted(v for v in self._late_recent.values() if v > 400)
         if self.offset_delay():   # the offset is YouTube's delay, not ours to change
             return
         if not self.s.live_sync_adapt or len(late) < 3 or self._sync_delay >= self.s.live_sync_delay_max_ms:
             return
-        step = min(3000, (late[len(late) // 2] // 500 + 1) * 500)
+        step = min(self.s.live_sync_grow_step_ms, (late[len(late) // 2] // 500 + 1) * 500)
         self._sync_delay = min(self.s.live_sync_delay_max_ms, self._sync_delay + step)
         self._late_recent.clear()
         self.sync_grown.append((self.sess.now_ms(), self._sync_delay))
@@ -918,7 +928,7 @@ class LivePipeline:
                 timings[f"late:{lang}"] = self._lag[lang] = start - target
                 self._late.setdefault(lang, deque(maxlen=500)).append(start - target)
                 # Only lateness in making the audio grows the delay; audio queued behind a long phrase does not.
-                self._note_late(timings[f"t_first_audio:{lang}"] + SYNC_ARRIVE_MS - target)
+                self._note_late(timings[f"t_first_audio:{lang}"] + SYNC_ARRIVE_MS - target, chunk.seq)
             self._playhead[lang] = start + int(sent / 2 / sr * 1000)
             for c, t in [(chunk, timings), *rest]:
                 t[f"t_heard:{lang}"] = start

@@ -31,6 +31,37 @@ def engine_voice_id(profile_id: str) -> str:
     return f"voice-{profile_id}"
 
 
+async def sample_text(p: dict[str, Any], path: Path, src_lang: str = "hi-IN", *, stt: Any = None, store: Any = None) -> str:
+    """The text to send with a profile's voice sample: the stored one, unless it no longer belongs to the file.
+
+    The engine takes its pace from the sample and the sample's text together. A text written for a 15.7 s cut, sent
+    with a 9 s cut of the same recording, made every line about twice as fast (measured 2026-11-21: 53% of the words
+    heard back in Punjabi, 91% with the right text). The stored length is what ties the two together: when the file
+    is a different length, the file is transcribed again and the profile is corrected.
+    """
+    try:
+        secs = sf.info(str(path)).duration
+    except Exception:  # noqa: BLE001 - no file to check: the caller's own error handling takes it from here
+        return str(p["ref_text"])
+    stored = p.get("ref_seconds")
+    if stored is not None and abs(float(stored) - secs) <= 0.5:
+        return str(p["ref_text"])
+    try:
+        heard = (await (stt or get_stt()).transcribe(str(path), src_lang)).text.strip()
+    except Exception as e:  # noqa: BLE001 - fail soft: the stored text is still the best there is
+        log.warning("voice reference %s: could not re-read the sample (%s)", p.get("id"), e)
+        return str(p["ref_text"])
+    if len(heard.split()) < 4:
+        return str(p["ref_text"])
+    log.warning("voice reference %s: stored text was for %s s, the file is %.1f s; text taken from the file again",
+                p.get("id"), stored, secs)
+    if store is None:
+        from app.db import get_store
+        store = get_store()
+    await store.update("voice_profiles", p["id"], {"ref_text": heard, "ref_seconds": round(secs, 1)})
+    return heard
+
+
 async def _clean(wav44: Path, out: Path) -> bool:
     """Take game sound and music out of the recording (Demucs on the GPU machine), when that is available."""
     url = get_settings().gpu_separate_url

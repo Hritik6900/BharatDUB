@@ -310,7 +310,11 @@ async def test_sync_delay_grows_only_when_audio_keeps_coming_late(tmp_path, monk
     assert p.sync_delay() == base                    # one late phrase is not a pattern
     for late in (1200, 1300):
         p._note_late(late)
-    assert p.sync_delay() == base + 1500             # three of the last six: hold viewers back by about that much
+    assert p.sync_delay() == base + p.s.live_sync_grow_step_ms   # three of the last six: a step, not all at once
+    grown = p.sync_delay()
+    for lang_late in (2900, 2800, 2700):             # one long line, late in three languages, is one late phrase
+        p._note_late(lang_late, seq=7)
+    assert p.sync_delay() == grown
     for _ in range(40):
         for late in (2900, 2900, 2900):
             p._note_late(late)
