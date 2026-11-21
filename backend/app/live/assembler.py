@@ -131,6 +131,12 @@ class Phraser:
             self._last.pop(old, None)
         return " ".join(avail[:k]), self._when(seen, done), self._when(seen, done + k - 1)
 
+    def tail_start(self, uid: str | None) -> int | None:
+        """When the first word not yet given out was spoken, if a partial ever showed it. Ask before `final()`."""
+        uid = uid or ""
+        seen, done = self._seen.get(uid, []), self._done.get(uid, 0)
+        return self._when(seen, done) if done < len(seen) else None
+
     def final(self, uid: str | None, text: str) -> str:
         """The part of the final transcript not yet given out.
 

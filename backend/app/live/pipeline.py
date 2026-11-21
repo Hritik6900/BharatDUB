@@ -186,6 +186,7 @@ class LivePipeline:
         self._ticks = 0
         self._lag: dict[str, int] = {}     # per language: how far behind the dub was at the last phrase (sync mode)
         self._starts: dict[int, int] = {}  # seq -> when that phrase began (to know how long the one before may run)
+        self._last_end = 0                 # when the phrase before this one ended (no phrase begins before that)
         self.sync_grown: list[tuple[int, int]] = []  # (session ms, new delay) each time the delay grew
 
     # ---------- lifecycle ----------
@@ -574,6 +575,7 @@ class LivePipeline:
                 self._dispatch(self.assembler.make(text, t_start_ms=t_start, t_end_ms=t_end, t_final_ms=now))
         elif ev.kind == "final" and ev.text and self.phraser.covered(ev.utterance_id):
             # Phrases of this utterance are already being dubbed: only the tail is left.
+            heard = self.phraser.tail_start(ev.utterance_id) if self.s.live_stamp_fix else None
             rest = self.phraser.final(ev.utterance_id, ev.text)
             t_end = self._t_end if self._t_end is not None else now - STT_SILENCE_MS
             self._t_start = self._t_end = None
@@ -581,7 +583,10 @@ class LivePipeline:
             self.sess.bus.publish(ALL, {"type": "vad", "speaking": False}, to_all=False)
             self.sess.bus.publish(ALL, {"type": "transcript", "text": ev.text, "t_ms": now}, to_all=False)
             if rest:
+                # When its first word was heard in a partial; if none showed it, counted back at the speaker's pace.
                 t_start = min(t_end, now) - int(len(rest.split()) * self._src_ms_per_word)
+                if heard is not None:
+                    t_start = min(heard, t_end)
                 self._dispatch(self.assembler.make(rest, t_start_ms=t_start, t_end_ms=t_end, t_final_ms=now))
         elif ev.kind == "final" and ev.text:
             self.phraser.final(ev.utterance_id, ev.text)  # no phrase went out: forget the utterance
@@ -610,6 +615,12 @@ class LivePipeline:
 
     # ---------- fan-out ----------
     def _dispatch(self, chunk: Chunk) -> None:
+        if self.s.live_stamp_fix:
+            # Phrases are spoken one after another, but their times are estimates: a phrase stamped as starting
+            # before the one before it ended would have its dub due while that dub is still playing.
+            chunk.t_speech_end_ms = max(chunk.t_speech_end_ms, chunk.t_speech_ms)
+            chunk.t_speech_ms = min(max(chunk.t_speech_ms, self._last_end), chunk.t_speech_end_ms)
+            self._last_end = max(self._last_end, chunk.t_speech_end_ms)
         ctx = list(self.context)
         self.context.append(chunk.text)
         self.sess.chunk_count += 1

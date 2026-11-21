@@ -598,3 +598,18 @@ Checked against the code and the running setup on this date. Nothing here is bui
   viewers, a phone on a mobile network, word error rate on ground-truth clips, how close the copied voice sounds to
   the speaker (needs listeners).
 - [ ] **Monitoring.** No error tracking or alerts; a failure is seen only when someone looks at the console.
+- [x] **Why "on time" sat at 45-70% in sync mode** (2026-11-21). "On time" = the dub starts within 0.25 s of the video
+  moment its phrase was spoken at. One run on the dense reel, Tamil: 45% within 0.25 s, 71% within 1 s, 87% within 2 s;
+  a user session in Punjabi: 56% / 81% / 94%. Of 17 late Tamil phrases, 4 had audio that arrived late and 13 had audio
+  ready in time but waited for the dub before them. The hold is not the cause: replaying the run with a 7 s hold instead
+  of 6 s leaves Tamil at 45%.
+  - Cause found: the moment itself was wrong. The tail of a line was counted back from its end at the speaker's pace,
+    and 10 of 36 phrases were stamped as starting before the phrase before them had ended (by up to 1.3 s), so their
+    dub was due while the earlier dub was still playing.
+  - `live_stamp_fix` (on): a tail starts when its first word showed up in a partial (`Phraser.tail_start`), and no
+    phrase starts before the one before it ended. Replay of the same run with the recorded audio and corrected stamps
+    (an estimate: speed-up decisions would change in a real run): Tamil 45% -> 61% on time, 71% -> 81% within 1 s,
+    p90 2.1 s -> 1.2 s; Bengali 48% -> 67%, 70% -> 82%. **Not yet measured in a live run.**
+  - What is left is real: on dense speech the dubbed phrase is longer than its slot even at the 1.3x limit (19 of 31
+    Tamil phrases were at the limit), because the word budget allows 1.15x the speaker's time when in step and a
+    speaker who does not pause leaves no room. Not changed yet.

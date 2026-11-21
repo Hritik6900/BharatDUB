@@ -100,6 +100,11 @@ class Settings(BaseSettings):
     live_sync_slack_ms: int = 400         # a dubbed phrase may run this much longer than the speech before it is sped up
     live_sync_clone_spare_ms: int = 2000  # the copied voice is used when at least this long is left before the audio is needed
     live_sync_late_skip_ms: int = 4000    # a phrase that would start this long after its moment is not spoken
+    # The moment a phrase was spoken at is an estimate. Without this, the tail of a line was counted back from its end
+    # at the speaker's pace and often landed before the phrase before it had ended (10 of 36 phrases in one run),
+    # so its dub was due while the earlier dub was still playing. On: a tail starts when its first word was
+    # heard, and no phrase starts before the one before it ended.
+    live_stamp_fix: bool = True
     mock_providers: bool = False       # simulate Gnani + LLM for UI work without keys (UI shows a banner)
 
     data_dir: str = ""                 # local working files + cache; default backend/data

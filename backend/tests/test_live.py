@@ -552,3 +552,49 @@ async def test_streamer_mic_session_times_the_dub_to_the_youtube_delay(tmp_path,
     # a session without a streamer keeps the old behaviour: its offset is only the viewer's slider default
     plain = LiveSession({"id": "o2", "target_langs": ["ta-IN"], "src_lang": "hi-IN", "offset_ms": 8000})
     assert LivePipeline(plain, stt=SilentSTT(), llm=MockLLM(), tts=MockTTS()).sync_delay() == 0
+
+
+async def test_a_phrase_is_never_stamped_before_the_end_of_the_one_before_it(tmp_path, monkeypatch):
+    """The moment a phrase was spoken at is an estimate. A tail counted back too far used to land inside the
+    phrase before it, so its dub was due while the earlier dub was still playing."""
+    store = LocalStore(tmp_path / "db.json")
+    monkeypatch.setattr("app.live.pipeline.get_store", lambda: store)
+    sess = LiveSession({"id": "st1", "target_langs": ["ta-IN"], "src_lang": "hi-IN"})
+    p = LivePipeline(sess, stt=SilentSTT(), llm=MockLLM(), tts=MockTTS())
+    await p.start()
+    first = p.assembler.make("first phrase", t_start_ms=1000, t_end_ms=3000, t_final_ms=3100)
+    tail = p.assembler.make("its tail", t_start_ms=2200, t_end_ms=4000, t_final_ms=4100)   # counted back too far
+    odd = p.assembler.make("odd one", t_start_ms=5000, t_end_ms=4500, t_final_ms=5100)     # ends before it starts
+    for c in (first, tail, odd):
+        p._dispatch(c)
+    await p.stop()
+    assert (first.t_speech_ms, tail.t_speech_ms) == (1000, 3000)
+    assert p._starts[tail.seq] == 3000                      # what the dub's moment and the next phrase's room use
+    assert odd.t_speech_end_ms >= odd.t_speech_ms == 5000
+
+    was = p.s.live_stamp_fix
+    p.s.__dict__["live_stamp_fix"] = False                  # the switch restores the stamps as they came
+    try:
+        sess2 = LiveSession({"id": "st2", "target_langs": ["ta-IN"], "src_lang": "hi-IN"})
+        p2 = LivePipeline(sess2, stt=SilentSTT(), llm=MockLLM(), tts=MockTTS())
+        await p2.start()
+        a = p2.assembler.make("first phrase", t_start_ms=1000, t_end_ms=3000, t_final_ms=3100)
+        b = p2.assembler.make("its tail", t_start_ms=2200, t_end_ms=4000, t_final_ms=4100)
+        p2._dispatch(a)
+        p2._dispatch(b)
+        await p2.stop()
+        assert b.t_speech_ms == 2200
+    finally:
+        p.s.__dict__["live_stamp_fix"] = was
+
+
+def test_the_tail_of_a_line_starts_when_its_first_word_was_heard():
+    from app.live.assembler import PARTIAL_LAG_MS, Phraser
+
+    ph = Phraser(min_words=2, max_words=3)
+    assert ph.partial("u", "a b c", "a b c", 1000) == ("a b c", 1000 - PARTIAL_LAG_MS, 1000 - PARTIAL_LAG_MS)
+    assert ph.tail_start("u") is None                       # no partial has shown a word after the phrase yet
+    assert ph.partial("u", "a b c", "a b c d e", 1800) is None
+    assert ph.tail_start("u") == 1800 - PARTIAL_LAG_MS      # "d" first showed up at 1800
+    assert ph.final("u", "a b c d e.") == "d e."
+    assert ph.tail_start("u") is None                       # the utterance is forgotten after its final
