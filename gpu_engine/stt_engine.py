@@ -41,6 +41,9 @@ MAX_SPEECH_S = float(os.environ.get("MAX_SPEECH_S", "9"))
 SR = 16000
 WIN = 512                 # Silero's window: 32 ms
 PRE_ROLL = int(0.3 * SR)  # audio kept from before speech was noticed
+# What this model writes for sound that is not speech (music, a click, a room): seen 2026-11-21 on a real stream,
+# "nan" nine times in 1000 lines, and one of them was translated and spoken.
+NOT_SPEECH = {"nan", "na n", "n a n"}
 
 app = FastAPI()
 model: WhisperModel | None = None
@@ -64,6 +67,8 @@ def _decode(audio: np.ndarray, hint: str) -> str:
                                    condition_on_previous_text=False, initial_prompt=hint or None,
                                    no_speech_threshold=0.6, log_prob_threshold=-1.0, compression_ratio_threshold=2.4)
     text = " ".join(s.text.strip() for s in segs).strip()
+    if text.strip(" .?!,").lower() in NOT_SPEECH:
+        text = ""
     stats["decodes"] += 1
     stats["decode_ms"] += (time.perf_counter() - t0) * 1000
     return text

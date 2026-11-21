@@ -110,3 +110,12 @@ async def test_studio_gpu_voice_needs_consent_and_has_no_stock_voice_of_its_own(
         await tts.clone_embedding(str(tmp_path / "x.wav"), consent_at=None)
     with pytest.raises(ProviderError):     # a stock voice exists only at the hosted service
         await tts.synth("வணக்கம்", "ta-IN", {"kind": "stock", "voice": "Asmita"})
+
+
+async def test_the_models_word_for_noise_is_not_a_transcript(tmp_path):
+    from app.providers.stt_gpu import not_speech
+    assert not_speech("nan") and not_speech("Nan.") and not not_speech("nan khao") and not not_speech("naan")
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(b"RIFF")
+    stt = gpu_stt(lambda req: httpx.Response(200, json={"text": "nan", "ms": 90}))
+    assert (await stt.transcribe(str(wav), "hi-IN")).text == ""

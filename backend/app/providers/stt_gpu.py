@@ -24,6 +24,11 @@ HEARS = {"hi-IN", "hi", "indic-auto", "hi-IN,en-IN"}
 RETURN_CHECK_S = 15.0   # while on the hosted stream: how often the engine is asked whether it is back
 
 
+def not_speech(text: str) -> bool:
+    """The model writes "nan" for sound that is not speech (9 of 1000 lines on a real stream, one was dubbed)."""
+    return text.strip(" .?!,").lower() == "nan"
+
+
 class GpuSTT:
     def __init__(self, settings: Settings | None = None, client: httpx.AsyncClient | None = None,
                  backup: Any = None) -> None:
@@ -55,7 +60,8 @@ class GpuSTT:
                 raise ProviderError(f"gpu_stt.transcribe: {e}") from e
             self.fell_back += 1
             return await self.backup.transcribe(wav_path, lang, fmt=fmt, keyterms=keyterms)
-        return STTResult(text=(j.get("text") or "").strip(), detected_lang="hi-IN",
+        text = (j.get("text") or "").strip()
+        return STTResult(text="" if not_speech(text) else text, detected_lang="hi-IN",
                          processing_time=(j.get("ms") or 0) / 1000, latency_s=time.perf_counter() - t0, raw=j)
 
     async def stream(self, pcm_frames: AsyncIterator[bytes], lang: str = "indic-auto", *,
@@ -111,6 +117,8 @@ class GpuSTT:
                 async for msg in ws:
                     if isinstance(msg, str):
                         ev = parse_ws_message(msg)
+                        if ev and ev.kind in ("partial", "final") and not_speech(ev.text):
+                            ev.text = ev.stable_text = ""   # the model's word for noise; nothing to dub
                         if ev:
                             await queue.put(ev)
             except websockets.ConnectionClosed:
