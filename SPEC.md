@@ -652,3 +652,16 @@ Checked against the code and the running setup on this date. Nothing here is bui
     (0.63-0.76 against 0.86-0.89 for the real voice), and clear speech depends on the sample: a slowly read sample
     gave 87-98%, a casual one 65-89%. A different scale from the 0.87 other vendors quote (different model and test).
   - Never write the local store from a script while the server runs: the server holds its own copy and writes it back.
+- [x] **Denoising steps per kind of voice** (2026-11-21; `gpu_voice_steps` = 16 for a recorded voice,
+  `gpu_voice_steps_stream` = 12 for a voice learned from the stream; sent with every line, so the engines are not
+  restarted; 0 = the engine's own 12). One run each, six loops of the dense reel, hold fixed at 6 s, 12 against 16 steps:
+  - Recorded voice (Streamer Mode, the casual 7.5 s sample, Tamil + Punjabi, about 68 spoken lines a language): words
+    heard back Tamil 67% -> 73%, Punjabi 74% -> 82%; first audio p50 2.7 s -> 2.9 s; within 1 s of the moment 56% -> 56%.
+  - Voice learned from the stream (Live, Tamil + Bengali, about 75 lines a language): words Tamil 81% -> 77%,
+    Bengali 78% -> 79% (no gain); first audio p50 2.8 s -> 2.9 s; within 1 s 87% -> 87%, within 2 s 97% -> 93%.
+  - The 8-line check before it (12 steps 71%, 16 steps 83%) overstated the gain: 8 lines a language is too few.
+  - **Open: this recorded voice is late whatever the steps.** Only 26-27% of its phrases started within 0.25 s of their
+    moment and 56% within 1 s (Live with the stream's voice in the same hour: 61-63% and 87%); 96-98 of about 137
+    phrases were at the 1.3x speed limit and 7 were skipped as too late. Its lines are long: in the 8-line check this
+    voice took 813 ms a word in Tamil against 455-555 ms for the other recorded voice. Likely cause, not yet proven:
+    the engine copies the pace of the sample, and this sample is slow casual speech.

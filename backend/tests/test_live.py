@@ -334,7 +334,7 @@ class FakeGpu:
     def speaks(self, lang):
         return lang != "en-IN"
 
-    async def set_ref(self, session_id, wav_path, ref_text, *, consent_at):
+    async def set_ref(self, session_id, wav_path, ref_text, *, consent_at, steps=None):
         assert consent_at, "the pipeline must never ask for a copy without consent"
         self.refs.append((session_id, ref_text, consent_at))
         return {"ok": True}
@@ -636,3 +636,26 @@ async def test_a_line_keeps_its_own_start_when_the_next_line_has_already_begun(t
     seq = max(p._starts)
     assert p._starts[seq] == 4000 - 1500         # its end less its own length, not the next line's start
     assert p._t_start == 5000                    # still there for the line being spoken now
+
+
+async def test_gpu_voice_asks_for_its_steps_per_voice():
+    """A recorded voice and a voice learned from the stream each get their own number of denoising steps."""
+    import httpx
+    from app.config import Settings
+    from app.providers.tts_gpu import GpuVoice
+    seen: list[dict] = []
+
+    def handle(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/ref":
+            return httpx.Response(200, json={"ok": True})
+        seen.append(json.loads(req.content))
+        return httpx.Response(200, content=b"\x10\x20" * 2400, headers={"x-sample-rate": "24000", "x-format": "pcm"})
+
+    s = Settings(gpu_voice_url="http://engine", gpu_voice_steps=16, gpu_voice_steps_stream=12, gpu_voice_format="pcm")
+    gpu = GpuVoice(s, client=httpx.AsyncClient(transport=httpx.MockTransport(handle)))
+    await gpu.synth("voice-1", "a", "ta-IN")
+    await gpu.set_ref("s1-v1", __file__, "text", consent_at="2026-11-21", steps=s.gpu_voice_steps_stream)
+    await gpu.synth("s1-v1", "a", "ta-IN")
+    await gpu.set_ref("s2-v1", __file__, "text", consent_at="2026-11-21", steps=0)
+    await gpu.synth("s2-v1", "a", "ta-IN")
+    assert [b.get("nfe") for b in seen] == [16, 12, None]

@@ -82,6 +82,15 @@ class Settings(BaseSettings):
     # 144 ms to make on the GPU machine's CPU) or `pcm`.
     gpu_voice_format: str = "mp3"
     gpu_voice_speed: float = 1.0       # < 1 = slower speech; the engine copies the pace of the voice sample
+    # Denoising steps asked of the engine per line; 0 = the engine's own setting (12, `NFE` in start_live.sh).
+    # Measured 2026-11-21 on one stored voice, 8 lines each in Punjabi, Gujarati and Tamil, words heard back by
+    # Prisma: 12 steps 79 / 73 / 60%, 16 steps 80 / 89 / 80%, 32 steps 89 / 82 / 80%; a line took 0.15 s longer at 16
+    # and 0.7 s longer at 32; how close the voice is to the speaker did not change.
+    # Whole sessions, six loops of the dense reel, about 70 lines a language, 12 against 16 steps. Recorded voice:
+    # Tamil 67 -> 73%, Punjabi 74 -> 82%, timing equal. Voice learned from the stream: Tamil 81 -> 77%,
+    # Bengali 78 -> 79%, and phrases starting within 2 s of their moment 97 -> 93%. So 16 only for a recorded voice.
+    gpu_voice_steps: int = 16          # a recorded voice (Streamer Mode and its preview)
+    gpu_voice_steps_stream: int = 12   # a voice learned from the stream (Live)
     # True: only a streamer who recorded their own voice with consent gets a copied voice, and any other Live session
     # speaks in stock voices. False (the user's choice on 15 Nov 2026): /live may also copy the voice on the stream
     # that is playing, behind the consent tick box (403 without it).

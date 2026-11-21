@@ -9,7 +9,7 @@ Off unless `GPU_VOICE_URL` is set: one URL, or several separated by commas (one 
 the least busy one). The engines listen only on their own machine; reach them through an SSH tunnel.
 
   POST /ref   multipart: session_id, ref_text, audio          -> remembers the reference voice (3-10 s) for that session
-  POST /tts   json {session_id, text, lang, speed, fmt}       -> audio at X-Sample-Rate (24 kHz): raw PCM16, or OGG/Opus
+  POST /tts   json {session_id, text, lang, speed, fmt, nfe}  -> audio at X-Sample-Rate (24 kHz): raw PCM16, or OGG/Opus
 """
 import asyncio
 import io
@@ -37,6 +37,7 @@ class GpuVoice:
         self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(self.s.gpu_voice_timeout_s, connect=3.0))
         self._busy = [0] * len(self.urls)
         self._has_ref: dict[str, set[int]] = {}   # session -> engines that hold its voice
+        self._steps: dict[str, int] = {}          # session -> denoising steps for its lines (else gpu_voice_steps)
         self.last_synth_ms: float | None = None   # the engine's own time for the last line
         self.last_latency_s: float | None = None  # ... and the whole round trip
 
@@ -52,11 +53,15 @@ class GpuVoice:
     def speaks(self, lang: str) -> bool:
         return self.enabled and lang in GPU_LANGS
 
-    async def set_ref(self, session_id: str, wav_path: str, ref_text: str, *, consent_at: str | None) -> dict[str, Any]:
+    async def set_ref(self, session_id: str, wav_path: str, ref_text: str, *, consent_at: str | None,
+                      steps: int | None = None) -> dict[str, Any]:
         """Give every engine the voice to copy: 3-10 s of speech and exactly what is said in it.
-        Refuses without recorded consent (golden rule 4), like every other cloning call."""
+        Refuses without recorded consent (golden rule 4), like every other cloning call.
+        `steps`: denoising steps for this voice's lines (None = `gpu_voice_steps`, 0 = the engine's own)."""
         if not consent_at:
             raise ConsentRequired("voice cloning requires recorded consent", status=403)
+        if steps is not None:
+            self._steps[session_id] = steps
         audio = Path(wav_path).read_bytes()
 
         async def one(i: int) -> dict[str, Any]:
@@ -78,6 +83,9 @@ class GpuVoice:
         i = min(ready, key=lambda k: self._busy[k])
         body = {"session_id": session_id, "text": text, "lang": lang, "fmt": self.s.gpu_voice_format,
                 "speed": round(speed or self.s.gpu_voice_speed, 3)}
+        steps = self._steps.get(session_id, self.s.gpu_voice_steps)
+        if steps > 0:
+            body["nfe"] = steps
 
         async def send() -> httpx.Response:
             return await self._client.post(self.urls[i] + "/tts", json=body)

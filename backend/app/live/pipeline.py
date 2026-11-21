@@ -416,7 +416,8 @@ class LivePipeline:
             if len(text.split()) < 4:
                 return  # nothing usable was said in this cut; the next pause tries again
             cand = f"{self.sess.id}-v{self._gpu_tries}"   # each sample is its own voice on the engine
-            await self.gpu.set_ref(cand, str(wav), text, consent_at=consent.get("consent_at"))
+            await self.gpu.set_ref(cand, str(wav), text, consent_at=consent.get("consent_at"),
+                                   steps=self.s.gpu_voice_steps_stream)
             first = not self.gpu_ready
             if first:  # speak in it at once; whether it is a good one is found out while it is already in use
                 self._gpu_sid = cand
