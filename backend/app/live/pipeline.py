@@ -135,7 +135,10 @@ class LivePipeline:
                  gpu: Any = None) -> None:
         self.sess = sess
         # Our GPU voice engine (off unless GPU_VOICE_URL is set): the copied voice for Indian languages.
-        self.gpu = gpu if gpu is not None else get_gpu_voice()
+        # Which engine this session asked for: None = the hosted services as before, "gpu" = our own machine.
+        eng = sess.row.get("engine") or None
+        self.engine = eng
+        self.gpu = gpu if gpu is not None else (get_gpu_voice(eng) if eng else get_gpu_voice())
         self.gpu_ready = False     # the engine has this session's voice
         self._gpu_busy = False
         self._gpu_tries = 0
@@ -149,7 +152,9 @@ class LivePipeline:
         self._gpu_retry_at = 0     # after three failures in a row: session time at which the engine is tried again
         self._ring: deque[tuple[int, bytes]] = deque(maxlen=700)  # ~22 s of the stream's sound, with arrival time
         self._prev_start: int | None = None
-        self.stt, self.llm, self.tts = stt or get_stt(), llm or get_llm(), tts or get_tts()
+        self.stt = stt or (get_stt(eng) if eng else get_stt())
+        self.llm = llm or (get_llm(eng) if eng else get_llm())
+        self.tts = tts or (get_tts(eng) if eng else get_tts())
         self.s = get_settings()
         self.audio: asyncio.Queue[bytes | None] = asyncio.Queue()
         self.assembler = Assembler()
@@ -258,7 +263,7 @@ class LivePipeline:
         t0 = self.sess.now_ms()
         try:
             path = voices_dir() / p["ref_path"]
-            text = await sample_text(p, path, row.get("src_lang") or "hi-IN")
+            text = await sample_text(p, path, row.get("src_lang") or "hi-IN", stt=self.stt)
             await self.gpu.set_ref(vid, str(path), text, consent_at=p["consent_at"])
         except Exception as e:  # noqa: BLE001 - fail soft: the Gnani copy of the same voice, or stock
             log.warning("live stored voice: the engines did not take it (%s)", e)

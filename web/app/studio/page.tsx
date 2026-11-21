@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ArrowRight, AudioLines, Captions, Check, ChevronRight, Clapperboard, FileVideo, Mic, Music2, PencilLine, Upload } from "lucide-react";
 import { Shell } from "@/components/layout/Shell";
 import { Button } from "@/components/ui/Button";
+import { EnginePicker, type Engine } from "@/components/ui/EnginePicker";
 import { LanguageChip } from "@/components/ui/LanguageChip";
 import { Notice } from "@/components/ui/Notice";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -42,6 +43,7 @@ export default function StudioPage() {
   const [voiceMode, setVoiceMode] = useState<"video" | "stock" | "saved">("video");
   const [voiceConsent, setVoiceConsent] = useState(false);
   const [owns, setOwns] = useState(false);
+  const [engine, setEngine] = useState<Engine>("cloud");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -69,6 +71,7 @@ export default function StudioPage() {
     fd.append("file", file);
     fd.append("target_langs", langs.join(","));
     fd.append("owns_video", String(owns));
+    if (engine === "gpu") fd.append("engine", engine);
     if (voiceMode === "saved" && voiceId) fd.append("voice_profile_id", voiceId);
     if (voiceMode === "video") {
       fd.append("voice_from_video", "true");
@@ -216,6 +219,8 @@ export default function StudioPage() {
                 </div>
               )}
             </fieldset>
+
+            <EnginePicker value={engine} onChange={setEngine} />
 
             <div>
               <label className="flex cursor-pointer items-start gap-3">

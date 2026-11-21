@@ -49,6 +49,7 @@ async def main() -> None:
     ap.add_argument("--streamer", default="", help="Streamer Mode: this streamer's id; the session uses their recorded voice")
     ap.add_argument("--sync", type=float, default=-1, help="report video time like the console does, starting at this many seconds (sync mode)")
     ap.add_argument("--api", default="http://localhost:8010")
+    ap.add_argument("--engine", default="cloud", choices=["cloud", "gpu"], help="gpu = this session on our own GPU machine")
     ap.add_argument("--chat", default="அண்ணா stream சூப்பர், அடுத்து எந்த game விளையாடப் போறீங்க?")
     a = ap.parse_args()
     out = Path(a.outdir) / a.name
@@ -74,6 +75,8 @@ async def main() -> None:
             body |= {"streamer_id": a.streamer, "voice_mode": "stock" if a.voice == "stock" else "clone"}
         if a.offset:
             body["offset_ms"] = a.offset
+        if a.engine == "gpu":
+            body["engine"] = "gpu"
         r = await http.post("/api/live/sessions", json=body)
         r.raise_for_status()
         s = r.json()

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, AudioLines, Check, CircleAlert, Cpu, Ear, Headphones, Languages, LogOut, Mic, MonitorPlay, Pencil, Play, Radio, RefreshCw, Square, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
 import { Shell } from "@/components/layout/Shell";
 import { Button } from "@/components/ui/Button";
+import { EnginePicker, type Engine } from "@/components/ui/EnginePicker";
 import { LanguageChip } from "@/components/ui/LanguageChip";
 import { Notice } from "@/components/ui/Notice";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -779,6 +780,7 @@ function GoLive({ me, onAnalyser, health }: { me: Streamer; onAnalyser: SetAnaly
   const [yt, setYt] = useState("");
   const [langs, setLangs] = useState<string[]>(me.default_langs);
   const [mode, setMode] = useState<"clone" | "stock">("clone");
+  const [engine, setEngine] = useState<Engine>("cloud");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const toggle = (c: string) => setLangs((l) => (l.includes(c) ? l.filter((x) => x !== c) : l.length >= 4 ? l : [...l, c]));
@@ -837,7 +839,7 @@ function GoLive({ me, onAnalyser, health }: { me: Streamer; onAnalyser: SetAnaly
       const r = await api<{ session_id: string; ingest_token: string }>("/api/live/sessions", {
         method: "POST",
         // 8 s: a usual YouTube "Low latency" delay. The console has a slider to match it to the real stream.
-        body: JSON.stringify({ youtube_video_id: yt, target_langs: langs, src_lang: me.src_lang, streamer_id: me.id, voice_mode: mode, offset_ms: 8000 }),
+        body: JSON.stringify({ youtube_video_id: yt, target_langs: langs, src_lang: me.src_lang, streamer_id: me.id, voice_mode: mode, offset_ms: 8000, ...(engine === "gpu" ? { engine } : {}) }),
       });
       localStorage.setItem(LIVE_KEY, JSON.stringify({ sid: r.session_id, token: r.ingest_token }));
       localStorage.setItem(INPUT_KEY, device);
@@ -897,6 +899,8 @@ function GoLive({ me, onAnalyser, health }: { me: Streamer; onAnalyser: SetAnaly
         </div>
         {mode === "clone" && langs.includes("en-IN") && <p className="mt-2 text-sm text-muted">English uses the slower copy of your voice or a stock voice; the other languages use the fast engine.</p>}
       </fieldset>
+
+      <EnginePicker value={engine} onChange={setEngine} />
 
       {health && mode === "clone" && enginesUp === 0 && <Notice tone="warn">The fast voice engines are not reachable. You can still go live: your first language uses the slower copy of your voice, the others stock voices.</Notice>}
       {err && <Notice tone="error" role="alert">{err}</Notice>}

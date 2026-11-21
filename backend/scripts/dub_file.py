@@ -27,6 +27,7 @@ async def main() -> None:
     ap.add_argument("--langs", default="ta-IN")
     ap.add_argument("--no-separate", action="store_true")
     ap.add_argument("--voice", default="", help="voice profile id: dub in that recorded voice (the profile must carry consent)")
+    ap.add_argument("--engine", default="cloud", choices=["cloud", "gpu"], help="gpu = our own GPU machine for this job")
     a = ap.parse_args()
 
     s = get_settings()
@@ -36,7 +37,7 @@ async def main() -> None:
     tmp = Path(tempfile.mkdtemp()) / Path(a.video).name
     shutil.copyfile(a.video, tmp)
     job = await runner.create_job(tmp, Path(a.video).name, [x.strip() for x in a.langs.split(",") if x.strip()],
-                                  voice_profile_id=a.voice or None)
+                                  voice_profile_id=a.voice or None, engine=a.engine)
     print(f"job {job['id']} ({job['duration_s']:.1f} s)")
     await runner.run(job["id"])
     job = await runner.store.get("jobs", job["id"])

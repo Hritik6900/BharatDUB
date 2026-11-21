@@ -690,7 +690,17 @@ Checked against the code and the running setup on this date. Nothing here is bui
 
 ## 21. All-GPU mode (21 Nov 2026)
 
-`AI_MODE=gpu` (default `cloud`). Speech-to-text and translation run on our GPU machine beside the voice engines, so
+**A second engine, chosen per session and per job** (since 21 Nov evening). The hosted engine (`cloud`) is the
+default and is not touched; the GPU engine is picked with the "Engine" button on `/live`, `/streamer` and `/studio`
+(`engine: "gpu"` on `POST /api/live/sessions` and `POST /api/jobs`; the button is shown only when `GPU_STT_URL` and
+`GPU_LLM_URL` are set, `gpu_mode` in `/api/streamers/health`). A session stores its engine; a job keeps it in its
+meta file; `providers.get_stt/get_llm/get_tts/get_gpu_voice(engine)` hand out the matching provider, and each engine
+has its own voice-engine client (only the GPU path rewrites a sample's text). `AI_MODE` is just the default for a
+caller that does not choose. Checked on the site, one session each way on the same reel: without the button the
+source lines came from the hosted service (35 of 35 in Devanagari, translation p50 0.96 s), with it from the GPU
+(42 of 42 in Latin letters, translation p50 0.55 s).
+
+On the GPU engine speech-to-text and translation run on our GPU machine beside the voice engines, so
 a phrase needs no hosted service; the hosted ones are the fallback when their keys are set. Setup, models, licences
 and memory: `gpu_engine/README.md`. Code: `providers/stt_gpu.py`, `llm_local.py`, `tts_gpu_studio.py`, `fallback.py`,
 `gpu_engine/stt_engine.py`. With the switch off nothing in the hosted path changes.

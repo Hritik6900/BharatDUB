@@ -122,3 +122,38 @@ async def test_the_models_word_for_noise_is_not_a_transcript(tmp_path):
     wav.write_bytes(b"RIFF")
     stt = gpu_stt(lambda req: httpx.Response(200, json={"text": "nan", "ms": 90}))
     assert (await stt.transcribe(str(wav), "hi-IN")).text == ""
+
+
+def test_the_engine_is_chosen_per_call_and_the_default_stays_hosted(monkeypatch):
+    """`cloud` unless a session or job asks for `gpu`, and `gpu` only when its servers are configured."""
+    from app import providers
+    from app.providers.stt_gnani import GnaniSTT
+    ready = Settings(gpu_stt_url="http://127.0.0.1:9030", gpu_llm_url="http://127.0.0.1:9020/v1", gpu_voice_url="http://127.0.0.1:9001")
+    monkeypatch.setattr(providers, "get_settings", lambda: ready)
+    for f in (providers._stt, providers._llm, providers._tts, providers._gpu_voice):
+        f.cache_clear()
+    try:
+        assert providers.engine_of(None) == "cloud" and providers.engine_of("cloud") == "cloud" and providers.engine_of("gpu") == "gpu"
+        assert isinstance(providers.get_stt(), GnaniSTT) and isinstance(providers.get_stt("gpu"), GpuSTT)
+        assert isinstance(providers.get_llm("gpu"), FallbackLLM) and not isinstance(providers.get_llm(), FallbackLLM)
+        assert isinstance(providers.get_tts("gpu"), GpuStudioTTS) and not isinstance(providers.get_tts(), GpuStudioTTS)
+        # The hosted path's voice client never rewrites a sample's text; the GPU path's does.
+        assert providers.get_gpu_voice().ref_text_fix is None and providers.get_gpu_voice("gpu").ref_text_fix is not None
+        monkeypatch.setattr(providers, "get_settings", lambda: Settings())   # the GPU servers are not set up
+        assert providers.engine_of("gpu") == "cloud"
+    finally:
+        for f in (providers._stt, providers._llm, providers._tts, providers._gpu_voice):
+            f.cache_clear()
+
+
+def test_a_session_or_a_job_cannot_ask_for_the_gpu_engine_when_it_is_not_set_up():
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    with TestClient(app) as c:
+        r = c.post("/api/live/sessions", json={"target_langs": ["ta-IN"], "engine": "gpu"})
+        assert r.status_code == 400 and "GPU engine" in r.json()["detail"]
+        assert c.post("/api/live/sessions", json={"target_langs": ["ta-IN"], "engine": "x"}).status_code == 400
+        r = c.post("/api/live/sessions", json={"target_langs": ["ta-IN"]})
+        assert r.status_code == 201 and r.json()["engine"] == "cloud"
+        assert c.get("/api/streamers/health").json()["gpu_mode"] is False

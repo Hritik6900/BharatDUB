@@ -1,9 +1,10 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, Captions, Check, Copy, ExternalLink, Headphones, MessagesSquare, Mic, MonitorPlay, Plus, Presentation, Radio, Square, Terminal, Timer, Users } from "lucide-react";
+import { ArrowRight, Captions, Check, Copy, Cpu, ExternalLink, Headphones, MessagesSquare, Mic, MonitorPlay, Plus, Presentation, Radio, Square, Terminal, Timer, Users } from "lucide-react";
 import { Shell } from "@/components/layout/Shell";
 import { Button } from "@/components/ui/Button";
 import { DelayBadge } from "@/components/ui/DelayBadge";
+import { EnginePicker, type Engine } from "@/components/ui/EnginePicker";
 import { LanguageChip } from "@/components/ui/LanguageChip";
 import { Notice } from "@/components/ui/Notice";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -77,6 +78,7 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
   const [src, setSrc] = useState("hi-IN");
   const [voice, setVoice] = useState(STREAM);
   const [voiceConsent, setVoiceConsent] = useState(false);
+  const [engine, setEngine] = useState<Engine>("cloud");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const toggle = (c: string) => setLangs((l) => (l.includes(c) ? l.filter((x) => x !== c) : l.length >= 4 ? l : [...l, c]));
@@ -92,6 +94,7 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
           src_lang: src,
           voice_from_stream: voice === STREAM,
           voice_consent: voice === STREAM && voiceConsent,
+          ...(engine === "gpu" ? { engine } : {}),
         }),
       });
       onCreated({ sid: r.session_id, token: r.ingest_token });
@@ -150,6 +153,7 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
               </p>
             </div>
           )}
+          <EnginePicker value={engine} onChange={setEngine} />
           {err && <Notice tone="error" role="alert">{err}</Notice>}
           <div className="flex flex-wrap items-center gap-5">
             <Button size="lg" disabled={!langs.length || busy || (voice === STREAM && !voiceConsent)} onClick={create}>
@@ -311,6 +315,12 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
                   ? "Learning the voice (stock until then)"
                   : "Stock voices"}
             </li>
+            {session?.engine === "gpu" && (
+              <li className="inline-flex items-center gap-2 rounded-chip border border-line bg-surface px-3 py-1.5">
+                <Cpu aria-hidden className="size-4" />
+                GPU engine
+              </li>
+            )}
             <li className="inline-flex items-center gap-2 px-2 text-muted">
               <Users aria-hidden className="size-4" />
               <span className="tnum">{session?.viewers ?? 0}</span> listening

@@ -35,6 +35,7 @@ class CreateSession(BaseModel):
     streamer_id: str | None = None     # Streamer Mode: the session belongs to this streamer
     voice_mode: str = "clone"          # with a streamer: `clone` = their recorded voice, `stock` = never clone
     offset_ms: int = 0
+    engine: str = "cloud"              # `gpu` = speech-to-text and translation on our own GPU machine (when set up)
 
 
 class PatchSession(BaseModel):
@@ -56,6 +57,10 @@ async def create_session(body: CreateSession) -> dict[str, Any]:
         raise HTTPException(400, f"unsupported target languages: {bad}")
     if body.src_lang != "indic-auto" and body.src_lang not in LANG_NAMES:
         raise HTTPException(400, f"unsupported source language: {body.src_lang}")
+    if body.engine not in ("cloud", "gpu"):
+        raise HTTPException(400, "engine is cloud or gpu")
+    if body.engine == "gpu" and not get_settings().gpu_mode_ready:
+        raise HTTPException(400, "The GPU engine is not set up on this server.")
     yt = parse_youtube_id(body.youtube_video_id) if body.youtube_video_id else None
     if body.youtube_video_id and not yt:
         raise HTTPException(400, "Could not read a YouTube video id from that link.")
@@ -87,6 +92,8 @@ async def create_session(body: CreateSession) -> dict[str, Any]:
                                         max(-5000, min(MAX_OFFSET_MS, body.offset_ms)), from_stream, body.src_lang)
     if streamer:
         await sessions.update(sess, streamer_id=streamer["id"], voice_mode=body.voice_mode)
+    if body.engine == "gpu":   # stored only when chosen: a session without it is the hosted path, untouched
+        await sessions.update(sess, engine="gpu")
     return {"session_id": sess.id, "ingest_token": token, **sess.public()}
 
 

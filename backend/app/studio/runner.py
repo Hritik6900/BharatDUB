@@ -4,6 +4,7 @@ import json
 import logging
 import shutil
 from collections import Counter, defaultdict
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -21,6 +22,8 @@ from app.studio.events import events
 from app.studio.stages import extract, fit, mix, render, segment, separate, transcribe, translate, voice
 
 log = logging.getLogger("studio")
+# The engine of the job being worked on in this task: None = the hosted services (as before), "gpu" = our own machine.
+ENGINE: ContextVar[str | None] = ContextVar("studio_engine", default=None)
 
 STAGES = ["ingest", "extract", "separate", "segment", "transcribe", "translate", "voice", "fit", "mix", "render"]
 
@@ -49,17 +52,32 @@ class StudioRunner:
     def store(self) -> Store:
         return self._store or get_store()
 
+    # Each job runs in its own task, and `ENGINE` says which engine that job asked for (None = the hosted services
+    # as before). A context variable, so two jobs with different engines can run side by side.
     @property
     def stt(self) -> STT:
-        return self._stt or get_stt()
+        return self._stt or (get_stt(ENGINE.get()) if ENGINE.get() else get_stt())
 
     @property
     def llm(self) -> LLM:
-        return self._llm or get_llm()
+        return self._llm or (get_llm(ENGINE.get()) if ENGINE.get() else get_llm())
 
     @property
     def tts(self) -> TTS:
-        return self._tts or get_tts()
+        return self._tts or (get_tts(ENGINE.get()) if ENGINE.get() else get_tts())
+
+    def job_engine(self, job_id: str) -> str:
+        """Which engine a job was made with: `cloud` (the hosted services) or `gpu`."""
+        try:
+            return "gpu" if self._meta(self.job_dir(job_id)).get("engine") == "gpu" else "cloud"
+        except (OSError, ValueError):
+            return "cloud"
+
+    def _use_engine(self, job_dir: Path) -> None:
+        try:
+            ENGINE.set(self._meta(job_dir).get("engine") or None)
+        except (OSError, ValueError):
+            ENGINE.set(None)
 
     def job_dir(self, job_id: str) -> Path:
         return self.s.data_path / "jobs" / job_id
@@ -67,7 +85,7 @@ class StudioRunner:
     # ---------- create ----------
     async def create_job(self, upload: Path, source_name: str, target_langs: list[str],
                          voice_profile_id: str | None = None,
-                         voice_from_video: dict[str, str] | None = None) -> dict[str, Any]:
+                         voice_from_video: dict[str, str] | None = None, engine: str | None = None) -> dict[str, Any]:
         """Stage 1 (ingest). Raises extract.IngestError with a user-facing message."""
         duration = await asyncio.to_thread(extract.ingest, upload, self.s.max_video_seconds)
         expires = datetime.now(timezone.utc) + timedelta(hours=self.s.upload_ttl_hours)
@@ -81,7 +99,8 @@ class StudioRunner:
         shutil.move(str(upload), d / f"source{upload.suffix.lower() or '.mp4'}")
         self._write_meta(d, {"source": f"source{upload.suffix.lower() or '.mp4'}",
                              "name": Path(source_name).stem[:60] or "video", "duration": duration,
-                             "voice_from_video": voice_from_video})
+                             "voice_from_video": voice_from_video,
+                             **({"engine": "gpu"} if engine == "gpu" else {})})
         return job
 
     def start(self, job_id: str) -> asyncio.Task[Any]:
@@ -93,6 +112,7 @@ class StudioRunner:
     # ---------- full run ----------
     async def run(self, job_id: str) -> None:
         ctx = Ctx(job_id, self.job_dir(job_id))
+        self._use_engine(ctx.dir)
         job = await self.store.get("jobs", job_id)
         if not job:
             return
@@ -330,6 +350,7 @@ class StudioRunner:
     async def edit_line(self, job_id: str, translation_id: str, text: str) -> dict[str, Any]:
         """Re-run stages 7-10 for one line, then re-mix and re-render that language."""
         ctx = Ctx(job_id, self.job_dir(job_id))
+        self._use_engine(ctx.dir)
         tr = await self.store.get("translations", translation_id)
         if not tr:
             raise KeyError("translation not found")
@@ -353,6 +374,7 @@ class StudioRunner:
     async def render_langs(self, job_id: str, langs: list[str]) -> None:
         """Render (or add) languages for a finished job; STT is never re-run."""
         ctx = Ctx(job_id, self.job_dir(job_id))
+        self._use_engine(ctx.dir)
         job = await self.store.get("jobs", job_id)
         if not job:
             return
@@ -397,7 +419,7 @@ class StudioRunner:
             p = await self.store.get("voice_profiles", pid)
             if p and p.get("consent_at") and p.get("embedding") and not p.get("deleted_at"):
                 emb = p["embedding"]
-                if self.s.ai_mode == "gpu" and p.get("ref_path") and p.get("ref_text") and not emb.get("ref_path"):
+                if ENGINE.get() == "gpu" and p.get("ref_path") and p.get("ref_text") and not emb.get("ref_path"):
                     # A streamer's recorded voice: our engine speaks it from the stored sample.
                     emb = {**emb, "ref_path": p["ref_path"], "ref_text": p["ref_text"], "consent_at": p["consent_at"]}
                 return {"kind": "clone", "embedding": emb}

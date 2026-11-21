@@ -50,7 +50,12 @@ async def create_job(
     voice_profile_id: Annotated[str | None, Form()] = None,
     voice_from_video: Annotated[bool, Form()] = False,
     voice_consent: Annotated[bool, Form()] = False,
+    engine: Annotated[str, Form()] = "cloud",   # `gpu` = our own GPU machine for this job (when it is set up)
 ) -> dict[str, str]:
+    if engine not in ("cloud", "gpu"):
+        raise HTTPException(400, "engine is cloud or gpu")
+    if engine == "gpu" and not get_settings().gpu_mode_ready:
+        raise HTTPException(400, "The GPU engine is not set up on this server.")
     if not owns_video:
         raise HTTPException(400, "Confirm you own this video or have permission to dub it.")
     if voice_from_video and not voice_consent:
@@ -81,7 +86,8 @@ async def create_job(
         from_video = None
         if voice_from_video and not voice_profile_id:
             from_video = {"consent_at": now_iso(), "consent_text": VIDEO_VOICE_CONSENT}
-        job = await runner.create_job(tmp, file.filename or "video", langs, voice_profile_id, from_video)
+        job = await runner.create_job(tmp, file.filename or "video", langs, voice_profile_id, from_video,
+                                      engine=engine)
     except IngestError as e:
         tmp.unlink(missing_ok=True)
         raise HTTPException(400, str(e)) from e
@@ -98,7 +104,7 @@ async def list_jobs() -> list[dict[str, Any]]:
 
 @router.get("/api/jobs/{job_id}")
 async def get_job(job_id: str) -> dict[str, Any]:
-    return await _job_or_404(job_id)
+    return {**(await _job_or_404(job_id)), "engine": runner.job_engine(job_id)}
 
 
 @router.get("/api/jobs/{job_id}/source")

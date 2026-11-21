@@ -97,6 +97,8 @@ export interface LiveSession {
   voice_profile_id?: string | null;
   voice_from_stream?: boolean;
   clone_langs?: string[] | null;
+  /** `gpu`: this session's speech recognition and translation run on our own GPU machine; `cloud`: hosted, as before. */
+  engine?: "cloud" | "gpu";
   /** Our GPU engine has learned the speaker's voice from this stream. */
   gpu_voice?: boolean;
   /** Streamer Mode: the session belongs to this streamer and uses their recorded voice (`clone`) or none. */

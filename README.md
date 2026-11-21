@@ -116,7 +116,8 @@ ground-truth clips yet), and how close a copied voice sounds to the speaker need
 
 ### All-GPU mode (21 Nov 2026)
 
-`AI_MODE=gpu`: speech-to-text (Whisper-Hindi2Hinglish-Apex) and translation (Gemma 4 E4B) also run on our GPU
+A second engine, picked per session or job with the "Engine" button on Live, Streamer and Studio (the default
+stays the hosted one): speech-to-text (Whisper-Hindi2Hinglish-Apex) and translation (Gemma 4 E4B) also run on our GPU
 machine, hosted services as fallback ([gpu_engine/README.md](gpu_engine/README.md), SPEC.md section 21). Same dense
 reel, Tamil + Bengali, voice learned from the stream, video held 6 s:
 

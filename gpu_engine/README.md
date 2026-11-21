@@ -55,8 +55,10 @@ Measured 15 Nov 2026 on the first machine, 60 s of audio: 11.5 to 13.8 s through
 
 ## All-GPU mode: speech-to-text and translation on the same machine (21 Nov 2026)
 
-Off by default. With `AI_MODE=gpu` the backend also takes speech-to-text and translation from this machine, so a
-phrase makes no trip to a hosted service; the hosted ones stay as the fallback when their keys are set.
+A second engine beside the hosted one, chosen per Live session and per Studio job with the "Engine" button on the
+site (`engine: "gpu"` on `POST /api/live/sessions` and `POST /api/jobs`). The default is the hosted engine and it is
+not touched. On the GPU engine the backend also takes speech-to-text and translation from this machine, so a phrase
+makes no trip to a hosted service; the hosted ones stay as the fallback when their keys are set.
 
 | Part | Model | Licence | Port | Memory |
 |---|---|---|---|---|
@@ -67,10 +69,10 @@ phrase makes no trip to a hosted service; the hosted ones stay as the fallback w
 ```
 bash setup_gpu_mode.sh                 # once: two environments beside .venv2 (.venv_stt, .venv_llm) and the models
 bash start_stt.sh && bash start_llm.sh # after every restart of the machine (the model server needs about 2 minutes)
-# backend/.env on the PC (tunnel.ps1 forwards 9020 and 9030 too):
-AI_MODE=gpu
+# backend/.env on the PC (tunnel.ps1 forwards 9020 and 9030 too). These two lines put the button on the site:
 GPU_STT_URL=http://127.0.0.1:9030
 GPU_LLM_URL=http://127.0.0.1:9020/v1
+# AI_MODE=gpu would make it the default for every session; left out, a session uses it only when it is picked.
 ```
 
 All five engines together use 34.7 of 40 GB; one stream in two languages keeps the GPU 36% busy on average.

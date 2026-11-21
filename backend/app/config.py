@@ -76,8 +76,12 @@ class Settings(BaseSettings):
     # one-request limit. Empty = off. See providers/tts_gpu.py.
     gpu_voice_url: str = ""
     gpu_voice_timeout_s: float = 6.0
-    # `gpu`: speech-to-text and translation also run on our own GPU machine (gpu_engine/stt_engine.py and a vLLM
-    # server), and the hosted services are only the fallback, when their keys are set. `cloud` = as before.
+    # Two engines, chosen per Live session and per Studio job (the "engine" button on the site):
+    #   cloud  the hosted services, as before
+    #   gpu    speech-to-text and translation on our own GPU machine too (gpu_engine/stt_engine.py and a vLLM
+    #          server), the hosted services only as the fallback
+    # The GPU engine is on offer when both URLs below are set. `ai_mode` is only what a caller gets when it does
+    # not say which one it wants; left at `cloud`, nothing changes for a session that does not pick the GPU engine.
     ai_mode: str = "cloud"
     gpu_stt_url: str = ""              # e.g. http://127.0.0.1:9030
     gpu_llm_url: str = ""              # OpenAI-compatible, e.g. http://127.0.0.1:9020/v1
@@ -156,12 +160,9 @@ class Settings(BaseSettings):
         return self.gnani_base.replace("https://", "wss://").replace("http://", "ws://")
 
     @property
-    def gpu_stt_on(self) -> bool:
-        return self.ai_mode == "gpu" and bool(self.gpu_stt_url)
-
-    @property
-    def gpu_llm_on(self) -> bool:
-        return self.ai_mode == "gpu" and bool(self.gpu_llm_url)
+    def gpu_mode_ready(self) -> bool:
+        """The all-GPU engine can be chosen: its speech-to-text and translation servers are configured."""
+        return bool(self.gpu_stt_url and self.gpu_llm_url)
 
     @property
     def llm_fast(self) -> str:
