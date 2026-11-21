@@ -143,7 +143,7 @@ class Phraser:
         seen += [now_ms] * max(0, len(full.split()) - len(seen))
         done = self._done.get(uid, 0)
         avail = stable.split()[done:]
-        k = self._cut(avail)
+        k = self._cut(avail, full.split()[done:])
         if not k:
             return None
         self._done[uid] = done + k
@@ -196,10 +196,18 @@ class Phraser:
         at = seen[i] if i < len(seen) else (seen[-1] if seen else 0)
         return max(0, at - PARTIAL_LAG_MS)
 
-    def _cut(self, avail: list[str]) -> int:
+    def _cut(self, avail: list[str], ahead: list[str] | None = None) -> int:
+        """`ahead`: the same words plus the ones the recogniser has not settled yet. They may still change, but
+        they show when a sentence is one word from its end: cutting there left that word as a line of its own
+        (seen 2026-11-21 on a real stream: "... milta nahin" and then "hai?", 19 of 490 phrases)."""
+        ahead = ahead if ahead and len(ahead) > len(avail) else avail
         for k in range(self.min_words, min(len(avail), self.max_words) + 1):
             # Punctuation comes only from a recogniser that writes it (the GPU one); a full stop ends a clause.
             if avail[k - 1].endswith(SENTENCE_END) or _word(avail[k - 1]) in CLAUSE_END \
                     or (k < len(avail) and _word(avail[k]) in CLAUSE_START):
+                nxt = ahead[k] if k < len(ahead) else ""
+                if k < self.max_words and not avail[k - 1].endswith(SENTENCE_END) and nxt \
+                        and (nxt.endswith(SENTENCE_END) or _word(nxt) in CLAUSE_END):
+                    continue   # the next word closes the sentence: it belongs to this phrase
                 return k
         return self.max_words if len(avail) >= self.max_words else 0

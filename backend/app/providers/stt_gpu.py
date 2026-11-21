@@ -21,6 +21,7 @@ from app.providers.http import request_with_retry
 from app.providers.stt_gnani import FRAME_BYTES, parse_ws_message
 
 HEARS = {"hi-IN", "hi", "indic-auto", "hi-IN,en-IN"}
+RETURN_CHECK_S = 15.0   # while on the hosted stream: how often the engine is asked whether it is back
 
 
 class GpuSTT:
@@ -73,9 +74,21 @@ class GpuSTT:
             if self.backup is None:
                 raise ProviderError(f"gpu_stt.stream: {e}") from e
             self.fell_back += 1
+            # The hosted stream is not kept for good: seen 2026-11-21 on a real stream, the tunnel dropped for a few
+            # seconds and the session then stayed on the hosted service for as long as that connection lived. So the
+            # engine is asked now and then, and once it answers the hosted stream is ended after an utterance's final
+            # (nobody is mid-sentence then); the caller connects again and lands on the engine.
+            can_return = lang in HEARS and sample_rate == 16000
+            checked = time.perf_counter()
+            back = False
             async for ev in self.backup.stream(pcm_frames, lang, sample_rate=sample_rate, pace=pace,
                                                extra_headers=extra_headers):
                 yield ev
+                if can_return and not back and time.perf_counter() - checked >= RETURN_CHECK_S:
+                    checked = time.perf_counter()
+                    back = bool((await self.health()).get("ok"))
+                if back and ev.kind == "final":
+                    return
             return
         queue: asyncio.Queue[TranscriptEvent | None] = asyncio.Queue()
         frame_s = 512 / sample_rate

@@ -686,3 +686,41 @@ def test_phraser_cuts_latin_hinglish_at_clause_words_and_full_stops():
     assert got and got[0] == "Main ek grill chicken khud khaata hoon"          # "hoon" ends a clause, "aur" opens one
     got = ph.partial("u3", "Is green chicken ki khaas baat. Yah bahut achha", "", 3000)
     assert got and got[0] == "Is green chicken ki khaas baat."                 # a full stop ends a clause
+
+
+def test_phraser_waits_for_the_word_that_closes_the_sentence():
+    from app.live.assembler import Phraser
+    ph = Phraser(min_words=6, max_words=12)
+    # "nahin" could end a clause, but the recogniser already hears "hai?" coming: no cut that leaves it alone.
+    assert ph.partial("u1", "Anumaanjik jaankaari ke lie milta nahin", "Anumaanjik jaankaari ke lie milta nahin hai?", 1000) is None
+    got = ph.partial("u1", "Anumaanjik jaankaari ke lie milta nahin hai?", "Anumaanjik jaankaari ke lie milta nahin hai? Aur", 1300)
+    assert got and got[0] == "Anumaanjik jaankaari ke lie milta nahin hai?"
+    # Nothing known beyond the settled words: cut as before.
+    got = ph.partial("u2", "ise ham machine mein dedh ghante pakaate hain", "ise ham machine mein dedh ghante pakaate hain", 2000)
+    assert got and got[0] == "ise ham machine mein dedh ghante pakaate hain"
+
+
+async def test_gpu_stt_leaves_the_hosted_stream_once_the_engine_is_back(monkeypatch):
+    from app.config import Settings
+    from app.providers import stt_gpu
+    from app.providers.base import TranscriptEvent as Ev
+
+    class Hosted:
+        async def stream(self, pcm_frames, lang, **kw):
+            for i in range(50):
+                yield Ev(kind="partial", text="a")
+                yield Ev(kind="final", text=f"line {i}")
+
+    monkeypatch.setattr(stt_gpu, "RETURN_CHECK_S", 0.0)
+    stt = stt_gpu.GpuSTT(Settings(ai_mode="gpu", gpu_stt_url="http://127.0.0.1:1"), backup=Hosted())
+    answers = iter([{"ok": False}, {"ok": False}, {"ok": True}])
+
+    async def health():
+        return next(answers, {"ok": True})
+    stt.health = health
+
+    async def frames():
+        yield b"\x00" * 1024
+
+    got = [ev.text async for ev in stt.stream(frames(), "hi-IN") if ev.kind == "final"]
+    assert got == ["line 0", "line 1"]   # engine back after the third check: the stream ends at the next final
