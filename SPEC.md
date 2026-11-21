@@ -830,3 +830,23 @@ and memory: `gpu_engine/README.md`. Code: `providers/stt_gpu.py`, `llm_local.py`
     copied voice's pace following the speaker (Streamer Mode, within 1 s of the moment 61% -> 61%; switch left, off).
   - Open: the hold does not come back down. A viewer's player leaves a small offset alone, so lowering the hold on
     the server would not move viewers who are already watching; it needs a change in the viewer page and a browser test.
+- **GPU engine against the hosted services, part by part** (21 Nov 2026, late). The user found the hosted output
+  better and asked what the GPU engine lacks.
+  - Hearing. The same 24 class lines, key words right out of 80, hosted Prisma / our GPU model: clean 77 / 70, hard
+    (15% faster, echo, noise) 73 / 49. The test voices are Gnani's own stock voices, which may favour Prisma; the gap
+    on hard audio is far larger than that could explain. The GPU engine now lets Prisma hear first and keeps our
+    model behind it (`gpu_stt_first` = hosted; `gpu` = nothing hosted in the path, as before; `FallbackSTT`).
+  - What that costs, whole session on the clean dense reel, Tamil + Punjabi, one run each, our model -> Prisma
+    hearing: within 1 s of the moment 95% -> 72%, within 2 s 99% -> 88%, phrases at the 1.3x limit 43 -> 70 of about
+    150; first audio p50 2.5 s -> 2.3 s; words heard back the same (81 / 78% -> 80 / 77%: the reel is clean speech).
+    Prisma's partials give longer phrases (8 source words against 7). Not measured: a session on hard audio, where
+    the gain in right words should show.
+  - Voice, Punjabi, 16 lines each: hosted stock voice 94% of words heard back, 345 ms a word, 741 ms to make,
+    44.1 kHz, 3.2% of the sound above 4 kHz. Our engine in the copied voice: 93%, 370 ms a word, 454 ms, 24 kHz,
+    0.6% above 4 kHz. So the words are as clear; the copied voice is duller, and so is its sample (the recording has
+    0.9% above 4 kHz, its 16 kHz cut 0.5%): the engine copies the sound of the microphone with the voice.
+    32 steps instead of 12: 94%, 0.7%, 2.5 times the time: no gain.
+  - Our engine with a native Punjabi speaker's sample (the one published with IndicF5) instead of the Hindi
+    speaker's: 95%, 330 ms a word, 457 ms, 2.9% above 4 kHz: level with the hosted stock voice by these numbers,
+    on our GPU and without the one-request limit. Only Punjabi and Marathi samples come with the model. Not built
+    into the product. Accent itself was not measured; it needs ears.

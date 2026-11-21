@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     gpu_stt_url: str = ""              # e.g. http://127.0.0.1:9030
     gpu_llm_url: str = ""              # OpenAI-compatible, e.g. http://127.0.0.1:9020/v1
     gpu_llm_model: str = "local"
+    # Who hears the speech in the GPU engine: `hosted` (the hosted service first, our GPU model behind it) or `gpu`
+    # (our GPU model first, the hosted one behind it: nothing hosted in the path of a phrase). See FallbackSTT.
+    gpu_stt_first: str = "hosted"
     # The GPU engine's voice: `f5` (IndicF5, as in the hosted engine) or `mio` (Indic-Mio, gpu_engine/mio_engine.py;
     # needs `gpu_mio_url`). The hosted engine always uses IndicF5. See providers/tts_gpu_mio.py.
     gpu_voice_model: str = "f5"

@@ -257,3 +257,25 @@ def test_guard_is_only_in_the_gpu_engine(monkeypatch):
         assert type(prov.get_gpu_voice("cloud")) is GpuVoice
     finally:
         prov._gpu_voice.cache_clear()
+
+
+async def test_hosted_speech_to_text_first_with_the_gpu_model_behind_it(tmp_path):
+    from app.providers.fallback import FallbackSTT
+
+    class Down:
+        async def transcribe(self, wav_path, lang="indic-auto", **kw):
+            raise ProviderError("down")
+
+        async def stream(self, pcm_frames, lang, **kw):
+            raise ProviderError("down")
+            yield  # pragma: no cover
+
+    async def frames():
+        yield b"\x00" * 1024
+
+    ok = Hosted()
+    stt = FallbackSTT(Down(), ok)
+    assert (await stt.transcribe("a.wav", "hi-IN")).text == "hosted" and stt.fell_back == 1
+    assert [ev.kind async for ev in stt.stream(frames(), "hi-IN")] == ["connected"] and stt.fell_back == 2
+    first = FallbackSTT(ok, Down())
+    assert [ev.kind async for ev in first.stream(frames(), "hi-IN")] == ["connected"] and first.fell_back == 0

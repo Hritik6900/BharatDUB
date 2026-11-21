@@ -44,7 +44,11 @@ def _stt(engine: str) -> Any:
     s = get_settings()
     if engine == "gpu":
         from app.providers.stt_gpu import GpuSTT
-        return GpuSTT(s, backup=GnaniSTT() if s.gnani_api_key.get_secret_value() else None)
+        hosted = GnaniSTT() if s.gnani_api_key.get_secret_value() else None
+        if hosted is not None and s.gpu_stt_first == "hosted":
+            from app.providers.fallback import FallbackSTT
+            return FallbackSTT(hosted, GpuSTT(s, backup=None))   # the hosted service hears better; ours is behind it
+        return GpuSTT(s, backup=hosted)
     return GnaniSTT()
 
 
