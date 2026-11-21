@@ -6,6 +6,7 @@ any failure, goes to the hosted service when one is configured (`backup`).
 """
 import asyncio
 import json
+import re
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -21,7 +22,14 @@ from app.providers.http import request_with_retry
 from app.providers.stt_gnani import FRAME_BYTES, parse_ws_message
 
 HEARS = {"hi-IN", "hi", "indic-auto", "hi-IN,en-IN"}
+NOISE_AT_START = re.compile(r"^(?:nan[\s,.]+)+", re.IGNORECASE)
 RETURN_CHECK_S = 15.0   # while on the hosted stream: how often the engine is asked whether it is back
+
+
+def without_noise(text: str) -> str:
+    """A transcript without the model's noise word: alone ("nan") or before speech ("nan everyone, welcome")."""
+    text = NOISE_AT_START.sub("", text)
+    return "" if not_speech(text) else text
 
 
 def not_speech(text: str) -> bool:
@@ -61,7 +69,7 @@ class GpuSTT:
             self.fell_back += 1
             return await self.backup.transcribe(wav_path, lang, fmt=fmt, keyterms=keyterms)
         text = (j.get("text") or "").strip()
-        return STTResult(text="" if not_speech(text) else text, detected_lang="hi-IN",
+        return STTResult(text=without_noise(text), detected_lang="hi-IN",
                          processing_time=(j.get("ms") or 0) / 1000, latency_s=time.perf_counter() - t0, raw=j)
 
     async def stream(self, pcm_frames: AsyncIterator[bytes], lang: str = "indic-auto", *,
@@ -117,8 +125,8 @@ class GpuSTT:
                 async for msg in ws:
                     if isinstance(msg, str):
                         ev = parse_ws_message(msg)
-                        if ev and ev.kind in ("partial", "final") and not_speech(ev.text):
-                            ev.text = ev.stable_text = ""   # the model's word for noise; nothing to dub
+                        if ev and ev.kind in ("partial", "final"):   # the model's word for noise is nothing to dub
+                            ev.text, ev.stable_text = without_noise(ev.text), without_noise(ev.stable_text)
                         if ev:
                             await queue.put(ev)
             except websockets.ConnectionClosed:

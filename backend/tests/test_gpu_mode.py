@@ -114,6 +114,9 @@ async def test_studio_gpu_voice_needs_consent_and_has_no_stock_voice_of_its_own(
 
 async def test_the_models_word_for_noise_is_not_a_transcript(tmp_path):
     from app.providers.stt_gpu import not_speech
+    from app.providers.stt_gpu import without_noise
+    assert without_noise("nan everyone, welcome back") == "everyone, welcome back" and without_noise("Nan. nan") == ""
+    assert without_noise("nanha baccha") == "nanha baccha"
     assert not_speech("nan") and not_speech("Nan.") and not not_speech("nan khao") and not not_speech("naan")
     wav = tmp_path / "a.wav"
     wav.write_bytes(b"RIFF")
