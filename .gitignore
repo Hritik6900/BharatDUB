@@ -26,3 +26,8 @@ V1_MASTER.md
 # v1 local data and env
 data-v1/
 .venv-v1/
+
+# v1 compose values
+.env.v1
+
+.run-v1/

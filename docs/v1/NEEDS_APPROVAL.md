@@ -35,3 +35,49 @@ Work that was deferred because it needs the GPU VM, a forbidden command, or a de
   `sudo usermod -aG docker ocr`, then the NVIDIA container toolkit guide.
 - **Meanwhile:** `scripts/v1/run-local.sh` starts the v1 backend and website without containers.
 - **Expected GPU memory:** none. **Rollback:** `docker compose -p bharatdb-v1 -f docker-compose.v1.yml down`.
+
+## 3. Put v1 on the VM
+
+- **What:** v1 was built and run on the laptop (backend 8110, website 3100, engines through the SSH forwards).
+  The design has it on the VM, next to the engines.
+- **Why deferred:** needs a shell on the VM, and `/srv/bharatdb-v1` needs `sudo` once.
+- **Commands (the user runs the first two lines):**
+  ```bash
+  sudo mkdir -p /srv/bharatdb-v1/data && sudo chown -R $USER /srv/bharatdb-v1
+  cd /srv/bharatdb-v1 && git clone <repo url> app && cd app && git checkout v1
+  cp backend/.env.example backend/.env      # fill in the keys; DATA_DIR=/srv/bharatdb-v1/data
+  scripts/v1/run-local.sh                    # without containers
+  # or, with Docker (item 2): cp .env.v1.example .env.v1 && docker compose -p bharatdb-v1 -f docker-compose.v1.yml --env-file .env.v1 up -d --build
+  scripts/v1/demo-check.sh
+  ```
+- **Expected GPU memory:** none (the backend's Demucs and VAD fallbacks run on CPU).
+- **Rollback:** `scripts/v1/stop-local.sh` or `docker compose -p bharatdb-v1 -f docker-compose.v1.yml down`. v0 is
+  not involved.
+
+## 4. Domain, HTTPS and the demo password
+
+- **What:** the `https` profile of the compose file (Caddy) needs a domain whose DNS points at the VM, ports 80
+  and 443 open in the VM's firewall, and a password hash.
+- **Why deferred:** DNS, firewall and cloud console changes are forbidden here.
+- **Commands:**
+  ```bash
+  docker run --rm caddy:2.8-alpine caddy hash-password --plaintext '<the demo password>'
+  # in .env.v1: V1_DOMAIN=<domain>  V1_DEMO_PASSWORD_HASH='<hash>'
+  #             V1_PUBLIC_ORIGIN=https://<domain>  V1_PUBLIC_WS_ORIGIN=wss://<domain>
+  docker compose -p bharatdb-v1 -f docker-compose.v1.yml --env-file .env.v1 --profile https up -d --build
+  ```
+- **Note:** a browser gives the microphone only to an HTTPS page or to `localhost`. Until there is a domain, the
+  site works through an SSH forward of 3100 and 8110 to the laptop's `localhost`.
+- **Rollback:** `docker compose ... --profile https down`.
+
+## 5. Postgres store (`V1_STORE=postgres`)
+
+- **What:** `backend/app/v1/store_pg.py` keeps the store's rows in Postgres.
+- **Why deferred:** there was no database to run it against, so it has never been executed. Treat it as untested.
+- **Commands:**
+  ```bash
+  docker compose -p bharatdb-v1 -f docker-compose.v1.yml --env-file .env.v1 --profile postgres up -d postgres
+  # backend/.env: V1_STORE=postgres  POSTGRES_DSN=postgresql://bharatdb:<password>@127.0.0.1:5440/bharatdb
+  cd backend && V1_STORE=postgres POSTGRES_DSN=... python -m pytest tests/test_v1_store.py -q
+  ```
+- **Rollback:** `V1_STORE=json` (the default). The JSON file is not migrated or deleted by switching.

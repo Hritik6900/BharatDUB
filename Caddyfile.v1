@@ -1,0 +1,15 @@
+# HTTPS for v1 (a browser gives the microphone only to an HTTPS page) and one demo password for everything.
+# Model servers (9001-9045) are never proxied.
+{$V1_DOMAIN} {
+	encode zstd gzip
+	basic_auth {
+		{$V1_DEMO_USER} {$V1_DEMO_PASSWORD_HASH}
+	}
+	@api path /api/* /ws/* /files/* /health /metrics
+	handle @api {
+		reverse_proxy 127.0.0.1:{$V1_BACKEND_PORT}
+	}
+	handle {
+		reverse_proxy 127.0.0.1:{$V1_WEB_PORT}
+	}
+}

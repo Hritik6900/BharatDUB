@@ -1,0 +1,7 @@
+.venv
+data
+data-mock
+__pycache__
+.pytest_cache
+.env
+scripts/out

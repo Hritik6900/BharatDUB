@@ -1,0 +1,81 @@
+# BharatDb v1 beside v0. Project name: bharatdb-v1.
+#   docker compose -p bharatdb-v1 -f docker-compose.v1.yml --env-file .env.v1 up -d
+# The shared GPU servers of v0 listen on the VM's 127.0.0.1 (9001-9030), so the backend uses the host's network
+# and binds 127.0.0.1:8110 itself. Nothing here binds 3000, 8010 or 9001-9040, and no model port is published.
+name: bharatdb-v1
+
+services:
+  backend:
+    build: { context: ./backend }
+    network_mode: host
+    restart: always
+    env_file: [./backend/.env]
+    environment:
+      DATA_DIR: /data
+      REDIS_URL: redis://127.0.0.1:${V1_REDIS_PORT:-6390}/0
+      CORS_ORIGINS: ${V1_PUBLIC_ORIGIN:-http://localhost:3100}
+      PUBLIC_API_BASE: ${V1_PUBLIC_ORIGIN:-http://localhost:8110}
+    command: ["uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "${V1_BACKEND_PORT:-8110}"]
+    volumes:
+      - ${V1_DATA_DIR:-/srv/bharatdb-v1/data}:/data
+    depends_on: [redis]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,os;urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('V1_BACKEND_PORT','8110')+'/health',timeout=4)"]
+      interval: 20s
+      timeout: 6s
+      retries: 3
+      start_period: 40s
+
+  web:
+    build:
+      context: ./web
+      args:
+        NEXT_PUBLIC_API_BASE: ${V1_PUBLIC_ORIGIN:-http://localhost:8110}
+        NEXT_PUBLIC_WS_BASE: ${V1_PUBLIC_WS_ORIGIN:-ws://localhost:8110}
+    restart: always
+    ports: ["127.0.0.1:${V1_WEB_PORT:-3100}:3000"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 6s
+      retries: 3
+      start_period: 30s
+
+  redis:
+    image: redis:7.4-alpine
+    restart: always
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
+    ports: ["127.0.0.1:${V1_REDIS_PORT:-6390}:6379"]
+    volumes: ["${V1_DATA_DIR:-/srv/bharatdb-v1/data}/redis:/data"]
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 20s, timeout: 4s, retries: 3 }
+
+  # Used only with V1_STORE=postgres (POSTGRES_DSN in backend/.env points here).
+  postgres:
+    image: postgres:16.6-alpine
+    restart: always
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_DB: bharatdb
+      POSTGRES_USER: bharatdb
+      POSTGRES_PASSWORD: ${V1_POSTGRES_PASSWORD:?set V1_POSTGRES_PASSWORD in .env.v1}
+    ports: ["127.0.0.1:${V1_POSTGRES_PORT:-5440}:5432"]
+    volumes: ["${V1_DATA_DIR:-/srv/bharatdb-v1/data}/postgres:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U bharatdb"], interval: 20s, timeout: 4s, retries: 3 }
+
+  # HTTPS and the demo password. Needs a domain that points at the VM and ports 80/443 open: see
+  # docs/v1/NEEDS_APPROVAL.md. Without a domain, reach the site through an SSH forward of 3100 and 8110.
+  caddy:
+    image: caddy:2.8-alpine
+    restart: always
+    profiles: ["https"]
+    network_mode: host
+    environment:
+      V1_DOMAIN: ${V1_DOMAIN:?set V1_DOMAIN in .env.v1}
+      V1_DEMO_USER: ${V1_DEMO_USER:-demo}
+      V1_DEMO_PASSWORD_HASH: ${V1_DEMO_PASSWORD_HASH:?set V1_DEMO_PASSWORD_HASH in .env.v1 (caddy hash-password)}
+      V1_WEB_PORT: ${V1_WEB_PORT:-3100}
+      V1_BACKEND_PORT: ${V1_BACKEND_PORT:-8110}
+    volumes:
+      - ./Caddyfile.v1:/etc/caddy/Caddyfile:ro
+      - ${V1_DATA_DIR:-/srv/bharatdb-v1/data}/caddy:/data
+    healthcheck: { test: ["CMD", "caddy", "version"], interval: 60s, timeout: 4s, retries: 3 }

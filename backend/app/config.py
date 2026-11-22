@@ -163,6 +163,54 @@ class Settings(BaseSettings):
     # so its dub was due while the earlier dub was still playing. On: a tail starts when its first word was
     # heard, and no phrase starts before the one before it ended.
     live_stamp_fix: bool = True
+    # ---------- v1 (docs/v1/ARCHITECTURE.md) ----------
+    # Every new behaviour is behind a flag, default off: with all of them off this code runs as v0 does.
+    v1_trace: bool = False              # a trace record per Live phrase and Studio line (JSONL + Prometheus)
+    v1_router: bool = False             # providers are handed out from config/routing.yaml instead of the fixed table
+    v1_phrase_dynamic: bool = False     # first phrase 4-6 words, later ones 8-12, lines under 3 words join the next
+    v1_spec_translate: bool = False     # translation starts when a partial has stood still, redone if the final differs
+    v1_tts_server: bool = False         # copied voice from the one batching server (V1_TTS_SERVER_URL) instead of 9001-9003
+    v1_tts_maya: bool = False           # Maya 2 as a second candidate voice in Studio HQ
+    v1_live_stock_default: bool = False  # a Live session without a streamer profile speaks in stock voices
+    v1_live_late_shorten: bool = False  # a line that is too late is said in a shorter version instead of skipped
+    v1_live_backcheck: bool = False     # a dubbed live line is heard back in the background and made again if wrong
+    v1_studio_hq: bool = False          # the HQ Studio path can be asked for (quality=hq on a job)
+    v1_fit_115: bool = False            # Studio speeds a line up by at most 1.15x (v0: 1.35x), then shortens
+    v1_store: str = "json"              # json (as v0) | postgres
+    postgres_dsn: SecretStr = SecretStr("")
+    redis_url: str = ""                 # job queue and live state; empty = in this process
+    v1_routing_file: str = ""           # empty = backend/config/routing.yaml
+    # New model servers (gpu_engine_v1/). Empty = not there; the router then uses the next provider in its list.
+    v1_tts_server_url: str = ""         # :9041 one IndicF5 with batching, same calls as 9001-9003
+    v1_maya_url: str = ""               # :9042
+    v1_transcribe_url: str = ""         # :9043 Indic Transcribe
+    v1_big_llm_url: str = ""            # :9044 OpenAI-compatible
+    v1_big_llm_model: str = "big"
+    v1_qa_url: str = ""                 # :9045 back-check + speaker similarity (+ diarization)
+    # Live phrase sizes with V1_PHRASE_DYNAMIC.
+    v1_first_phrase_min_words: int = 4
+    v1_first_phrase_max_words: int = 6
+    v1_phrase_min_words: int = 8
+    v1_phrase_max_words: int = 12
+    v1_merge_under_words: int = 3       # a line shorter than this waits for the next one
+    v1_merge_wait_ms: int = 1500        # ... this long at most, then it goes out alone
+    v1_spec_stable_ms: int = 300        # a partial unchanged for this long is translated ahead of its final
+    v1_late_skip_factor: float = 2.0    # with late-shorten: skipped only when later than this times the limit
+    v1_backcheck_min: float = 0.5       # live back-check: a line heard back under this share of words is made again
+    # Studio HQ.
+    v1_hq_nbest: int = 4                # voice versions of a line that failed its check (the first is always made)
+    v1_hq_backcheck_min: float = 0.9    # share of words heard back for a version to pass
+    v1_hq_similarity_min: float = 0.0   # speaker similarity to pass; 0 = measured and stored, not a gate
+    v1_fit_max_speed: float = 1.15
+    v1_hq_duck_db: float = -9.0         # sidechain ducking: how far the background goes down under speech
+    v1_hq_loudness_lufs: float = -16.0  # 0 = no loudness normalisation
+    # Cost per minute on the numbers page: nothing is shown for a rate that is 0 (not set).
+    v1_gpu_rate_per_hour: float = 0.0   # the A100's price per hour, in the currency below
+    v1_cost_currency: str = "USD"
+    v1_stt_rate_per_min: float = 0.0    # hosted speech-to-text, per minute of audio
+    v1_tts_rate_per_1k_chars: float = 0.0  # hosted voice, per 1000 characters
+    v1_llm_rate_per_call: float = 0.0   # hosted translation, per call
+
     mock_providers: bool = False       # simulate Gnani + LLM for UI work without keys (UI shows a banner)
 
     data_dir: str = ""                 # local working files + cache; default backend/data

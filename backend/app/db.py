@@ -194,4 +194,7 @@ def get_store() -> Store:
     s = get_settings()
     if s.use_supabase:
         return SupabaseStore()
+    if s.v1_store == "postgres" and s.postgres_dsn.get_secret_value():
+        from app.v1.store_pg import PostgresStore
+        return PostgresStore(s.postgres_dsn.get_secret_value())
     return LocalStore(s.data_path / "local_db.json")
