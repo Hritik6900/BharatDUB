@@ -247,3 +247,23 @@ What the numbers say:
 - **Test:** `python -m pytest tests/test_v1_hq.py -q`; a real job: `V1_STUDIO_HQ=true`, then
   `python -m eval.v1.studio <video> --out <dir> --target standard=http://127.0.0.1:8111 --target hq=http://127.0.0.1:8110:hq`.
 - **Roll back:** `V1_STUDIO_HQ=false` (the choice disappears and every job is standard); `V1_FIT_115=false`.
+
+## Phase 8: eval harness and report, 23 Nov 2026
+
+- **Changed:** `backend/eval/v1/`: `live.py` (phase 5), `studio.py` (standard against HQ, every finished line heard
+  back by the same scorer through `GET /api/v1/jobs/{id}/backcheck`), `stt.py` (key words on the hard set, clean
+  and hard, per provider), `make_video.py` (a many-line Studio video from the hard set), `prefix.py`,
+  `hard_set.json` (the 24 lines and their 80 key words; the audio stays in the data folder).
+  `scripts/v1/eval-all.sh` runs all of it, one thing at a time. `docs/v1/EVAL_REPORT.md` holds every number.
+- **Correction to the phase 7 entry:** on the first video HQ equalled standard. Over three videos HQ is ahead:
+  92.5% of words heard back (91.1-93.5) against 89.2% (84.9-93.4), for about three times the time. Still under
+  the 96% target.
+- **Found and fixed while measuring:** one dropped request to our voice engine handed a whole job's Bengali lines
+  (13) to the hosted copy of the voice, because a job keeps the voice that spoke first. The job's own voice is now
+  tried twice before another one answers (test added). That job was not made again.
+- **Speech-to-text on the hard set:** hosted 77 of 80 clean, 71.3 hard (71-72, three runs); our Whisper 70 and 52
+  (50-55).
+- **Not run against v0 itself:** a test session on port 8010 was refused (it would be a session in the product
+  people use), so "v0" in the report is v1 with every flag off. v0 was checked through its health endpoints only.
+- **v0 after this phase:** all nine checks ok. Tests: 159 pass, 1 skipped (Postgres store, no database here).
+- **Test:** `scripts/v1/eval-all.sh <data>/eval <out>`. **Roll back:** nothing to roll back (scripts and a report).

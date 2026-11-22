@@ -850,3 +850,30 @@ and memory: `gpu_engine/README.md`. Code: `providers/stt_gpu.py`, `llm_local.py`
     speaker's: 95%, 330 ms a word, 457 ms, 2.9% above 4 kHz: level with the hosted stock voice by these numbers,
     on our GPU and without the one-request limit. Only Punjabi and Marathi samples come with the model. Not built
     into the product. Accent itself was not measured; it needs ears.
+
+## 22. v1 (branch `v1`, 23 Nov 2026)
+
+v1 is built beside the running product (called v0 from here on: `main`, tag `v0-baseline`) and never changes it.
+It has its own ports (website 3100, backend 8110, new model servers 9041-9045), its own data folder and its own
+env file, and every new behaviour is behind a flag that is off by default: with all flags off this branch runs
+as v0 does. Everything about it is in `docs/v1/`:
+
+| File | What |
+|---|---|
+| `ARCHITECTURE.md` | the context, the design and the build rules |
+| `DISCOVERY.md`, `PLAN.md` | the map of v0 and the files v1 adds or changes |
+| `PROGRESS.md` | one entry per phase: what changed, how to test, how to roll back, measured numbers |
+| `EVAL_REPORT.md` | the measurements in one place |
+| `MODELS.md` | the new models: licence, size, what fits the card |
+| `NEEDS_APPROVAL.md` | what was deferred (the GPU VM, forbidden commands, decisions) with exact commands |
+| `RUNBOOK.md` | start, stop, check, flags, the GPU's two modes, roll back, backup and restore |
+| `SUMMARY.md` | what is built, what is ready to switch on, what is waiting |
+
+What v1 adds: a status page and endpoint, a trace per Live phrase and Studio line with a numbers page, a provider
+router read from `backend/config/routing.yaml`, Live changes behind flags, a Studio HQ path (takes scored and the
+best kept, flagged lines, an editor that shows every take), new model servers with a stub mode, an eval harness,
+and scripts for the demo check, the warm-up, the backup and the GPU's two modes.
+
+Where it was built and measured: on the dev laptop, against the shared GPU servers through the existing
+forwards. Nothing new was loaded on the GPU and nothing was run on the VM; those steps are in `NEEDS_APPROVAL.md`.
+The measured numbers are in `EVAL_REPORT.md` and are not repeated here, so that there is one place to correct.

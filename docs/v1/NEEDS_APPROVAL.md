@@ -78,7 +78,7 @@ Work that was deferred because it needs the GPU VM, a forbidden command, or a de
   ```bash
   docker compose -p bharatdb-v1 -f docker-compose.v1.yml --env-file .env.v1 --profile postgres up -d postgres
   # backend/.env: V1_STORE=postgres  POSTGRES_DSN=postgresql://bharatdb:<password>@127.0.0.1:5440/bharatdb
-  cd backend && V1_STORE=postgres POSTGRES_DSN=... python -m pytest tests/test_v1_store.py -q
+  cd backend && TEST_POSTGRES_DSN=postgresql://bharatdb:<password>@127.0.0.1:5440/bharatdb python -m pytest tests/test_v1_store.py -q
   ```
 - **Rollback:** `V1_STORE=json` (the default). The JSON file is not migrated or deleted by switching.
 

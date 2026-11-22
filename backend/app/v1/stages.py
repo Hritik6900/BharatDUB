@@ -141,11 +141,26 @@ class Stages:
         if sticky in names:
             names = [sticky] + [n for n in names if n != sticky]
 
-        async def call(name: str) -> bytes:
+        async def once(name: str) -> bytes:
             tts = self._speaker(name)
             if name == "indicf5":
                 return await tts.synth(text, lang, voice, speed=speed)  # type: ignore[no-any-return]
             return await tts.synth(text, lang, voice)  # type: ignore[no-any-return]
+
+        async def call(name: str) -> bytes:
+            # The voice a job speaks with is tried twice before another one answers: the next provider is another
+            # voice, and it then keeps the rest of the job (seen 23 Nov 2026: one dropped request to our engine
+            # on a job's first Bengali line, and all thirteen Bengali lines went to the hosted copy).
+            if name != names[0]:
+                return await once(name)
+            try:
+                return await once(name)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                log.warning("speak: %s failed once (%s), trying it again", name, str(e)[:120])
+                await asyncio.sleep(0.5)
+                return await once(name)
         out = await self._run("speak", names, call)
         self._sticky.setdefault(f"{lang}:{voice['kind']}", self.used["speak"])
         return out

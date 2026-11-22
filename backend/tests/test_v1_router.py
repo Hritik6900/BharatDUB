@@ -186,3 +186,32 @@ async def test_voice_stays_with_the_provider_that_spoke_first():
     r.calls.clear()
     assert await st.speak("two", "ta-IN", voice) == b"other"     # ... and keeps speaking although the first is back
     assert r.calls == ["other"]
+
+
+async def test_the_first_voice_is_tried_twice_before_another_one_speaks():
+    class Flaky(FakeRouter):
+        def __init__(self):
+            super().__init__(["main", "other"])
+            self.left = 1                       # the main voice fails once, then works
+
+        def timeout(self, stage):
+            return 5.0                          # room for the second try (the real limit is 20 s)
+
+        def provider(self, kind, name):
+            outer = self
+
+            class P:
+                async def synth(self, text, lang, voice, **kw):
+                    outer.calls.append(name)
+                    if name == "main" and outer.left:
+                        outer.left -= 1
+                        raise ProviderError("dropped request")
+                    return name.encode()
+            return P()
+    r = Flaky()
+    st = Stages("studio_hq", "cloud", router=r)
+    st._speaker = lambda name: r.provider("tts", name)
+    voice = {"kind": "stock", "voice": "Asmita"}
+    assert await st.speak("one", "ta-IN", voice) == b"main"       # one dropped request does not hand the job over
+    assert r.calls == ["main", "main"] and st.fallbacks == []
+    assert await st.speak("two", "ta-IN", voice) == b"main"

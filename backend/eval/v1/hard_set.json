@@ -1,0 +1,487 @@
+[
+{
+"file": "00.wav",
+"text": "चेचक का टीका सबसे पहले Edward Jenner ने खोजा था",
+"terms": [
+[
+"jenner",
+"जेनर"
+],
+[
+"edward",
+"एडवर्ड"
+],
+[
+"chechak",
+"चेचक"
+],
+[
+"tika",
+"teeka",
+"टीका"
+]
+]
+},
+{
+"file": "01.wav",
+"text": "Louis Pasteur ने rabies का vaccine बनाया था",
+"terms": [
+[
+"pasteur",
+"पाश्चर",
+"पास्चर"
+],
+[
+"rabies",
+"रेबीज"
+],
+[
+"vaccine",
+"वैक्सीन"
+]
+]
+},
+{
+"file": "02.wav",
+"text": "PCR का प्रयोग DNA amplification के लिए होता है",
+"terms": [
+[
+"pcr",
+"पीसीआर"
+],
+[
+"dna",
+"डीएनए"
+],
+[
+"amplification",
+"एम्प्लीफिकेशन",
+"एम्प्लिफिकेशन"
+]
+]
+},
+{
+"file": "03.wav",
+"text": "antibody का निर्माण B cell करती है, T cell नहीं",
+"terms": [
+[
+"antibody",
+"एंटीबॉडी"
+],
+[
+"bcell",
+"बीसेल"
+],
+[
+"tcell",
+"टीसेल"
+],
+[
+"nirmaan",
+"nirman",
+"निर्माण"
+]
+]
+},
+{
+"file": "04.wav",
+"text": "zygote बनने के बाद morula और फिर blastocyst बनता है",
+"terms": [
+[
+"zygote",
+"जाइगोट",
+"ज़ाइगोट"
+],
+[
+"morula",
+"मोरुला",
+"मॉरुला"
+],
+[
+"blastocyst",
+"ब्लास्टोसिस्ट"
+]
+]
+},
+{
+"file": "05.wav",
+"text": "भ्रूण का implantation गर्भाशय में होता है",
+"terms": [
+[
+"bhroon",
+"bhrun",
+"भ्रूण"
+],
+[
+"implantation",
+"इम्प्लांटेशन",
+"इंप्लांटेशन"
+],
+[
+"garbhashay",
+"garbhaashay",
+"गर्भाशय"
+]
+]
+},
+{
+"file": "06.wav",
+"text": "RNA से protein बनने को translation कहते हैं और DNA से RNA को transcription",
+"terms": [
+[
+"rna",
+"आरएनए"
+],
+[
+"protein",
+"प्रोटीन"
+],
+[
+"translation",
+"ट्रांसलेशन"
+],
+[
+"transcription",
+"ट्रांसक्रिप्शन"
+]
+]
+},
+{
+"file": "07.wav",
+"text": "neutrophil और macrophage phagocytosis करते हैं",
+"terms": [
+[
+"neutrophil",
+"न्यूट्रोफिल"
+],
+[
+"macrophage",
+"मैक्रोफेज"
+],
+[
+"phagocytosis",
+"फैगोसाइटोसिस",
+"फेगोसाइटोसिस"
+]
+]
+},
+{
+"file": "08.wav",
+"text": "mitochondria को cell का powerhouse कहा जाता है",
+"terms": [
+[
+"mitochondria",
+"माइटोकॉन्ड्रिया"
+],
+[
+"powerhouse",
+"पावरहाउस"
+]
+]
+},
+{
+"file": "09.wav",
+"text": "photosynthesis में chlorophyll सूरज की रोशनी से glucose बनाता है",
+"terms": [
+[
+"photosynthesis",
+"फोटोसिंथेसिस"
+],
+[
+"chlorophyll",
+"क्लोरोफिल"
+],
+[
+"glucose",
+"ग्लूकोज"
+]
+]
+},
+{
+"file": "10.wav",
+"text": "Newton का दूसरा नियम है force बराबर mass गुणा acceleration",
+"terms": [
+[
+"newton",
+"न्यूटन"
+],
+[
+"force",
+"फोर्स"
+],
+[
+"mass",
+"मास"
+],
+[
+"acceleration",
+"एक्सेलरेशन",
+"एक्सीलरेशन"
+]
+]
+},
+{
+"file": "11.wav",
+"text": "इस equation में x की value निकालो, quadratic formula लगाओ",
+"terms": [
+[
+"equation",
+"इक्वेशन"
+],
+[
+"value",
+"वैल्यू"
+],
+[
+"quadratic",
+"क्वाड्रेटिक"
+],
+[
+"formula",
+"फॉर्मूला",
+"फार्मूला"
+]
+]
+},
+{
+"file": "12.wav",
+"text": "option B को lock कर दो, बिल्कुल सही जवाब है",
+"terms": [
+[
+"option",
+"ऑप्शन"
+],
+[
+"lock",
+"लॉक"
+],
+[
+"bilkul",
+"बिल्कुल",
+"बिलकुल"
+],
+[
+"javaab",
+"jawab",
+"javab",
+"जवाब"
+]
+]
+},
+{
+"file": "13.wav",
+"text": "जल्दी से chat में बताओ, कौन सा answer सही है",
+"terms": [
+[
+"jaldi",
+"जल्दी"
+],
+[
+"chat",
+"चैट"
+],
+[
+"answer",
+"आंसर"
+],
+[
+"batao",
+"बताओ"
+]
+]
+},
+{
+"file": "14.wav",
+"text": "oxygen की कमी से सांस लेने में problem हो जाती है",
+"terms": [
+[
+"oxygen",
+"ऑक्सीजन"
+],
+[
+"saans",
+"sans",
+"सांस",
+"साँस"
+],
+[
+"problem",
+"प्रॉब्लम"
+]
+]
+},
+{
+"file": "15.wav",
+"text": "hemoglobin RBC में होता है और oxygen को carry करता है",
+"terms": [
+[
+"hemoglobin",
+"haemoglobin",
+"हीमोग्लोबिन"
+],
+[
+"rbc",
+"आरबीसी"
+],
+[
+"carry",
+"कैरी"
+]
+]
+},
+{
+"file": "16.wav",
+"text": "दोस्तों आज हम Valorant खेलेंगे और मैं Jett लूंगा",
+"terms": [
+[
+"valorant",
+"वैलोरेंट"
+],
+[
+"jett",
+"जेट"
+]
+]
+},
+{
+"file": "17.wav",
+"text": "BGMI में Pochinki उतरते हैं, वहां loot बहुत है",
+"terms": [
+[
+"bgmi",
+"बीजीएमआई"
+],
+[
+"pochinki",
+"पोचिंकी"
+],
+[
+"loot",
+"लूट"
+]
+]
+},
+{
+"file": "18.wav",
+"text": "भाई sniper से headshot मारा, क्या clutch था",
+"terms": [
+[
+"sniper",
+"स्नाइपर"
+],
+[
+"headshot",
+"हेडशॉट"
+],
+[
+"clutch",
+"क्लच"
+]
+]
+},
+{
+"file": "19.wav",
+"text": "इस recipe में paneer को marinate करके oven में bake करना है",
+"terms": [
+[
+"recipe",
+"रेसिपी"
+],
+[
+"paneer",
+"पनीर"
+],
+[
+"marinate",
+"मैरिनेट",
+"मेरिनेट"
+],
+[
+"bake",
+"बेक"
+]
+]
+},
+{
+"file": "20.wav",
+"text": "Sensex आज पांच सौ points गिरा और Nifty भी नीचे बंद हुआ",
+"terms": [
+[
+"sensex",
+"सेंसेक्स"
+],
+[
+"points",
+"पॉइंट"
+],
+[
+"nifty",
+"निफ्टी"
+]
+]
+},
+{
+"file": "21.wav",
+"text": "अगला question है, the vaccine for smallpox was discovered by",
+"terms": [
+[
+"question",
+"क्वेश्चन"
+],
+[
+"vaccine",
+"वैक्सीन"
+],
+[
+"smallpox",
+"स्मॉलपॉक्स"
+],
+[
+"discovered",
+"डिस्कवर्ड"
+]
+]
+},
+{
+"file": "22.wav",
+"text": "डेढ़ घंटे की class है, record नहीं है, live चल रही है",
+"terms": [
+[
+"dedh",
+"डेढ़"
+],
+[
+"class",
+"क्लास"
+],
+[
+"record",
+"रिकॉर्ड"
+],
+[
+"live",
+"लाइव"
+]
+]
+},
+{
+"file": "23.wav",
+"text": "embryo के अलग अलग stage होते हैं fertilization से पहले",
+"terms": [
+[
+"embryo",
+"एम्ब्रियो",
+"एंब्रियो"
+],
+[
+"stage",
+"स्टेज"
+],
+[
+"fertilization",
+"फर्टिलाइजेशन",
+"फर्टिलाइज़ेशन"
+]
+]
+}
+]
