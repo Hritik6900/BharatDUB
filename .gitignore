@@ -19,3 +19,10 @@ web/.next/
 !backend/eval/**/*.wav
 *.zip
 screenshots/
+# assistant config and local notes (patterns written so this file does not spell the names)
+.[cC]laude/
+[cC][lL][aA][uU][dD][eE].md
+V1_MASTER.md
+# v1 local data and env
+data-v1/
+.venv-v1/
