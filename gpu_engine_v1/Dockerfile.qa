@@ -1,0 +1,11 @@
+# :9045 QA (back-check, speaker similarity, optional diarization). CPU by default; also the image of the stub servers.
+FROM python:3.11.11-slim
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libsndfile1 && rm -rf /var/lib/apt/lists/*
+RUN pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+COPY requirements.qa.txt .
+RUN pip install -r requirements.qa.txt
+WORKDIR /srv
+COPY common.py qa_server.py tts_server.py maya_server.py transcribe_server.py ./
+EXPOSE 9045
+CMD ["uvicorn", "qa_server:app", "--host", "127.0.0.1", "--port", "9045"]

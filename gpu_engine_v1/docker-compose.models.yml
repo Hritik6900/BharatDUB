@@ -1,0 +1,101 @@
+# The new v1 model servers, one container each, ports 9041-9045 on the VM's loopback only.
+# Nothing here touches v0's servers (9001-9040) and no port is published to the outside.
+#
+#   docker compose -p bharatdb-v1-models -f gpu_engine_v1/docker-compose.models.yml --profile <name> up -d --build
+#
+# Profiles (start only what the card has room for; see docs/v1/NEEDS_APPROVAL.md and MODELS.md):
+#   stub        every server without its model (V1_STUB=1): no GPU, for testing the calls
+#   qa          QA server on CPU (back-check, speaker similarity)                       no GPU memory
+#   tts         :9041 IndicF5 with batching                                             about 4 GB (not measured)
+#   transcribe  :9043 Indic Transcribe                                                  about 9 GB (the card's figure)
+#   maya        :9042 Maya 2                                                            7.7 GB (the card's figure)
+#   hq          :9044 the big translation model, only inside an HQ window (gpu-mode.sh)
+#
+# Model versions: every *_REVISION is `main` until the first deployment, when it is set to the full commit hash
+# that was downloaded (the image tags below are already fixed).
+name: bharatdb-v1-models
+
+x-gpu: &gpu
+  deploy:
+    resources:
+      reservations:
+        devices: [{ driver: nvidia, count: 1, capabilities: [gpu] }]
+
+x-common: &common
+  restart: always
+  network_mode: host
+  volumes:
+    - ${V1_MODEL_CACHE:-/srv/bharatdb-v1/models}:/models
+  environment: &env
+    HF_HOME: /models/hf
+    HF_TOKEN: ${HF_TOKEN:-}
+
+services:
+  tts:
+    <<: [*common, *gpu]
+    profiles: ["tts"]
+    build: { context: ., dockerfile: Dockerfile.tts }
+    environment: { <<: *env, NFE: "12", BATCH_MAX: "4", BATCH_WAIT_MS: "15", TTS_REVISION: "${TTS_REVISION:-main}" }
+    command: ["uvicorn", "tts_server:app", "--host", "127.0.0.1", "--port", "9041"]
+    healthcheck: &hc41 { test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:9041/health',timeout=4)"], interval: 30s, timeout: 6s, retries: 3, start_period: 180s }
+
+  maya:
+    <<: [*common, *gpu]
+    profiles: ["maya"]
+    build: { context: ., dockerfile: Dockerfile.maya }
+    environment: { <<: *env, MAYA_SEATS: "1", MAYA_REVISION: "${MAYA_REVISION:-main}" }
+    command: ["uvicorn", "maya_server:app", "--host", "127.0.0.1", "--port", "9042"]
+    healthcheck: { test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:9042/health',timeout=4)"], interval: 30s, timeout: 6s, retries: 3, start_period: 240s }
+
+  transcribe:
+    <<: [*common, *gpu]
+    profiles: ["transcribe"]
+    build: { context: ., dockerfile: Dockerfile.transcribe }
+    environment: { <<: *env, TRANSCRIBE_REVISION: "${TRANSCRIBE_REVISION:-main}" }
+    command: ["uvicorn", "transcribe_server:app", "--host", "127.0.0.1", "--port", "9043"]
+    healthcheck: { test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:9043/health',timeout=4)"], interval: 30s, timeout: 6s, retries: 3, start_period: 240s }
+
+  big-llm:
+    <<: [*common, *gpu]
+    profiles: ["hq"]
+    image: vllm/vllm-openai:${VLLM_TAG:?set VLLM_TAG to a vLLM release that serves Gemma 4 QAT checkpoints}
+    command: ["--model", "${BIG_LLM_MODEL:-google/gemma-4-12B-it-qat-w4a16-ct}", "--revision", "${BIG_LLM_REVISION:-main}",
+              "--host", "127.0.0.1", "--port", "9044", "--served-model-name", "big",
+              "--gpu-memory-utilization", "${BIG_LLM_GPU_SHARE:-0.40}", "--max-model-len", "8192", "--max-num-seqs", "8",
+              "--enable-prefix-caching"]
+    healthcheck: { test: ["CMD", "python3", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:9044/v1/models',timeout=4)"], interval: 30s, timeout: 6s, retries: 3, start_period: 600s }
+
+  qa:
+    <<: *common
+    profiles: ["qa"]
+    build: { context: ., dockerfile: Dockerfile.qa }
+    environment: { <<: *env, QA_DEVICE: "${QA_DEVICE:-cpu}", QA_DIARIZE: "${QA_DIARIZE:-0}" }
+    command: ["uvicorn", "qa_server:app", "--host", "127.0.0.1", "--port", "9045"]
+    healthcheck: { test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:9045/health',timeout=4)"], interval: 30s, timeout: 6s, retries: 3, start_period: 240s }
+
+  # ---- the same servers without their models, for testing the calls (no GPU) ----
+  tts-stub:
+    <<: *common
+    profiles: ["stub"]
+    build: { context: ., dockerfile: Dockerfile.qa }
+    environment: { V1_STUB: "1" }
+    command: ["uvicorn", "tts_server:app", "--host", "127.0.0.1", "--port", "9041"]
+    healthcheck: *hc41
+  maya-stub:
+    <<: *common
+    profiles: ["stub"]
+    build: { context: ., dockerfile: Dockerfile.qa }
+    environment: { V1_STUB: "1" }
+    command: ["uvicorn", "maya_server:app", "--host", "127.0.0.1", "--port", "9042"]
+  transcribe-stub:
+    <<: *common
+    profiles: ["stub"]
+    build: { context: ., dockerfile: Dockerfile.qa }
+    environment: { V1_STUB: "1" }
+    command: ["uvicorn", "transcribe_server:app", "--host", "127.0.0.1", "--port", "9043"]
+  qa-stub:
+    <<: *common
+    profiles: ["stub"]
+    build: { context: ., dockerfile: Dockerfile.qa }
+    environment: { V1_STUB: "1" }
+    command: ["uvicorn", "qa_server:app", "--host", "127.0.0.1", "--port", "9045"]

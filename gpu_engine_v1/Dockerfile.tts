@@ -1,0 +1,11 @@
+# :9041 IndicF5 with batching. The IndicF5 code is installed from its repository at a fixed commit.
+FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+RUN apt-get update && apt-get install -y --no-install-recommends git ffmpeg libsndfile1 && rm -rf /var/lib/apt/lists/*
+ARG INDICF5_COMMIT=main
+RUN pip install "git+https://github.com/AI4Bharat/IndicF5.git@${INDICF5_COMMIT}" \
+    fastapi==0.115.6 "uvicorn[standard]==0.34.0" python-multipart==0.0.20 soundfile==0.13.0 safetensors==0.5.2 huggingface_hub==0.27.1
+WORKDIR /srv
+COPY common.py tts_server.py ./
+EXPOSE 9041
+CMD ["uvicorn", "tts_server:app", "--host", "127.0.0.1", "--port", "9041"]

@@ -1,0 +1,10 @@
+# :9043 Indic Transcribe. Runs on transformers; the model repository carries its own inference code.
+FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libsndfile1 && rm -rf /var/lib/apt/lists/*
+RUN pip install torchaudio==2.5.1 transformers==4.47.1 sentencepiece==0.2.0 soundfile==0.13.0 huggingface_hub==0.27.1 \
+    fastapi==0.115.6 "uvicorn[standard]==0.34.0" python-multipart==0.0.20
+WORKDIR /srv
+COPY common.py transcribe_server.py ./
+EXPOSE 9043
+CMD ["uvicorn", "transcribe_server:app", "--host", "127.0.0.1", "--port", "9043"]

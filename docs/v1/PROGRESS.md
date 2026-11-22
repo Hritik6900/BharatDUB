@@ -149,3 +149,36 @@ What the numbers say:
   `scripts/v1/ab-server.sh 8111 base` and `... 8112 dynamic V1_PHRASE_DYNAMIC=true`, then `python -m eval.v1.live`.
 - **Roll back:** each flag off. Recommended now: all of these off, except `V1_PHRASE_DYNAMIC` for sessions that
   start with a ready voice if the earlier first audio is worth 5 points of on-time (a decision for the user).
+
+## Phase 6: new model servers (`gpu_engine_v1/`), 23 Nov 2026
+
+- **Changed:** `gpu_engine_v1/`: `tts_server.py` (:9041, one IndicF5 that batches lines; any batch error speaks
+  those lines one at a time the way v0's engine does, and three errors switch batching off), `maya_server.py`
+  (:9042), `transcribe_server.py` (:9043), `qa_server.py` (:9045: hear a line back, speaker similarity,
+  diarization; CPU by default), a vLLM service for the big translation model (:9044), one Dockerfile per server,
+  `docker-compose.models.yml` with a profile per server, `README.md`. `scripts/v1/gpu-mode.sh`
+  (`status | hq | normal`, prints only unless `--run`). `docs/v1/MODELS.md` (what each model is, licence, size).
+- **Nothing was loaded on the GPU.** About 6 GB is free beside v0 and the rule keeps 4 GB free, so no model over
+  2 GB may load; every load is in `NEEDS_APPROVAL.md` (items 6-12) with its commands, expected memory and
+  rollback. Each server has a stub mode (`V1_STUB=1`, no model, no GPU): the four stubs were run in-process and
+  called through the backend's real clients (5 tests: copied voice with consent refused without it, speed
+  honoured, four lines at once batched, English on the Maya stub, transcript, scores, one-speaker diarization).
+- **Never run with a real model:** the batched IndicF5 path, the Maya and Indic Transcribe model calls (written
+  from the libraries' documented interfaces), the QA models, the container images (no Docker here).
+- **`gpu-mode.sh`:** checked with `bash -n`; its read-only `status` ran (five shared servers up, 9041-9045 down,
+  mode normal). `hq` and `normal` were not run, not even as a dry run: those commands are on the do-not-run list.
+- **Licences and models, verified against their own pages** (details in `MODELS.md`):
+  - The speaker-similarity model used in earlier measurements (ECAPA2) is CC-BY-NC-4.0, non-commercial. The QA
+    server uses SpeechBrain ECAPA (Apache-2.0); the earlier similarity figures do not carry over to its scale.
+  - Indic Transcribe: free to self-host, but a hosted service that others call needs its authors' written
+    sign-off. Fine for samples; a decision before production.
+  - Maya 2 Native: Apache-2.0, 7.7 GB of GPU memory by its card, its own engine (not vLLM), no speed control.
+  - Gemma 4 is Apache-2.0; Google publishes 4-bit checkpoints for vLLM in 12B (10.3 GB) and 31B (23.3 GB).
+  - The live Whisper on 9030 is a Hindi/Hinglish model: it cannot hear Tamil or Bengali back.
+- **Read from the shared translation server (HTTP, read-only):** vLLM 0.34.0, prefix caching on, 52.8% of all
+  prompt tokens since its start served from the cache.
+- **v0 after this phase:** all nine checks ok. Tests: 155 pass.
+- **Test:** `python -m pytest tests/test_v1_servers.py -q`; a stub by hand:
+  `cd gpu_engine_v1 && V1_STUB=1 uvicorn qa_server:app --port 9045`.
+- **Roll back:** nothing runs; the folder can be ignored. A server that is started later is switched off by
+  emptying its address in `backend/.env`.

@@ -1,0 +1,8 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+numpy==1.26.4
+soundfile==0.13.0
+faster-whisper==1.1.1
+speechbrain==1.0.2
+# diarization (QA_DIARIZE=1) needs: pyannote.audio>=4.0 and a Hugging Face token that accepted the model terms
