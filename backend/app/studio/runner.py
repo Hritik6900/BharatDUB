@@ -25,6 +25,8 @@ from app.v1 import trace
 log = logging.getLogger("studio")
 # The engine of the job being worked on in this task: None = the hosted services (as before), "gpu" = our own machine.
 ENGINE: ContextVar[str | None] = ContextVar("studio_engine", default=None)
+# v1: which provider lists the router uses for this job (`studio`, or `studio_hq` for an HQ job).
+MODE: ContextVar[str] = ContextVar("studio_mode", default="studio")
 
 STAGES = ["ingest", "extract", "separate", "segment", "transcribe", "translate", "voice", "fit", "mix", "render"]
 
@@ -57,15 +59,15 @@ class StudioRunner:
     # as before). A context variable, so two jobs with different engines can run side by side.
     @property
     def stt(self) -> STT:
-        return self._stt or (get_stt(ENGINE.get()) if ENGINE.get() else get_stt())
+        return self._stt or get_stt(ENGINE.get() or None, mode=MODE.get())
 
     @property
     def llm(self) -> LLM:
-        return self._llm or (get_llm(ENGINE.get()) if ENGINE.get() else get_llm())
+        return self._llm or get_llm(ENGINE.get() or None, mode=MODE.get())
 
     @property
     def tts(self) -> TTS:
-        return self._tts or (get_tts(ENGINE.get()) if ENGINE.get() else get_tts())
+        return self._tts or get_tts(ENGINE.get() or None, mode=MODE.get())
 
     def job_engine(self, job_id: str) -> str:
         """Which engine a job was made with: `cloud` (the hosted services) or `gpu`."""

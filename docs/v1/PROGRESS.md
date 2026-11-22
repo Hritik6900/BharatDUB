@@ -62,3 +62,24 @@ One entry per phase: what changed, how to test, how to roll back, measured numbe
 - **v0 after this phase:** `scripts/v1/v0-check.sh` all nine ok. Tests: 103 pass.
 - **Test:** `V1_TRACE=true`, run a session, `curl "http://127.0.0.1:8110/api/v1/metrics/summary?hours=1"`, open
   `/metrics-ui`. **Roll back:** `V1_TRACE=false`.
+
+## Phase 4: config-driven router (`V1_ROUTER`), 23 Nov 2026
+
+- **Changed:** `backend/config/routing.yaml` (provider order per step, per mode `live` / `studio` / `studio_hq`
+  and per engine, timeouts per step), `app/v1/router.py` (reads and checks the file, builds the provider objects,
+  leaves out a provider whose address or key is not set), `app/v1/stages.py` (`transcribe()`, `translate()`,
+  `speak()`, `separate()`, `diarize()`, `score()`: each walks its list with a timeout per provider and logs why it
+  moved on; a job's voice stays with the provider that spoke its first line), clients for the new servers
+  (`providers/stt_indic.py`, `providers/tts_gpu_v1.py`, `app/v1/qa.py`), `GET /api/v1/routing`.
+  `providers/__init__.py` asks the router only when the flag is on; off, v0's fixed table answers as before.
+- **Checked:** 17 tests. For five setups (nothing configured, hosted only, hosted + voice engine, everything,
+  GPU machine without hosted keys), both engines and both modes, the shipped file builds the same provider
+  objects as v0's table (same classes, same order of fallbacks). Bad files are refused; a broken file at run time
+  falls back to v0's table instead of stopping the service.
+- **Measured, router on, one Live run** (GPU engine, voice from the stream, Tamil + Bengali, two loops): same
+  providers in the trace as with it off (hosted speech-to-text with ours behind it, our translation model with the
+  hosted one behind it, our voice engine); first audio p50 2.4 s (2.7 s with it off in phase 3), 74% within 0.25 s
+  and 85% within 1 s of the moment (76% / 89%), no fallback. One run each: inside what two equal runs differ by.
+- **v0 after this phase:** all nine checks ok. Tests: 120 pass.
+- **Test:** `python -m pytest tests/test_v1_router.py -q`; `curl http://127.0.0.1:8110/api/v1/routing`.
+- **Roll back:** `V1_ROUTER=false`.

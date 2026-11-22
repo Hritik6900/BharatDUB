@@ -143,3 +143,13 @@ async def health() -> dict[str, Any]:
 @router.get("/api/v1/flags")
 async def get_flags() -> dict[str, Any]:
     return flags()
+
+
+@router.get("/api/v1/routing")
+async def routing() -> dict[str, Any]:
+    """Which provider does which step: what the routing file says and what is configured now."""
+    from app.v1.router import RoutingError, get_router
+    try:
+        return {"router_on": get_settings().v1_router, "ok": True, "steps": get_router().describe()}
+    except RoutingError as e:
+        return {"router_on": get_settings().v1_router, "ok": False, "error": str(e)}

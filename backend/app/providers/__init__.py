@@ -19,20 +19,32 @@ def engine_of(engine: str | None = None) -> str:
     return "gpu" if want == "gpu" and s.gpu_mode_ready and not s.mock_providers else "cloud"
 
 
-def get_stt(engine: str | None = None) -> Any:
-    return _stt(engine_of(engine))
+def _router() -> Any:
+    """v1: the config-driven router when `V1_ROUTER` is on, else None and the fixed table below is used."""
+    if not get_settings().v1_router:
+        return None
+    from app.v1.router import active
+    return active()
 
 
-def get_tts(engine: str | None = None) -> Any:
-    return _tts(engine_of(engine))
+def get_stt(engine: str | None = None, mode: str = "live") -> Any:
+    r = _router()
+    return r.stt(mode, engine_of(engine)) if r else _stt(engine_of(engine))
 
 
-def get_gpu_voice(engine: str | None = None) -> Any:
-    return _gpu_voice(engine_of(engine))
+def get_tts(engine: str | None = None, mode: str = "live") -> Any:
+    r = _router()
+    return r.tts(mode, engine_of(engine)) if r else _tts(engine_of(engine))
 
 
-def get_llm(engine: str | None = None) -> Any:
-    return _llm(engine_of(engine))
+def get_gpu_voice(engine: str | None = None, mode: str = "live") -> Any:
+    r = _router()
+    return r.gpu_voice(mode, engine_of(engine)) if r else _gpu_voice(engine_of(engine))
+
+
+def get_llm(engine: str | None = None, mode: str = "live") -> Any:
+    r = _router()
+    return r.llm(mode, engine_of(engine)) if r else _llm(engine_of(engine))
 
 
 @lru_cache

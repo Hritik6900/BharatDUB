@@ -1,0 +1,63 @@
+# Which provider does which step, in order: the first one that is configured and answers is used, the next ones
+# are its fallbacks. Read by backend/app/v1/router.py when V1_ROUTER=true.
+#
+# This file as shipped reproduces what v0 does for both engines. A provider whose address or key is not set is
+# skipped, so a line such as [big_llm, gemma, gemini] is safe before the big model's server exists.
+#
+# Providers
+#   transcribe    prisma (hosted) | whisper_gpu (:9030, Hindi and Hinglish only) | indic_transcribe (:9043)
+#   translate     gemini (hosted) | gemma (:9020) | big_llm (:9044)
+#   speak         timbre (hosted stock voices and hosted clone) | indicf5 (our voice engine for a copied voice)
+#   copied_voice  indicf5 (:9001-9003) | indicf5_v1 (:9041, one server with batching) | maya (:9042)
+#   separate      demucs_gpu (:9010) | demucs_cpu
+#   diarize       qa_server (:9045) | none (everything is one speaker)
+#   score         qa_server (:9045) | prisma (words heard back only, no speaker similarity)
+version: 1
+
+# Seconds one provider gets for one call before the next one is tried.
+timeouts_s:
+  transcribe: 30
+  translate: 20
+  speak: 20
+  separate: 180
+  diarize: 180
+  score: 40
+
+modes:
+  live:
+    cloud:
+      transcribe: [prisma]
+      translate: [gemini]
+      speak: [timbre]
+      copied_voice: [indicf5]
+    gpu:
+      transcribe: [prisma, whisper_gpu]
+      translate: [gemma, gemini]
+      speak: [indicf5, timbre]
+      copied_voice: [indicf5]
+  studio:
+    cloud:
+      transcribe: [prisma]
+      translate: [gemini]
+      speak: [timbre]
+      copied_voice: [indicf5]
+      separate: [demucs_gpu, demucs_cpu]
+    gpu:
+      transcribe: [prisma, whisper_gpu]
+      translate: [gemma, gemini]
+      speak: [indicf5, timbre]
+      copied_voice: [indicf5]
+      separate: [demucs_gpu, demucs_cpu]
+  # The HQ Studio path (V1_STUDIO_HQ). Both engines use the same lists: HQ is about quality, not about where.
+  studio_hq:
+    cloud: &hq
+      transcribe: [prisma, indic_transcribe, whisper_gpu]   # every one that answers is heard; the text step merges them
+      translate: [big_llm, gemma, gemini]
+      review: [big_llm, gemini, gemma]
+      speak: [indicf5, timbre]
+      copied_voice: [indicf5]
+      candidates: [maya]                                    # extra candidate voices for N-best (V1_TTS_MAYA)
+      separate: [demucs_gpu, demucs_cpu]
+      diarize: [qa_server, none]
+      score: [qa_server, prisma]
+    gpu: *hq
