@@ -19,6 +19,7 @@ from app.providers import get_gpu_voice, get_llm, get_stt, get_tts
 from app.providers.base import ProviderError, VoiceSpec
 from app.shared import audio_utils as au
 from app.shared.metrics import percentile
+from app.v1 import trace
 
 log = logging.getLogger("live")
 TRANSLATE_TIMEOUT_S = 8.0
@@ -156,6 +157,7 @@ class LivePipeline:
         self.llm = llm or (get_llm(eng) if eng else get_llm())
         self.tts = tts or (get_tts(eng) if eng else get_tts())
         self.s = get_settings()
+        self._trace = self.s.v1_trace   # v1: extra timing marks and one trace record per phrase
         self.audio: asyncio.Queue[bytes | None] = asyncio.Queue()
         self.assembler = Assembler()
         self.phraser = Phraser(self.s.live_phrase_min_words, self.s.live_phrase_max_words)
@@ -327,10 +329,12 @@ class LivePipeline:
         row = self.sess.row
         return int(row.get("offset_ms") or 0) if row.get("streamer_id") and not self._media else 0
 
-    def viewer_played(self, lang: str, late_ms: int) -> None:
+    def viewer_played(self, lang: str, late_ms: int, seq: int | None = None) -> None:
         """What a viewer's player measured: how long after its moment a phrase really started (0 = on it)."""
         if 0 <= late_ms < 120000:
             self._viewer_late.append(late_ms)
+            if self._trace and seq is not None:
+                trace.live_played(self.sess.id, seq, lang, late_ms)
 
     def sync_delay(self) -> int:
         """The delay viewers hold their video at, or 0 when the console is not reporting video time (any more)."""
@@ -724,9 +728,14 @@ class LivePipeline:
                 kw["native"] = True  # the GPU voice reads only the language's own letters
             if kw.get("brief") and chunk.seq in self._pending:
                 self._pending[chunk.seq]["timings"][f"brief:{lang}"] = 1
+            fell = getattr(self.llm, "fell_back", 0)
+            if self._trace and chunk.seq in self._pending:
+                self._pending[chunk.seq]["timings"][f"t_translate_start:{lang}"] = self.sess.now_ms()
             text = await asyncio.wait_for(self.llm.translate_chunk(chunk.text, lang, self.glossary, ctx, **kw),
                                           TRANSLATE_TIMEOUT_S)
             untranslated = False
+            if self._trace and chunk.seq in self._pending and getattr(self.llm, "fell_back", 0) != fell:
+                self._pending[chunk.seq]["timings"][f"llm_fb:{lang}"] = 1
         except (ProviderError, TimeoutError) as e:
             text, untranslated = chunk.text, True
             bus.publish(ALL, {"type": "error", "message": f"{lang} translation failed: {str(e)[:120]}"},
@@ -807,6 +816,8 @@ class LivePipeline:
         if untranslated:
             end_of_audio()
             return
+        if self._trace:
+            timings[f"tts_chars:{lang}"] = len(text)
         # Decided when this chunk's turn to speak comes. `waiting` is how much dubbed audio a viewer of this
         # language still has to play (see _playhead): a phrase is heard only after everything before it.
         now = self.sess.now_ms()
@@ -906,12 +917,16 @@ class LivePipeline:
                         pcm = np.interp(np.linspace(0, len(x) - 1, n), np.arange(len(x)), x).astype("<i2").tobytes()
                     held = au.trim_pcm_silence(pcm, start=True, end=False) if self.s.live_trim_silence else pcm
                     timings[f"clone:{lang}"] = timings[f"gpu:{lang}"] = 1
+                    if self._trace and getattr(self.gpu, "last_synth_ms", None):
+                        timings[f"gpu_ms:{lang}"] = round(float(self.gpu.last_synth_ms))
                     self._gpu_fail = 0
                     return
                 except Exception as e:  # noqa: BLE001 - fail soft: this line goes to the Gnani voice instead
                     self._gpu_fail += 1
                     self._gpu_retry_at = self.sess.now_ms() + GPU_RETRY_MS
                     log.warning("live gpu voice failed (%d): %s", self._gpu_fail, e)
+                    if self._trace:
+                        timings[f"tts_fb:{lang}"] = 1
             async for pcm in self.tts.synth_stream(text, lang, voice, sample_rate=sr, speed=self.s.live_tts_speed):
                 pcm = carry + pcm
                 cut = len(pcm) // 2 * 2
@@ -978,6 +993,12 @@ class LivePipeline:
         if p["left"] > 0:
             return
         self._pending.pop(seq, None)
+        if self._trace:
+            fb = getattr(self.stt, "fell_back", 0)
+            if fb != getattr(self, "_stt_fb_seen", 0):
+                self._stt_fb_seen, p["timings"]["stt_fb"] = fb, 1
+            trace.live_phrase(self.sess.id, self.sess.row, seq, p, {
+                "stt": trace.provider_name(self.stt), "llm": trace.provider_name(self.llm)})
         try:
             await get_store().insert("live_chunks", {"session_id": self.sess.id, "seq": seq,
                                                      "t_speech_ms": p["t_speech_ms"], "src_text": p["src_text"],

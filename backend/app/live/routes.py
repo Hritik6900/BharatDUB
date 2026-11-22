@@ -234,7 +234,8 @@ async def ws_watch(ws: WebSocket, sid: str, lang: str = Query("ta-IN")) -> None:
                     with contextlib.suppress(ValueError, TypeError, KeyError):
                         data = json.loads(msg["text"])
                         if data.get("type") == "played":
-                            s.pipeline.viewer_played(lang, int(data["late_ms"]))
+                            seq = data.get("seq")
+                            s.pipeline.viewer_played(lang, int(data["late_ms"]), int(seq) if isinstance(seq, int) else None)
         finally:
             pump.cancel()
     except WebSocketDisconnect:

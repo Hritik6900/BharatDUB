@@ -20,6 +20,7 @@ from app.shared.metrics import StageTimer
 from app.shared.storage import publish_output
 from app.studio.events import events
 from app.studio.stages import extract, fit, mix, render, segment, separate, transcribe, translate, voice
+from app.v1 import trace
 
 log = logging.getLogger("studio")
 # The engine of the job being worked on in this task: None = the hosted services (as before), "gpu" = our own machine.
@@ -132,6 +133,13 @@ class StudioRunner:
         finally:
             self._drop_ahead(job_id)
             await self._save_stats(ctx)
+            if self.s.v1_trace:
+                gpu = ENGINE.get() == "gpu"
+                trace.studio_job(job_id, mode="studio", engine=ENGINE.get() or "cloud", duration_s=job.get("duration_s"),
+                                 langs=job.get("target_langs"), total_s=round(sum(v for k, v in ctx.timer.timings.items() if ":" not in k), 3),
+                                 stages={k: v for k, v in ctx.timer.timings.items() if ":" not in k}, usage=dict(ctx.usage),
+                                 stt_hosted=self.s.gpu_stt_first == "hosted" or not gpu, llm_hosted=not gpu, tts_hosted=not gpu,
+                                 warnings=len(ctx.warnings))
             events.publish(job_id, {"type": "end", "job": await self.store.get("jobs", job_id)})
 
     async def _prepare(self, ctx: Ctx, meta: dict[str, Any]) -> None:
@@ -320,6 +328,12 @@ class StudioRunner:
             lines_dir.mkdir(exist_ok=True)
             out = lines_dir / f"{lang}_{seg['idx']:03}.wav"
             speed = await asyncio.to_thread(fit.fit_clip, raw, slot_s, out)
+        if self.s.v1_trace:
+            on_gpu = bool(getattr(self.tts, "native_speed", False) and self.tts.engine_speaks(lang, vspec))
+            trace.studio_line(ctx.job_id, lang, seg["idx"], mode="studio", engine=ENGINE.get() or "cloud",
+                              words=len(text.split()), slot_s=round(slot_s, 3), dur_s=round(au.duration_s(out), 3),
+                              speed=speed, native_speed=round(native, 2), tts="gpu_voice" if on_gpu else "hosted",
+                              clone=vspec["kind"] == "clone", edited=bool(tr.get("edited")))
         fields = {"text": text, "audio_path": str(out.relative_to(ctx.dir)), "fit_speed": speed}
         return await self.store.update("translations", tr["id"], fields) or {**tr, **fields}
 

@@ -41,3 +41,24 @@ One entry per phase: what changed, how to test, how to roll back, measured numbe
 - **Test:** `cd backend && python -m pytest -q`; `curl http://127.0.0.1:8110/api/v1/health`; open
   `http://127.0.0.1:3100/health`.
 - **Roll back:** stop the two v1 processes; nothing else depends on them.
+
+## Phase 3: trace and numbers (`V1_TRACE`), 23 Nov 2026
+
+- **Changed:** `app/v1/trace.py` (JSONL in `<DATA_DIR>/trace/trace-YYYYMMDD.jsonl` + Prometheus counters and
+  histograms), `app/v1/metrics.py` (`GET /metrics`, `GET /api/v1/metrics/summary?hours=&session=`), website page
+  `/metrics-ui`, four tests. In `live/pipeline.py` the flag adds marks to a phrase's timings (translation start,
+  the voice engine's own time, which step fell back, characters spoken) and writes one record per phrase and
+  language when the phrase is done; a viewer's `played` report is recorded with the phrase number. In
+  `studio/runner.py` it writes one record per voiced line and one per run. With the flag off none of this runs.
+- **A record holds:** trace id (session, phrase, language), the times of speech start and end, final transcript,
+  translation start and end, first audio, last audio sent, the moment a viewer starts hearing it (server estimate),
+  lateness against the video moment, providers, fallback yes/no per step, seconds of work on our GPU servers
+  (the voice engine's own time, plus the translation call's time when our model answered).
+- **Cost per minute:** GPU seconds x the GPU's hourly rate + hosted usage x its rates. The rates are settings and
+  are 0 (not set), so the page shows no cost figure yet: the rates are a decision for the user.
+- **Measured, one traced Live session** (GPU engine, voice from the stream, Tamil + Bengali, two loops of the reel,
+  56 s): 44 records, 40 spoken, first audio p50 2.7 s, translation p50 0.55 s, 76% within 0.25 s and 89% within
+  1 s of the video moment, 95% in the copied voice, no fallback, 46 s of GPU work reported for 0.74 stream minutes.
+- **v0 after this phase:** `scripts/v1/v0-check.sh` all nine ok. Tests: 103 pass.
+- **Test:** `V1_TRACE=true`, run a session, `curl "http://127.0.0.1:8110/api/v1/metrics/summary?hours=1"`, open
+  `/metrics-ui`. **Roll back:** `V1_TRACE=false`.

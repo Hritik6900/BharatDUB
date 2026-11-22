@@ -15,6 +15,7 @@ from app.shared import dashboard, glossary, voices
 from app.streamer import routes as streamer_routes
 from app.studio import routes as studio_routes
 from app.v1 import health as v1_health
+from app.v1 import metrics as v1_metrics
 
 log = logging.getLogger("app")
 settings = get_settings()
@@ -76,6 +77,7 @@ app.include_router(live_routes.router)
 app.include_router(dashboard.router)
 app.include_router(streamer_routes.router)
 app.include_router(v1_health.router)
+app.include_router(v1_metrics.router)
 
 
 @app.get("/health")
