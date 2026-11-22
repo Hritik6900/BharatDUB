@@ -17,3 +17,5 @@ web/.next/
 *.mp4
 *.mp3
 !backend/eval/**/*.wav
+*.zip
+screenshots/
