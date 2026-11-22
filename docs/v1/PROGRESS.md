@@ -267,3 +267,24 @@ What the numbers say:
   people use), so "v0" in the report is v1 with every flag off. v0 was checked through its health endpoints only.
 - **v0 after this phase:** all nine checks ok. Tests: 159 pass, 1 skipped (Postgres store, no database here).
 - **Test:** `scripts/v1/eval-all.sh <data>/eval <out>`. **Roll back:** nothing to roll back (scripts and a report).
+
+## Phase 9: operations and demo readiness, 23 Nov 2026
+
+- **Changed:** `scripts/v1/demo-check.sh` (READY or NOT READY: v1 backend and website, every model server the
+  backend calls, the hosted services, the GPU of the machine it runs on, which GPU mode, whether anyone is live,
+  which flags are on), `scripts/v1/warmup.sh` with `POST /api/v1/warmup` (one small request through each service,
+  each timed; a service that is not configured is skipped, not failed), `scripts/v1/backup.sh` (store, voice
+  samples, trace and configuration to a bucket; never keys; `--dry` prints only), `docs/v1/RUNBOOK.md` (start and
+  stop, checks, flags, routing, the GPU's two modes, roll back to v0, backup and restore), the queue and store
+  tests, links to the status and numbers pages in the footer.
+- **Ran here:** `demo-check.sh` -> READY (eleven checks ok; it names the laptop's own card as "the GPU of this
+  machine", which on the VM will be the model servers' card). `warmup.sh` -> warm: translation 0.8 s, hosted stock
+  voice 1.9 s, three voice engines 1.4 s, our speech-to-text 1.0 s, separation 1.3 s; QA server skipped (not
+  configured). `backup.sh` with no bucket set: stops, copies nothing.
+- **Fixed on the way:** on Windows `python3` can be a stub that opens the Store; the scripts now use the
+  backend's own Python when it is there.
+- **Not done (see `NEEDS_APPROVAL.md`):** a real backup (no bucket, item 13), the restore rehearsal on another
+  machine, "warm and green five minutes after a VM restart" (no VM restart was ours to do), the Postgres store
+  against a database (item 5: its test is written and skipped).
+- **v0 after this phase:** all nine checks ok. Tests: 159 pass, 1 skipped.
+- **Test:** `scripts/v1/demo-check.sh && scripts/v1/warmup.sh`. **Roll back:** nothing to roll back.

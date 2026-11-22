@@ -153,3 +153,58 @@ async def routing() -> dict[str, Any]:
         return {"router_on": get_settings().v1_router, "ok": True, "steps": get_router().describe()}
     except RoutingError as e:
         return {"router_on": get_settings().v1_router, "ok": False, "error": str(e)}
+
+
+@router.post("/api/v1/warmup")
+async def warmup(lang: str = "ta-IN", engine: str = "") -> dict[str, Any]:
+    """One small request through every service a session would use, so the first real line is not the slow one.
+    Each step is timed; a service that is not configured is skipped, not failed."""
+    from app.config import VOICE_BY_LANG
+    from app.providers import engine_of, get_gpu_voice, get_llm, get_tts
+    s = get_settings()
+    eng = engine_of(engine or ("gpu" if s.gpu_mode_ready else "cloud"))
+    steps: list[dict[str, Any]] = []
+
+    async def step(name: str, call: Any, *, skip: str = "", limit: float = 25.0) -> None:
+        if skip:
+            steps.append({"step": name, "ok": False, "skipped": True, "note": skip})
+            return
+        t0 = time.perf_counter()
+        try:
+            note = await asyncio.wait_for(call(), limit)
+            steps.append({"step": name, "ok": True, "ms": round((time.perf_counter() - t0) * 1000), "note": note or ""})
+        except Exception as e:  # noqa: BLE001 - a warm-up reports, it does not raise
+            steps.append({"step": name, "ok": False, "ms": round((time.perf_counter() - t0) * 1000),
+                          "note": f"{type(e).__name__}: {str(e)[:120]}"})
+
+    async def translate() -> str:
+        out = await get_llm(eng).translate_chunk("नमस्ते दोस्तों", lang, [], [])
+        return f"{len(out.split())} words back"
+
+    async def stock_voice() -> str:
+        n = 0
+        voice = {"kind": "stock", "voice": VOICE_BY_LANG.get(lang, VOICE_BY_LANG["hi-IN"])}
+        async for chunk in get_tts(eng).synth_stream("ok", lang, voice, sample_rate=s.live_sample_rate):
+            n += len(chunk)
+        return f"{n} bytes of audio"
+
+    async def voice_engines() -> str:
+        got = await get_gpu_voice(eng).health()
+        if not got or not all(h.get("ok") for h in got):
+            raise RuntimeError(f"{sum(1 for h in got if h.get('ok'))} of {len(got)} voice engines answer")
+        return f"{len(got)} engines answer"
+
+    async def get(url: str) -> str:
+        async with httpx.AsyncClient() as c:
+            r = await c.get(url, timeout=TIMEOUT_S)
+            r.raise_for_status()
+        return ""
+
+    has_llm = bool((eng == "gpu" and s.gpu_llm_url) or (s.llm_base_url and s.llm_model))
+    await step(f"translation ({eng} engine)", translate, skip="" if has_llm else "no translation model is configured")
+    await step("stock voice (hosted)", stock_voice, skip="" if s.gnani_api_key.get_secret_value() else "no hosted key")
+    await step("copied voice engines", voice_engines, skip="" if s.gpu_voice_url or s.v1_tts_server_url else "no voice engine is configured")
+    await step("speech-to-text (ours)", lambda: get(s.gpu_stt_url.rstrip("/") + "/health"), skip="" if s.gpu_stt_url else "not configured")
+    await step("separation", lambda: get(s.gpu_separate_url.rstrip("/") + "/health"), skip="" if s.gpu_separate_url else "not configured (CPU is used)")
+    await step("QA server", lambda: get(s.v1_qa_url.rstrip("/") + "/health"), skip="" if s.v1_qa_url else "not configured")
+    return {"engine": eng, "lang": lang, "ok": all(x["ok"] or x.get("skipped") for x in steps), "steps": steps}

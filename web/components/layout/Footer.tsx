@@ -18,6 +18,8 @@ const COLS = [
       { href: "/voices", label: "Your voice" },
       { href: "/glossary", label: "Glossary" },
       { href: "/dashboard", label: "Dashboard" },
+      { href: "/metrics-ui", label: "Numbers" },
+      { href: "/health", label: "Status" },
     ],
   },
 ];
