@@ -6,6 +6,7 @@ import { ArrowRight, AudioLines, Captions, Check, ChevronRight, Clapperboard, Fi
 import { Shell } from "@/components/layout/Shell";
 import { Button } from "@/components/ui/Button";
 import { EnginePicker, type Engine } from "@/components/ui/EnginePicker";
+import { QualityPicker, type Quality } from "@/components/ui/QualityPicker";
 import { LanguageChip } from "@/components/ui/LanguageChip";
 import { Notice } from "@/components/ui/Notice";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -44,6 +45,7 @@ export default function StudioPage() {
   const [voiceConsent, setVoiceConsent] = useState(false);
   const [owns, setOwns] = useState(false);
   const [engine, setEngine] = useState<Engine>("cloud");
+  const [quality, setQuality] = useState<Quality>("standard");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -72,6 +74,7 @@ export default function StudioPage() {
     fd.append("target_langs", langs.join(","));
     fd.append("owns_video", String(owns));
     if (engine === "gpu") fd.append("engine", engine);
+    if (quality === "hq") fd.append("quality", quality);
     if (voiceMode === "saved" && voiceId) fd.append("voice_profile_id", voiceId);
     if (voiceMode === "video") {
       fd.append("voice_from_video", "true");
@@ -221,6 +224,7 @@ export default function StudioPage() {
             </fieldset>
 
             <EnginePicker value={engine} onChange={setEngine} />
+            <QualityPicker value={quality} onChange={setQuality} />
 
             <div>
               <label className="flex cursor-pointer items-start gap-3">

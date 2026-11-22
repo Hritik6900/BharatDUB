@@ -85,6 +85,9 @@ async def test_qa_server_scores_and_diarizes(wav):
 
 
 def test_words_heard_matches_the_backend_scoring():
-    from app.live.pipeline import words_heard
-    for said, heard in (("ஒன்று இரண்டு மூன்று", "ஒன்று மூன்று"), ("aaj hum khelenge", "aaj ham khelenge yaar"), ("", "x")):
+    from app.v1.qa import heard_share as words_heard
+    assert words_heard("পি সি আর ব্যবহার হয়", "পিসিআর ব্যবহার হয়") == 1.0      # spelled apart, heard as one word
+    assert words_heard("ஒன்று இரண்டு மூன்று", "ஒன்று மூன்று") == pytest.approx(2 / 3)
+    for said, heard in (("ஒன்று இரண்டு மூன்று", "ஒன்று மூன்று"), ("aaj hum khelenge", "aaj ham khelenge yaar"), ("", "x"),
+                        ("পি সি আর ব্যবহার হয়", "পিসিআর ব্যবহার হয়")):
         assert qa_server.words_heard(said, heard) == words_heard(said, heard)

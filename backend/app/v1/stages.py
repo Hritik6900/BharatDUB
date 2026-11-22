@@ -119,6 +119,12 @@ class Stages:
                 self._tts[name] = self.r.provider("tts", name)
         return self._tts[name]
 
+    def voice_engine_ms(self) -> float | None:
+        """The voice engine's own time for the line it made last, when it reported one."""
+        tts = self._tts.get("indicf5")
+        ms = getattr(getattr(tts, "gpu", None), "last_synth_ms", None)
+        return float(ms) if ms else None
+
     def own_voice(self, lang: str, voice: VoiceSpec) -> bool:
         """This line would be spoken by our voice engine (a copied voice with an engine sample, in a language it speaks)."""
         if "indicf5" not in self.names("speak") or voice["kind"] != "clone":
@@ -170,9 +176,10 @@ class Stages:
             if name == "qa_server":
                 from app.v1.qa import QAClient
                 return {**(await QAClient(self.r.s).score(wav, text, lang, ref_wav)), "by": name}
-            from app.live.pipeline import words_heard
+            from app.v1.qa import HEARD_RULE, heard_share
             heard = (await self.r.provider("stt", "prisma").transcribe(str(wav), lang)).text
-            return {"heard": heard, "backcheck": round(words_heard(text, heard), 3), "similarity": None, "by": name}
+            return {"heard": heard, "backcheck": round(heard_share(text, heard), 3), "similarity": None, "by": name,
+                    "rule": HEARD_RULE}
         return await self._run("score", self.names("score"), call)
 
 

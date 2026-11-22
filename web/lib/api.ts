@@ -54,12 +54,31 @@ export interface Job {
   created_at?: string;
 }
 
+/** One spoken version of a line (HQ jobs only). */
+export interface LineVersion {
+  idx: number;
+  provider: string;
+  text: string;
+  dur_s: number;
+  speed: number;
+  backcheck: number | null;
+  similarity: number | null;
+  passed: boolean;
+  why: string[];
+}
+
 export interface Translation {
   id: string;
   lang: string;
   text: string;
   edited: boolean;
   fit_speed?: number | null;
+  /** HQ jobs only: the line failed its checks and should be heard by a person. */
+  flagged?: boolean;
+  flag_reason?: string;
+  qa?: { backcheck: number | null; similarity: number | null; by: string; provider: string } | null;
+  picked?: number | null;
+  alts?: LineVersion[];
 }
 
 export interface Segment {

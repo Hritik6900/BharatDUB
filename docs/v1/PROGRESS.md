@@ -182,3 +182,68 @@ What the numbers say:
   `cd gpu_engine_v1 && V1_STUB=1 uvicorn qa_server:app --port 9045`.
 - **Roll back:** nothing runs; the folder can be ignored. A server that is started later is switched off by
   emptying its address in `backend/.env`.
+
+## Phase 7: Studio HQ (`V1_STUDIO_HQ`, `V1_FIT_115`), 23 Nov 2026
+
+- **Changed:** `app/v1/hq/` (`text.py`: merge two hearings, clean, translate with a word limit per line, review,
+  numbers as words; `voice.py`: takes, scoring, picking, flagging; `finish.py`: sidechain ducking and loudness;
+  `runner.py`: the three phases, one job or several jobs phase by phase), `app/v1/queue.py` (waiting HQ jobs, in
+  Redis when `REDIS_URL` is set), `app/v1/qa.py` (`heard_share`). `studio/runner.py` takes the HQ path only for a
+  job created with `quality=hq` while the flag is on; `V1_FIT_115` caps the speed-up at 1.15x on both paths.
+  `studio/routes.py`: `quality` and `hold` on `POST /api/jobs`, `POST /api/jobs/{id}/translations/{tid}/pick`,
+  `GET .../alts/{n}` (a take's audio), `POST /api/v1/hq/batch`, HQ fields on the segments. Website: an HQ choice
+  on `/studio` (shown only when the flag is on), flagged lines marked in the editor with their reason, every take
+  of a line with its scores, its audio and "Use this take". 13 tests with fake providers (a line that passes is
+  spoken once; own voice gets more takes until one passes; a stock voice is not asked twice for the same words; a
+  line that is only too long is not re-taken but sped by the engine and then shortened; a line that never passes
+  is flagged with its best take; the swap; flag off = v0 path; batch order A, A, B, B, C, C).
+- **How a line is judged:** share of its words heard back (at least `V1_HQ_BACKCHECK_MIN`, 0.9), speed-up needed
+  to fit its slot (at most 1.15x with `V1_FIT_115`), and speaker similarity when a scorer measures it (not a gate
+  yet: `V1_HQ_SIMILARITY_MIN=0`). A line no scorer could check is spoken and reported as unchecked, not failed.
+- **What it used here** (routing `studio_hq`, nothing new loaded): hosted speech-to-text plus our Whisper as the
+  second hearing, our small translation model for the text steps with the hosted one for review, our voice engine
+  for the copied voice, the hosted speech-to-text as the scorer (words only; no speaker similarity without the QA
+  server), one speaker (no diarization).
+
+### Measured (GPU engine, voice copied from the video with consent, Tamil + Bengali, one run each)
+
+Twelve-line class video (50 s, made from the hard set's speech, `eval/v1/make_video.py`):
+
+| | standard (all flags off) | HQ |
+|---|---|---|
+| Turnaround, nothing cached | 84 s | 222 s (voices 142 s) |
+| Words heard back, mean of lines | 93.4% (Tamil 93.9, Bengali 93.0) | 92.9% (Tamil 95.8, Bengali 90.1) |
+| Takes | 24 (one a line) | 54 |
+| Lines flagged for a person | not checked in this path | 8 of 24 |
+| Largest speed-up | 1.00x | 1.02x |
+
+Inside the HQ job, first take against the take that was picked: Tamil 85.0% -> 95.8%, Bengali 87.7% -> 90.1%
+(13 of 24 lines needed more than one take). The review step changed 6 Tamil and 2 Bengali lines; 0 and 3 lines
+were over their word limit; the two hearings differed in script on every line and the merge kept the first.
+
+Dense one-line reel (24.9 s): standard 41 s, HQ 92 s; words heard back 88.2% against 87.7%; both lines of the HQ
+job flagged (88% heard back, under the 90% line); the line fitted its slot unsped in both.
+
+What the numbers say:
+
+- **The 96% target was not reached** (92.9% on one video, one run). HQ did not beat standard on words heard back:
+  picking among takes raised a line's score by 2 to 11 points over its own first take, but the HQ translation
+  step produced lines that scored lower on their first take than standard's lines did (85-88% against 93-94%),
+  so the two ends cancel. The text steps ran on the small translation model here; the big one is deferred.
+- **The scorer was wrong on the first run, and was fixed:** a dub says an abbreviation as separate letters and the
+  speech-to-text writes it as one word, so every take of such a line scored the same low number (nine lines
+  flagged, 90.9%). `heard_share` now also counts a word whose letters are there with the spaces set aside; what
+  was heard is kept in the cache, so old scores are worked out again without new calls. The table above is with
+  the fixed rule, applied to both paths.
+- **Several flagged lines have the same score on every take** (for example 0.889 four times): that is the scorer
+  or the wording, not the voice. More takes cannot fix those; a person, or a better scorer, can.
+- **The 1.15x limit, duration control and shortening were not exercised by these videos** (every line fitted its
+  slot); they are covered by tests only. Sidechain ducking and loudness ran (mix 1.7-3.4 s) but were not judged
+  by ear. Speaker similarity: not measured (needs the QA server).
+- **Not done:** more than one run a path (the second run of the same video is served from the cache), a video
+  with two speakers, the big translation model, Maya 2, the batch endpoint on real jobs (tests only).
+
+- **v0 after this phase:** all nine checks ok. Tests: 155 pass.
+- **Test:** `python -m pytest tests/test_v1_hq.py -q`; a real job: `V1_STUDIO_HQ=true`, then
+  `python -m eval.v1.studio <video> --out <dir> --target standard=http://127.0.0.1:8111 --target hq=http://127.0.0.1:8110:hq`.
+- **Roll back:** `V1_STUDIO_HQ=false` (the choice disappears and every job is standard); `V1_FIT_115=false`.

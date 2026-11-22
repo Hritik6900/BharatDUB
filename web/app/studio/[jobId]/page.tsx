@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Captions, Check, Clapperboard, Download, LoaderCircle, Play, Plus, X } from "lucide-react";
+import { ArrowLeft, Captions, Check, Clapperboard, Download, LoaderCircle, Play, Plus, TriangleAlert, X } from "lucide-react";
 import { Shell } from "@/components/layout/Shell";
 import { ABPlayer, type Track } from "@/components/player/ABPlayer";
 import { Button, LinkButton } from "@/components/ui/Button";
@@ -275,6 +275,20 @@ function Review({ jobId, lang: code, segments, onPlay, onUpdated }: { jobId: str
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<Record<string, string>>({});
   const [toast, setToast] = useState("");
+  const [open, setOpen] = useState<string | null>(null);
+  const flagged = rows.filter((s) => s.translations.find((t) => t.lang === code)?.flagged).length;
+  const checked = rows.some((s) => s.translations.find((t) => t.lang === code)?.alts);
+
+  const pick = async (tid: string, alt: number) => {
+    setStatus((s) => ({ ...s, [tid]: "Switching to that take…" }));
+    try {
+      await api(`/api/jobs/${jobId}/translations/${tid}/pick`, { method: "POST", body: JSON.stringify({ alt }) });
+      setStatus((s) => ({ ...s, [tid]: "Updated" }));
+      onUpdated();
+    } catch (e) {
+      setStatus((s) => ({ ...s, [tid]: `Failed: ${(e as Error).message}` }));
+    }
+  };
 
   const save = async (tid: string) => {
     setStatus((s) => ({ ...s, [tid]: "Re-rendering this line…" }));
@@ -301,6 +315,15 @@ function Review({ jobId, lang: code, segments, onPlay, onUpdated }: { jobId: str
         The {l.name} <em>lines</em>
       </h2>
       <p className="mt-3 max-w-[58ch] text-muted">Edit a line and save. Only that line is re-voiced, then the video is re-rendered.</p>
+      {checked && (
+        <p className="mt-3 max-w-[58ch] text-sm" role="status">
+          {flagged > 0 ? (
+            <span className="inline-flex items-center gap-2 font-medium text-danger"><TriangleAlert aria-hidden className="size-4" />{flagged} of {rows.length} lines need your ear. They are marked below.</span>
+          ) : (
+            <span className="text-muted">Every line passed its checks. Nothing is marked.</span>
+          )}
+        </p>
+      )}
       <div className="card relative mt-8 overflow-x-auto" data-lenis-prevent>
         <table className="w-full min-w-[720px] text-left">
           <thead className="border-b border-line">
@@ -323,7 +346,7 @@ function Review({ jobId, lang: code, segments, onPlay, onUpdated }: { jobId: str
               const val = draft[tr.id] ?? tr.text;
               const dirty = draft[tr.id] != null && draft[tr.id] !== tr.text;
               return (
-                <tr key={s.id} className="align-top">
+                <tr key={s.id} className={`align-top ${tr.flagged ? "bg-danger/5" : ""}`}>
                   <td className="tnum px-5 py-4 font-mono text-xs text-muted">{s.start_s.toFixed(1)} s</td>
                   <td className="px-4 py-4 text-muted" lang="hi">{s.src_text}</td>
                   <td className="px-3 py-2.5">
@@ -339,6 +362,40 @@ function Review({ jobId, lang: code, segments, onPlay, onUpdated }: { jobId: str
                       {status[tr.id] ?? (tr.edited ? "Edited" : "")}
                       {tr.fit_speed && tr.fit_speed > 1.01 ? `${status[tr.id] || tr.edited ? " · " : ""}sped up ${tr.fit_speed.toFixed(2)}x to fit` : ""}
                     </span>
+                    {tr.flagged && (
+                      <span className="mt-1 flex items-start gap-1.5 px-1.5 text-xs font-medium text-danger">
+                        <TriangleAlert aria-hidden className="mt-px size-3.5 shrink-0" />
+                        Needs your ear: {tr.flag_reason || "it did not pass its checks"}
+                      </span>
+                    )}
+                    {tr.alts && tr.alts.length > 0 && (
+                      <div className="mt-1 px-1.5 text-xs text-muted">
+                        {tr.qa?.backcheck != null && <span>{Math.round(tr.qa.backcheck * 100)}% of its words heard back</span>}
+                        {tr.qa?.similarity != null && <span> · voice match {tr.qa.similarity.toFixed(2)}</span>}
+                        {tr.alts.length > 1 && (
+                          <button type="button" onClick={() => setOpen(open === tr.id ? null : tr.id)} aria-expanded={open === tr.id} className="ml-2 underline underline-offset-2 hover:text-fg">
+                            {open === tr.id ? "Hide takes" : `${tr.alts.length} takes`}
+                          </button>
+                        )}
+                        {open === tr.id && (
+                          <ul className="mt-2 grid gap-2">
+                            {tr.alts.map((a) => (
+                              <li key={a.idx} className={`rounded-[10px] border p-2.5 ${a.idx === tr.picked ? "border-fg" : "border-line"}`}>
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                  <span className="font-medium text-fg">Take {a.idx + 1}{a.idx === tr.picked ? " (in use)" : ""}</span>
+                                  <span>{a.backcheck != null ? `${Math.round(a.backcheck * 100)}% heard back` : "not checked"}</span>
+                                  {a.similarity != null && <span>voice match {a.similarity.toFixed(2)}</span>}
+                                  <span>{a.dur_s.toFixed(1)} s{a.speed > 1.01 ? `, needs ${a.speed.toFixed(2)}x` : ""}</span>
+                                  {a.idx !== tr.picked && <button type="button" onClick={() => pick(tr.id, a.idx)} className="rounded-chip border border-line px-2.5 py-0.5 text-fg hover:border-fg">Use this take</button>}
+                                </div>
+                                {a.text !== tr.text && <p className="mt-1" lang={l.short}>{a.text}</p>}
+                                <audio controls preload="none" src={`${API_BASE}/api/jobs/${jobId}/translations/${tr.id}/alts/${a.idx}`} className="mt-2 h-8 w-full" />
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex gap-2">

@@ -16,10 +16,12 @@ from app.db import now_iso
 from app.providers.base import ProviderError
 from app.shared.storage import output_url
 from app.studio.events import events
+from app.v1.queue import JobQueue
 from app.studio.runner import runner
 from app.studio.stages.extract import IngestError
 
 router = APIRouter()
+hq_queue = JobQueue("hq:held")   # v1: HQ jobs created with hold=true, waiting for a batch run
 # Shown next to the checkbox on /studio; stored on the voice profile created from the video.
 VIDEO_VOICE_CONSENT = ("The voice in this video is mine, or I have the speaker's permission, and I agree that "
                        "Bharat Dub may make a copy of it to dub this video.")
@@ -51,11 +53,17 @@ async def create_job(
     voice_from_video: Annotated[bool, Form()] = False,
     voice_consent: Annotated[bool, Form()] = False,
     engine: Annotated[str, Form()] = "cloud",   # `gpu` = our own GPU machine for this job (when it is set up)
+    quality: Annotated[str, Form()] = "standard",   # v1: `hq` = the HQ path (needs V1_STUDIO_HQ)
+    hold: Annotated[bool, Form()] = False,          # v1 HQ: wait for a batch run instead of starting now
 ) -> dict[str, str]:
     if engine not in ("cloud", "gpu"):
         raise HTTPException(400, "engine is cloud or gpu")
     if engine == "gpu" and not get_settings().gpu_mode_ready:
         raise HTTPException(400, "The GPU engine is not set up on this server.")
+    if quality not in ("standard", "hq"):
+        raise HTTPException(400, "quality is standard or hq")
+    if quality == "hq" and not get_settings().v1_studio_hq:
+        raise HTTPException(400, "The HQ path is not switched on on this server.")
     if not owns_video:
         raise HTTPException(400, "Confirm you own this video or have permission to dub it.")
     if voice_from_video and not voice_consent:
@@ -87,10 +95,13 @@ async def create_job(
         if voice_from_video and not voice_profile_id:
             from_video = {"consent_at": now_iso(), "consent_text": VIDEO_VOICE_CONSENT}
         job = await runner.create_job(tmp, file.filename or "video", langs, voice_profile_id, from_video,
-                                      engine=engine)
+                                      engine=engine, quality=quality)
     except IngestError as e:
         tmp.unlink(missing_ok=True)
         raise HTTPException(400, str(e)) from e
+    if hold and quality == "hq":
+        await hq_queue.push(job["id"])
+        return {"job_id": job["id"], "held": "true"}
     runner.start(job["id"])
     return {"job_id": job["id"]}
 
@@ -159,9 +170,19 @@ async def get_segments(job_id: str, lang: str | None = None) -> list[dict[str, A
     by_seg: dict[str, list[dict[str, Any]]] = {}
     for t in trs:
         by_seg.setdefault(t["segment_id"], []).append(
-            {k: t.get(k) for k in ("id", "lang", "text", "edited", "fit_speed")})
+            {**{k: t.get(k) for k in ("id", "lang", "text", "edited", "fit_speed")}, **_hq_fields(t)})
     return [{"id": s["id"], "idx": s["idx"], "start_s": s["start_s"], "end_s": s["end_s"],
-             "src_text": s.get("src_text") or "", "translations": by_seg.get(s["id"], [])} for s in segs]
+             "src_text": s.get("src_text") or "", "translations": by_seg.get(s["id"], []),
+             **({"speaker": s["speaker"]} if s.get("speaker") else {})} for s in segs]
+
+
+def _hq_fields(t: dict[str, Any]) -> dict[str, Any]:
+    """v1 HQ: what the editor shows for a line (present only on lines the HQ path voiced)."""
+    if "alts" not in t:
+        return {}
+    keep = ("idx", "provider", "text", "dur_s", "speed", "backcheck", "similarity", "passed", "why")
+    return {"flagged": bool(t.get("flagged")), "flag_reason": t.get("flag_reason") or "", "qa": t.get("qa"),
+            "picked": t.get("picked"), "alts": [{k: a.get(k) for k in keep} for a in t.get("alts") or []]}
 
 
 class EditLine(BaseModel):
@@ -180,6 +201,63 @@ async def edit_translation(job_id: str, tid: str, body: EditLine) -> dict[str, A
     except ProviderError as e:
         raise HTTPException(502, f"Re-render failed: {e}") from e
     return {k: tr.get(k) for k in ("id", "lang", "text", "edited", "fit_speed")}
+
+
+class PickVersion(BaseModel):
+    alt: int
+
+
+@router.post("/api/jobs/{job_id}/translations/{tid}/pick")
+async def pick_version(job_id: str, tid: str, body: PickVersion) -> dict[str, Any]:
+    """v1 HQ: use another version of this line that was already made; the language is mixed and rendered again."""
+    await _job_or_404(job_id)
+    if _busy(job_id):
+        raise HTTPException(409, "Job is still running.")
+    try:
+        tr = await runner.pick_version(job_id, tid, body.alt)
+    except KeyError as e:
+        raise HTTPException(404, str(e)) from e
+    return {**{k: tr.get(k) for k in ("id", "lang", "text", "edited", "fit_speed")}, **_hq_fields(tr)}
+
+
+@router.get("/api/jobs/{job_id}/translations/{tid}/alts/{alt}")
+async def version_audio(job_id: str, tid: str, alt: int) -> FileResponse:
+    """v1 HQ: one version of a line, to listen to before picking it."""
+    await _job_or_404(job_id)
+    tr = await runner.store.get("translations", tid)
+    seg = await runner.store.get("segments", tr["segment_id"]) if tr else None
+    row = next((a for a in (tr or {}).get("alts") or [] if a.get("idx") == alt), None)
+    if not seg or seg["job_id"] != job_id or not row:
+        raise HTTPException(404, "not found")
+    path = Path(row["path"]).resolve()
+    if get_settings().data_path.resolve() not in path.parents or not path.is_file():
+        raise HTTPException(404, "not found")
+    return FileResponse(path, media_type="audio/wav")
+
+
+class HQBatch(BaseModel):
+    job_ids: list[str] | None = None   # None = every HQ job that is waiting
+
+
+@router.post("/api/v1/hq/batch", status_code=202)
+async def hq_batch(body: HQBatch, bg: BackgroundTasks) -> dict[str, Any]:
+    """v1 HQ: run the waiting HQ jobs phase by phase (audio for all, text for all, voice for all)."""
+    if not get_settings().v1_studio_hq:
+        raise HTTPException(400, "The HQ path is not switched on on this server.")
+    waiting = await hq_queue.take_all()
+    ids = [j for j in (body.job_ids or waiting)]
+    for j in waiting:
+        if j not in ids:
+            await hq_queue.push(j)   # not asked for now: it keeps waiting
+    if not ids:
+        raise HTTPException(409, "No HQ job is waiting.")
+    bg.add_task(runner.run_hq_batch, ids)
+    return {"job_ids": ids}
+
+
+@router.get("/api/v1/hq/waiting")
+async def hq_waiting() -> dict[str, int]:
+    return {"waiting": await hq_queue.size()}
 
 
 class RenderBody(BaseModel):
@@ -225,3 +303,44 @@ async def local_file(job_id: str, name: str) -> FileResponse:
 
 def delete_job_files(job_id: str) -> None:
     shutil.rmtree(runner.job_dir(job_id), ignore_errors=True)
+
+
+@router.get("/api/v1/jobs/{job_id}/backcheck")
+async def job_backcheck(job_id: str, lang: str) -> dict[str, Any]:
+    """v1 eval: hear every dubbed line of one language back (the audio that is in the video, after fitting) and
+    report the share of its words that were understood. Works for standard and HQ jobs alike, so the two can be
+    compared with the same ear. Scores are cached by the line's audio."""
+    from app.shared import audio_utils as au
+    from app.shared import cache
+    from app.v1.stages import StageFailed, Stages
+    await _job_or_404(job_id)
+    st = Stages("studio_hq", runner.job_engine(job_id), key=job_id)
+    segs = await runner.store.select("segments", order="idx", job_id=job_id)
+    trs = {t["segment_id"]: t for t in await runner.store.select_in("translations", "segment_id", [s["id"] for s in segs], lang=lang)}
+    lines: list[dict[str, Any]] = []
+    for s in segs:
+        t = trs.get(s["id"])
+        path = runner.job_dir(job_id) / str(t.get("audio_path")) if t and t.get("audio_path") else None
+        if not t or path is None or not path.is_file():
+            continue
+        key = au.cache_key("eval-backcheck-1", au.sha256_file(path), t["text"], lang, ",".join(st.names("score")))
+        got = cache.get_json("score_eval", key)
+        if got is None:
+            try:
+                got = await st.score(path, t["text"], lang)
+                cache.put_json("score_eval", key, got)
+            except StageFailed as e:
+                got = {"backcheck": None, "by": "", "error": str(e)[:160]}
+        from app.v1.qa import HEARD_RULE, heard_share
+        if got.get("backcheck") is not None and "heard" in got and got.get("rule") != HEARD_RULE:
+            got = {**got, "backcheck": round(heard_share(t["text"], got["heard"]), 3)}
+        lines.append({"idx": s["idx"], "words": len(t["text"].split()), "backcheck": got.get("backcheck"),
+                      "by": got.get("by"), "fit_speed": t.get("fit_speed"), "flagged": bool(t.get("flagged")),
+                      "takes": len(t.get("alts") or []) or 1})
+    scored = [x for x in lines if x["backcheck"] is not None]
+    words = sum(x["words"] for x in scored)
+    return {"job_id": job_id, "lang": lang, "lines": lines, "scored": len(scored),
+            "backcheck_mean": round(sum(x["backcheck"] for x in scored) / len(scored), 4) if scored else None,
+            "backcheck_by_words": round(sum(x["backcheck"] * x["words"] for x in scored) / words, 4) if words else None,
+            "speed_max": max((x["fit_speed"] or 1.0 for x in lines), default=None),
+            "flagged": sum(1 for x in lines if x["flagged"]), "takes": sum(x["takes"] for x in lines)}

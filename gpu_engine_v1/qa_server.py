@@ -54,11 +54,13 @@ def words(text: str) -> list[str]:
 
 
 def words_heard(said: str, heard: str) -> float:
-    """Share of the words in `said` that turn up in `heard` (same word, or the same first four letters)."""
-    want, got = words(said), set(words(heard))
+    """Share of the words in `said` that turn up in `heard`: the same word, one with the same first four
+    letters, or its letters found in what was heard with the spaces set aside."""
+    want, got = words(said), words(heard)
     if not want:
         return 0.0
-    return sum(1 for w in want if w in got or any(w[:4] == g[:4] for g in got)) / len(want)
+    have, run = set(got), "".join(got)   # `run`: a word spelled apart or joined still counts (see the backend's heard_share)
+    return sum(1 for w in want if w in have or any(w[:4] == g[:4] for g in have) or (len(w) >= 2 and w in run)) / len(want)
 
 
 def _load() -> None:

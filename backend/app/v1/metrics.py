@@ -108,6 +108,7 @@ def studio_summary(recs: list[dict[str, Any]], s: Settings) -> dict[str, Any]:
     usage = {
         "dubbed_minutes": round(minutes, 2), "jobs": len(jobs),
         "gpu_seconds": round(sum(r.get("gpu_s") or 0 for r in lines) + sum(j.get("gpu_s") or 0 for j in jobs), 1),
+        "gpu_seconds_lines": sum(1 for r in lines if r.get("gpu_s")),   # lines whose voice time the engine reported
         "hosted_tts_chars": int(sum((j.get("usage") or {}).get("tts_chars", 0) for j in jobs if j.get("tts_hosted", True))),
         "hosted_llm_calls": int(sum((j.get("usage") or {}).get("llm_calls", 0) for j in jobs if j.get("llm_hosted", True))),
         "hosted_stt_minutes": round(sum((j.get("usage") or {}).get("stt_audio_s", 0) for j in jobs if j.get("stt_hosted", True)) / 60, 2),

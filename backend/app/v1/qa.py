@@ -4,6 +4,7 @@ with the speaker's, and tells speakers apart.
   POST /score    multipart audio, text, lang, [ref]  -> {heard, backcheck, similarity}
   POST /diarize  multipart audio                     -> {segments: [{start, end, speaker}]}
 """
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,35 @@ import httpx
 
 from app.config import Settings, get_settings
 from app.providers.base import ProviderError
+
+
+HEARD_RULE = "spaces-aside-1"   # which rule a stored score was worked out with (see heard_share)
+
+
+def _words(text: str) -> list[str]:
+    kept = "".join(c if unicodedata.category(c)[0] in "LMN" else " " for c in text.lower())
+    return kept.split()
+
+
+def heard_share(said: str, heard: str) -> float:
+    """Share of the words in `said` that a listener got (0-1).
+
+    A word counts when it was heard as a word (the same word, or one with the same first four letters), or when
+    its letters are there in what was heard with the spaces set aside. The second rule is for spelling, not for
+    hearing: a dub says "pi si aar" as three words and the speech-to-text writes "PCR" as one, or splits a long
+    compound in two; the first rule alone counted those lines as half lost (seen on the first HQ run: the same
+    low score on every take of such a line).
+    """
+    want, got = _words(said), _words(heard)
+    if not want:
+        return 0.0
+    have = set(got)
+    run = "".join(got)
+    hit = 0
+    for w in want:
+        if w in have or any(w[:4] == g[:4] for g in have) or (len(w) >= 2 and w in run):
+            hit += 1
+    return hit / len(want)
 
 
 class QAClient:
@@ -31,7 +61,9 @@ class QAClient:
             j = r.json()
         except (httpx.HTTPError, ValueError) as e:
             raise ProviderError(f"qa.score: {e}") from e
-        return {"heard": j.get("heard") or "", "backcheck": j.get("backcheck"), "similarity": j.get("similarity")}
+        heard = j.get("heard") or ""
+        return {"heard": heard, "backcheck": round(heard_share(text, heard), 3), "similarity": j.get("similarity"),
+                "rule": HEARD_RULE}
 
     async def diarize(self, wav: Path) -> list[dict[str, Any]]:
         try:

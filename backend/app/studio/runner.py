@@ -21,6 +21,7 @@ from app.shared.storage import publish_output
 from app.studio.events import events
 from app.studio.stages import extract, fit, mix, render, segment, separate, transcribe, translate, voice
 from app.v1 import trace
+from app.v1.hq import runner as hq
 
 log = logging.getLogger("studio")
 # The engine of the job being worked on in this task: None = the hosted services (as before), "gpu" = our own machine.
@@ -88,7 +89,8 @@ class StudioRunner:
     # ---------- create ----------
     async def create_job(self, upload: Path, source_name: str, target_langs: list[str],
                          voice_profile_id: str | None = None,
-                         voice_from_video: dict[str, str] | None = None, engine: str | None = None) -> dict[str, Any]:
+                         voice_from_video: dict[str, str] | None = None, engine: str | None = None,
+                         quality: str | None = None) -> dict[str, Any]:
         """Stage 1 (ingest). Raises extract.IngestError with a user-facing message."""
         duration = await asyncio.to_thread(extract.ingest, upload, self.s.max_video_seconds)
         expires = datetime.now(timezone.utc) + timedelta(hours=self.s.upload_ttl_hours)
@@ -103,7 +105,8 @@ class StudioRunner:
         self._write_meta(d, {"source": f"source{upload.suffix.lower() or '.mp4'}",
                              "name": Path(source_name).stem[:60] or "video", "duration": duration,
                              "voice_from_video": voice_from_video,
-                             **({"engine": "gpu"} if engine == "gpu" else {})})
+                             **({"engine": "gpu"} if engine == "gpu" else {}),
+                             **({"quality": "hq"} if quality == "hq" else {})})   # v1: the HQ path
         return job
 
     def start(self, job_id: str) -> asyncio.Task[Any]:
@@ -124,10 +127,14 @@ class StudioRunner:
         await self._set(ctx, status="running")
         try:
             async with self._locks[job_id]:
-                await self._prepare(ctx, meta)
-                await self._pretranslate(ctx, job["target_langs"])
-                for lang in job["target_langs"]:
-                    await self._process_lang(ctx, meta, lang)
+                if hq.is_hq(meta, self.s):   # v1: more work per line (docs/v1/ARCHITECTURE.md), same job and outputs
+                    MODE.set("studio_hq")
+                    await hq.run_job(self, ctx, meta, job, ENGINE.get())
+                else:
+                    await self._prepare(ctx, meta)
+                    await self._pretranslate(ctx, job["target_langs"])
+                    for lang in job["target_langs"]:
+                        await self._process_lang(ctx, meta, lang)
             await self._set(ctx, status="done", stage=None)
         except Exception as e:  # noqa: BLE001 - job failure must be reported, not raised
             log.exception("job %s failed", job_id)
@@ -299,6 +306,8 @@ class StudioRunner:
                                          ctx.usage, ctx.warnings)
         async with self._stage(ctx, "fit", lang):
             native = 1.0
+            # v1 (`V1_FIT_115`): a line is sped up by at most 1.15x; past that it is shortened.
+            max_speed = self.s.v1_fit_max_speed if self.s.v1_fit_115 else fit.MAX_SPEED
             need = fit.needed_speed(au.duration_s(raw), slot_s)
             if need > 1.05 and getattr(self.tts, "native_speed", False) and self.tts.engine_speaks(lang, vspec):
                 # Our GPU voice copies the pace of its sample, and a recorded voice at a natural pace can run far
@@ -311,12 +320,12 @@ class StudioRunner:
                                                  self.s.tts_sample_rate, ctx.usage, ctx.warnings, speed=native)
                 else:
                     native = 1.0
-            if fit.needed_speed(au.duration_s(raw), slot_s) > fit.MAX_SPEED and not tr.get("edited"):
+            if fit.needed_speed(au.duration_s(raw), slot_s) > max_speed and not tr.get("edited"):
                 try:
                     if native > 1.0:
                         # The voice's pace is known now, so the limit is given in words: what fits the slot at
                         # the 1.35x squeeze, less a tenth.
-                        fits = int(len(text.split()) * slot_s * fit.MAX_SPEED / au.duration_s(raw) * 0.9)
+                        fits = int(len(text.split()) * slot_s * max_speed / au.duration_s(raw) * 0.9)
                         shorter = await self.llm.shorten(text, lang, slot_s * 1.25, max_words=max(3, fits))
                     else:
                         shorter = await self.llm.shorten(text, lang, slot_s * 1.25)
@@ -329,13 +338,15 @@ class StudioRunner:
             lines_dir = ctx.dir / "lines"
             lines_dir.mkdir(exist_ok=True)
             out = lines_dir / f"{lang}_{seg['idx']:03}.wav"
-            speed = await asyncio.to_thread(fit.fit_clip, raw, slot_s, out)
+            speed = await asyncio.to_thread(fit.fit_clip, raw, slot_s, out, max_speed)
         if self.s.v1_trace:
             on_gpu = bool(getattr(self.tts, "native_speed", False) and self.tts.engine_speaks(lang, vspec))
             trace.studio_line(ctx.job_id, lang, seg["idx"], mode="studio", engine=ENGINE.get() or "cloud",
                               words=len(text.split()), slot_s=round(slot_s, 3), dur_s=round(au.duration_s(out), 3),
                               speed=speed, native_speed=round(native, 2), tts="gpu_voice" if on_gpu else "hosted",
-                              clone=vspec["kind"] == "clone", edited=bool(tr.get("edited")))
+                              clone=vspec["kind"] == "clone", edited=bool(tr.get("edited")),
+                              gpu_s=round(float(getattr(getattr(self.tts, "gpu", None), "last_synth_ms", 0) or 0) / 1000, 3)
+                              if on_gpu and not ctx.usage.get("tts_cache_hits") else None)
         fields = {"text": text, "audio_path": str(out.relative_to(ctx.dir)), "fit_speed": speed}
         return await self.store.update("translations", tr["id"], fields) or {**tr, **fields}
 
@@ -350,7 +361,13 @@ class StudioRunner:
         mix_wav = ctx.dir / f"mix_{lang}.wav"
         async with self._stage(ctx, "mix", lang):
             bg = Path(meta["background"]) if meta.get("background") else None
-            await asyncio.to_thread(mix.mix, lines, bg, meta["duration"], mix_wav)
+            if hq.is_hq(meta, self.s):
+                # v1: the background follows the voice's own loudness, and the mix is brought to one loudness.
+                from app.v1.hq import finish
+                await asyncio.to_thread(finish.mix, lines, bg, meta["duration"], mix_wav, duck_db=self.s.v1_hq_duck_db)
+                await asyncio.to_thread(finish.loudness, mix_wav, self.s.v1_hq_loudness_lufs)
+            else:
+                await asyncio.to_thread(mix.mix, lines, bg, meta["duration"], mix_wav)
         async with self._stage(ctx, "render", lang):
             mp4 = out_dir / f"{meta['name']}_{lang}.mp4"
             srt = out_dir / f"{meta['name']}_{lang}.srt"
@@ -387,6 +404,65 @@ class StudioRunner:
         events.publish(job_id, {"type": "line", "status": "done", "translation_id": translation_id})
         return tr
 
+    async def pick_version(self, job_id: str, translation_id: str, alt: int) -> dict[str, Any]:
+        """v1 HQ: use another version of a line that was already made (the editor's one-click swap)."""
+        ctx = Ctx(job_id, self.job_dir(job_id))
+        self._use_engine(ctx.dir)
+        tr = await self.store.get("translations", translation_id)
+        seg = await self.store.get("segments", tr["segment_id"]) if tr else None
+        if not tr or not seg or seg["job_id"] != job_id:
+            raise KeyError("translation not in this job")
+        async with self._locks[job_id]:
+            row = await hq.pick_alt(self, ctx, self._meta(ctx.dir), tr, seg, alt)
+        await self._save_stats(ctx, merge=True)
+        events.publish(job_id, {"type": "line", "status": "done", "translation_id": translation_id})
+        return row
+
+    async def run_hq_batch(self, job_ids: list[str]) -> dict[str, str]:
+        """v1 HQ: several jobs phase by phase (audio for all, then text for all, then voice for all), so a model
+        that is loaded for one phase serves every job. Returns job id -> done | failed."""
+        state: dict[str, dict[str, Any]] = {}
+        for jid in job_ids:
+            job = await self.store.get("jobs", jid)
+            d = self.job_dir(jid)
+            if not job or not (d / "meta.json").exists() or not hq.is_hq(self._meta(d), self.s):
+                continue
+            ctx = Ctx(jid, d)
+            ctx.timer.timings["ingest"] = 0.0
+            state[jid] = {"ctx": ctx, "meta": self._meta(d), "job": job, "ok": True}
+            await self._set(ctx, status="running")
+        for phase in ("a", "b", "c"):
+            for jid, st in state.items():
+                if not st["ok"]:
+                    continue
+                ctx, meta, job = st["ctx"], st["meta"], st["job"]
+                self._use_engine(ctx.dir)
+                MODE.set("studio_hq")
+                stages = st.setdefault("stages", hq.stages_for(jid, ENGINE.get()))
+                try:
+                    async with self._locks[jid]:
+                        if phase == "a":
+                            await hq.phase_a(self, ctx, meta, stages)
+                        elif phase == "b":
+                            await hq.phase_b(self, ctx, meta, stages, job["target_langs"])
+                        else:
+                            for lang in job["target_langs"]:
+                                await hq.phase_c(self, ctx, meta, stages, lang)
+                            hq.note_fallbacks(self, ctx, stages)
+                except Exception as e:  # noqa: BLE001 - one job's failure does not stop the others
+                    log.exception("hq batch: job %s failed in phase %s", jid, phase)
+                    st["ok"] = False
+                    await self._set(ctx, status="failed", error=_user_error(e))
+        out: dict[str, str] = {}
+        for jid, st in state.items():
+            ctx = st["ctx"]
+            if st["ok"]:
+                await self._set(ctx, status="done", stage=None)
+            await self._save_stats(ctx)
+            events.publish(jid, {"type": "end", "job": await self.store.get("jobs", jid)})
+            out[jid] = "done" if st["ok"] else "failed"
+        return out
+
     async def render_langs(self, job_id: str, langs: list[str]) -> None:
         """Render (or add) languages for a finished job; STT is never re-run."""
         ctx = Ctx(job_id, self.job_dir(job_id))
@@ -401,9 +477,13 @@ class StudioRunner:
         try:
             async with self._locks[job_id]:
                 meta = self._meta(ctx.dir)
-                await self._pretranslate(ctx, langs)
-                for lang in langs:
-                    await self._process_lang(ctx, meta, lang)
+                if hq.is_hq(meta, self.s):
+                    MODE.set("studio_hq")
+                    await hq.add_langs(self, ctx, meta, langs, ENGINE.get())
+                else:
+                    await self._pretranslate(ctx, langs)
+                    for lang in langs:
+                        await self._process_lang(ctx, meta, lang)
             await self._set(ctx, status="done", stage=None)
         except Exception as e:  # noqa: BLE001
             log.exception("render %s failed", job_id)
