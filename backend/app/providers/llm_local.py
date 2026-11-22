@@ -108,10 +108,16 @@ class LocalLLM(OpenAILLM):
         rules.append("CURRENT may be a piece of a sentence. Translate just that piece; do not finish the sentence, "
                      "do not repeat the previous lines, do not add anything.")
         rules.append("Reply with the translation only, on one line.")
+        temperature = 0.2
+        if self.s.v1_llm_prefix_cache:
+            # v1: the word limit changes with every line. Put last, the rules before it are the same for a whole
+            # session and language, and the server computes that prefix once (vLLM prefix caching).
+            rules = [rules[0], rules[1], rules[3], rules[4], rules[2]]
+            temperature = 0.1
         system = "\n".join(f"{i + 1}. {r}" for i, r in enumerate(rules))
         user = ("Previous lines (context only):\n" + "\n".join(context[-3:]) + "\n\n" if context else "") \
             + f"CURRENT: {text}"
-        out = clean_line(await self._chat(system, user, temperature=0.2, max_tokens=200, timeout=8.0))
+        out = clean_line(await self._chat(system, user, temperature=temperature, max_tokens=200, timeout=8.0))
         if wrong_script(out, target) or (native and script and has_latin(out)):
             fix = (f"Rewrite this {lang} line with every word in {script} letters, spelled the way it sounds. "
                    "Change nothing else. Reply with the line only." if script

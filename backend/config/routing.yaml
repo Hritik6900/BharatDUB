@@ -30,11 +30,13 @@ modes:
       translate: [gemini]
       speak: [timbre]
       copied_voice: [indicf5]
+      score: [qa_server]      # live back-check (V1_LIVE_BACKCHECK); the hosted service is left to the stream
     gpu:
       transcribe: [prisma, whisper_gpu]
       translate: [gemma, gemini]
       speak: [indicf5, timbre]
       copied_voice: [indicf5]
+      score: [qa_server]
   studio:
     cloud:
       transcribe: [prisma]

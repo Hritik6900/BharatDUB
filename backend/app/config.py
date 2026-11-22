@@ -174,6 +174,7 @@ class Settings(BaseSettings):
     v1_live_stock_default: bool = False  # a Live session without a streamer profile speaks in stock voices
     v1_live_late_shorten: bool = False  # a line that is too late is said in a shorter version instead of skipped
     v1_live_backcheck: bool = False     # a dubbed live line is heard back in the background and made again if wrong
+    v1_llm_prefix_cache: bool = False   # our translation model: fixed rules first (the server caches that prefix), temperature 0.1
     v1_studio_hq: bool = False          # the HQ Studio path can be asked for (quality=hq on a job)
     v1_fit_115: bool = False            # Studio speeds a line up by at most 1.15x (v0: 1.35x), then shortens
     v1_store: str = "json"              # json (as v0) | postgres

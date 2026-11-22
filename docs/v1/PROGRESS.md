@@ -83,3 +83,69 @@ One entry per phase: what changed, how to test, how to roll back, measured numbe
 - **v0 after this phase:** all nine checks ok. Tests: 120 pass.
 - **Test:** `python -m pytest tests/test_v1_router.py -q`; `curl http://127.0.0.1:8110/api/v1/routing`.
 - **Roll back:** `V1_ROUTER=false`.
+
+## Phase 5: Live changes, each behind its flag, 23 Nov 2026
+
+- **Changed:** `app/v1/phrase.py` (dynamic phrase sizes, short-line merge, translation ahead: logic without I/O),
+  `live/pipeline.py` (uses them only when their flags are on; late-line shortening; back-check of a dubbed line;
+  a per-session glossary), `live/routes.py` (`glossary` on a new session; `V1_LIVE_STOCK_DEFAULT`),
+  `providers/llm_local.py` (`V1_LLM_PREFIX_CACHE`: fixed rules first, temperature 0.1), `eval/v1/live.py` (the
+  same recording through several backends in turn, mean and spread), `eval/v1/prefix.py`,
+  `scripts/v1/ab-server.sh|ps1` (a second backend with chosen flags, own port and data folder). 16 tests.
+- **Flags added beyond the first list:** `V1_ROUTER` (phase 4), `V1_LIVE_LATE_SHORTEN`, `V1_LIVE_BACKCHECK`,
+  `V1_LLM_PREFIX_CACHE`. The 1.2x speed-up cap is the existing setting `LIVE_FIT_MAX_TEMPO=1.2`.
+- **Fixed in a helper script:** `scripts/live_e2e.py` waited 90 s after every run because the once-a-second clock
+  message counted as activity.
+
+### Measured (dense 24.9 s reel, GPU engine, Tamil + Bengali, sync mode, hold 6 s; mean and range of 3 runs each, taken in turn)
+
+Voice learned from the stream, three loops a run:
+
+| | all flags off | `V1_PHRASE_DYNAMIC` | dynamic + ahead + prefix + late-shorten + 1.2x cap |
+|---|---|---|---|
+| First audio p50 | 2.34 s (2.27-2.40) | 2.37 s (2.28-2.41) | 2.46 s (2.42-2.50) |
+| Within 0.25 s of the moment | 69.6% (68.8-70.1) | 64.5% (62.7-66.0) | 56.0% (52.4-59.6) |
+| Within 1 s | 83.3% (81.2-85.0) | 79.8% (78.9-81.4) | 75.6% (68.3-79.7) |
+| Phrases a run | 36.7 | 32 | 33.3 |
+| Skipped as too late | 4.7 (3-6) | 4 (1-6) | 1.7 (0-3) |
+| At the speed limit | 20 | 18 | 25.3 |
+| First word of the session to first audio | 7.2 s (6.4-8.0) | 7.2 s (6.3-7.8) | 7.6 s (6.4-8.7) |
+
+Stock voices (nothing to learn first), two loops a run:
+
+| | all flags off | `V1_PHRASE_DYNAMIC` |
+|---|---|---|
+| First word of the session to first audio | 5.9 s (4.9-6.5) | 4.1 s (4.0-4.4) |
+| First audio p50 | 5.1 s (2.6-6.6) | 5.2 s (2.7-6.6) |
+| Within 1 s | 58.3% (45.5-81.6) | 56.9% (43.5-81.6) |
+
+What the numbers say:
+
+- **Dynamic phrases:** the short first phrase brings the first dubbed audio 1.7 s earlier when a voice is ready at
+  the start (stock, or a streamer's recorded voice; measured with stock). With a voice learned from the stream
+  the first audio waits for the voice (about 7 s) and nothing is gained. The longer later phrases (8-12 words)
+  cost timing on this reel: 5 points fewer on time, outside the spread of the runs. This reel has no one- or
+  two-word lines, so the merge was not exercised (0 joined): its effect is not measured.
+- **Translation ahead** never produced a used translation in 5 runs: 4-6 starts a run, all dropped. Three of four
+  were the speaker carrying on; one was a final that kept fewer words than the partial. Partials arrive about
+  470 ms apart, so a pause is only certain after about 700 ms, which is when the final arrives anyway. No gain
+  with this speech-to-text; it costs 4-6 extra translation calls a language a minute.
+- **Fixed rules first:** no gain. The server's prefix cache was already on (vLLM 0.34.0) and already held the
+  prompt for each word limit: 61.4% of prompt tokens came from the cache with the flag off and on (40 calls each),
+  call time p50 379 ms against 420 ms (noise).
+- **Late-line shortening** works as built: 1-3 lines a run were said shorter and skips fell from 4.7 to 1.7 a run,
+  but in a bundle whose timing was worse, so its own effect on timing is not separated.
+- **1.2x cap:** more phrases at the limit (25 against 20), as expected from a lower limit.
+- **Back-check** and **stock default** were not measured in a run: the back-check has no scorer until the QA
+  server exists (it does nothing without one); stock default is covered by a test.
+- **Targets:** first audio p50 is 2.3-2.5 s here against the 1.8 s target, and on time is 56-70% against 90%.
+  None of these flags moves either. v0's own measurement put first audio at 1.8 s with the backend on the GPU
+  machine (no tunnel in the path), which is `NEEDS_APPROVAL.md` item 3 and was not repeated here.
+- **Not measured:** words heard back per run (it needs a hosted call per line), a person at a microphone, a
+  stream with short lines.
+
+- **v0 after this phase:** all nine checks ok; no v0 session was live during the runs. Tests: 155 pass.
+- **Test:** `python -m pytest tests/test_v1_phrase.py -q`; the comparison:
+  `scripts/v1/ab-server.sh 8111 base` and `... 8112 dynamic V1_PHRASE_DYNAMIC=true`, then `python -m eval.v1.live`.
+- **Roll back:** each flag off. Recommended now: all of these off, except `V1_PHRASE_DYNAMIC` for sessions that
+  start with a ready voice if the earlier first audio is worth 5 points of on-time (a decision for the user).

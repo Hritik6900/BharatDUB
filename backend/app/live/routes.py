@@ -36,6 +36,7 @@ class CreateSession(BaseModel):
     voice_mode: str = "clone"          # with a streamer: `clone` = their recorded voice, `stock` = never clone
     offset_ms: int = 0
     engine: str = "cloud"              # `gpu` = speech-to-text and translation on our own GPU machine (when set up)
+    glossary: list[str] = Field(default_factory=list, max_length=100)   # words kept as they are, this session only
 
 
 class PatchSession(BaseModel):
@@ -76,6 +77,10 @@ async def create_session(body: CreateSession) -> dict[str, Any]:
         body.voice_from_stream = False
         if body.voice_mode == "clone" and not body.voice_profile_id:
             raise HTTPException(403, "Record your voice with consent before going live in your own voice.")
+    if not streamer and get_settings().v1_live_stock_default:
+        # v1: a stream without a streamer profile (someone else's content) is dubbed in stock voices. A copied
+        # voice is only for a streamer who recorded their own with consent.
+        body.voice_from_stream, body.voice_profile_id = False, None
     if not streamer and get_settings().live_clone_needs_streamer and (body.voice_from_stream or body.voice_profile_id):
         raise HTTPException(403, "A copied voice needs a streamer profile with the speaker's own recorded consent. "
                                  "This session can use stock voices; to go live in your own voice, record it on /streamer.")
@@ -94,6 +99,9 @@ async def create_session(body: CreateSession) -> dict[str, Any]:
         await sessions.update(sess, streamer_id=streamer["id"], voice_mode=body.voice_mode)
     if body.engine == "gpu":   # stored only when chosen: a session without it is the hosted path, untouched
         await sessions.update(sess, engine="gpu")
+    terms = list(dict.fromkeys(t.strip()[:60] for t in body.glossary if t.strip()))
+    if terms:
+        await sessions.update(sess, glossary=terms)
     return {"session_id": sess.id, "ingest_token": token, **sess.public()}
 
 

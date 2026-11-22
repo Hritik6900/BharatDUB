@@ -142,7 +142,7 @@ async def main() -> None:
             while time.monotonic() < deadline:
                 seqs = {m["seq"] for m in events if m.get("type") == "caption" and m["_ch"] in heard}
                 done = {(m["lang"], m["seq"]) for m in events if m.get("type") == "audio" and m.get("last") and m["_ch"] != "all"}
-                quiet_for = time.monotonic() - t0 - max((m["_t"] for m in events if m.get("type") != "sync"), default=0)
+                quiet_for = time.monotonic() - t0 - max((m["_t"] for m in events if m.get("type") not in ("sync", "clock")), default=0)
                 if seqs and all((lg, q) in done for lg in heard for q in seqs) and quiet_for > 4:
                     break
                 await ws.send(silence)

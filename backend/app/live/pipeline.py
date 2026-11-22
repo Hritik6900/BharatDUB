@@ -20,6 +20,7 @@ from app.providers.base import ProviderError, VoiceSpec
 from app.shared import audio_utils as au
 from app.shared.metrics import percentile
 from app.v1 import trace
+from app.v1.phrase import DynamicPhraser, ShortLineMerger, SpecTracker, rest_of
 
 log = logging.getLogger("live")
 TRANSLATE_TIMEOUT_S = 8.0
@@ -161,6 +162,15 @@ class LivePipeline:
         self.audio: asyncio.Queue[bytes | None] = asyncio.Queue()
         self.assembler = Assembler()
         self.phraser = Phraser(self.s.live_phrase_min_words, self.s.live_phrase_max_words)
+        # v1, each behind its flag (off = the lines below change nothing and the pipeline is v0's).
+        self._merger: ShortLineMerger | None = None
+        if self.s.v1_phrase_dynamic:
+            self.phraser = DynamicPhraser((self.s.v1_first_phrase_min_words, self.s.v1_first_phrase_max_words),
+                                          (self.s.v1_phrase_min_words, self.s.v1_phrase_max_words))
+            self._merger = ShortLineMerger(self.s.v1_merge_under_words, self.s.v1_merge_wait_ms)
+        self._spec = SpecTracker(self.s.v1_spec_stable_ms) if self.s.v1_spec_translate else None
+        self._spec_for: dict[int, dict[str, asyncio.Task[str]]] = {}   # phrase -> translations started ahead
+        self._stages: Any = None   # the scorer for the live back-check, made when first needed
         self._voice_turn = asyncio.Semaphore(max(1, self.s.gnani_max_concurrency))
         self._gpu_turn = asyncio.Semaphore(max(1, int(getattr(self.gpu, "capacity", 1))))
         self._src_ms_per_word = 350.0             # how fast the speaker talks (from finished lines)
@@ -204,7 +214,7 @@ class LivePipeline:
             return
         self.running = True
         terms = [t["term"] for t in await get_store().select("glossary_terms")]
-        self.glossary = list(dict.fromkeys(DEFAULT_GLOSSARY + terms))
+        self.glossary = list(dict.fromkeys(DEFAULT_GLOSSARY + terms + list(self.sess.row.get("glossary") or [])))
         self.voice = await self._clone_voice()
         await self._use_stored_voice()
         consent = self.sess.row.get("voice_from_stream") or {}
@@ -224,12 +234,28 @@ class LivePipeline:
         chunk = self.assembler.flush()
         if chunk:
             self._dispatch(chunk)
+        if self._merger is not None:
+            held = self._merger.flush()
+            if held:
+                self._dispatch(held, True)
+        if self._spec is not None:
+            self._spec.cancel()
         for q in self.queues.values():
             await q.put(None)
         await asyncio.sleep(0)
         done, pending = await asyncio.wait(self.tasks, timeout=15)
         for t in pending:
             t.cancel()
+        if self._trace:
+            trace.event("live_session_end", session=self.sess.id, phrases=self.sess.chunk_count,
+                        engine=self.sess.row.get("engine") or "cloud", hold_ms=self._sync_delay,
+                        hold_grown=len(self.sync_grown),
+                        merged=self._merger.merged if self._merger else None,
+                        short_alone=self._merger.alone if self._merger else None,
+                        spec_started=self._spec.started if self._spec else None,
+                        spec_used=self._spec.used if self._spec else None,
+                        spec_dropped=self._spec.dropped if self._spec else None,
+                        partial_gap_ms=round(self._spec.gap_ms) if self._spec else None)
 
     async def _warmup(self) -> None:
         """Open the connections to the translation model and the voice before the first phrase needs them
@@ -596,6 +622,10 @@ class LivePipeline:
                     self._dispatch(held)
                 text, t_start, t_end = cut
                 self._dispatch(self.assembler.make(text, t_start_ms=t_start, t_end_ms=t_end, t_final_ms=now))
+            if self._spec is not None:
+                # v1: the words no phrase has taken yet, once they stand still, are translated ahead of the final.
+                if self._spec.observe(rest_of(self.phraser, ev.utterance_id, ev.text), now):
+                    self._spec.begin(self._spec_start(self._spec.text))
         elif ev.kind == "final" and ev.text and self.phraser.covered(ev.utterance_id):
             # Phrases of this utterance are already being dubbed: only the tail is left.
             heard = self.phraser.tail_start(ev.utterance_id) if self.s.live_stamp_fix else None
@@ -657,9 +687,27 @@ class LivePipeline:
             chunk = self.assembler.poll(self.sess.now_ms())
             if chunk:
                 self._dispatch(chunk)
+            if self._merger is not None:
+                alone = self._merger.poll(self.sess.now_ms())
+                if alone:
+                    self._dispatch(alone, True)
+            if self._spec is not None and self._spec.due(self.sess.now_ms()):
+                self._spec.begin(self._spec_start(self._spec.text))   # the speaker paused: translate ahead
 
     # ---------- fan-out ----------
-    def _dispatch(self, chunk: Chunk) -> None:
+    def _dispatch(self, chunk: Chunk, merged: bool = False) -> None:
+        if self._merger is not None and not merged:
+            # v1: a line of one or two words waits for the next line and goes out as part of it.
+            for c in self._merger.push(chunk, self.sess.now_ms()):
+                self._dispatch(c, True)
+            return
+        if self._spec is not None:
+            want = self._spec.text if self._spec.tasks else ""
+            ahead = self._spec.take(chunk.text)   # translations started ahead, if they are of these very words
+            if self._trace and want and not ahead:
+                trace.event("spec_miss", session=self.sess.id, seq=chunk.seq, ahead=want, final=chunk.text)
+            if ahead:
+                self._spec_for[chunk.seq] = ahead
         if self.s.live_stamp_fix:
             # Phrases are spoken one after another, but their times are estimates: a phrase stamped as starting
             # before the one before it ended would have its dub due while that dub is still playing.
@@ -731,8 +779,10 @@ class LivePipeline:
             fell = getattr(self.llm, "fell_back", 0)
             if self._trace and chunk.seq in self._pending:
                 self._pending[chunk.seq]["timings"][f"t_translate_start:{lang}"] = self.sess.now_ms()
-            text = await asyncio.wait_for(self.llm.translate_chunk(chunk.text, lang, self.glossary, ctx, **kw),
-                                          TRANSLATE_TIMEOUT_S)
+            text = await self._spec_result(chunk, lang) if chunk.seq in self._spec_for else None
+            if text is None:
+                text = await asyncio.wait_for(self.llm.translate_chunk(chunk.text, lang, self.glossary, ctx, **kw),
+                                              TRANSLATE_TIMEOUT_S)
             untranslated = False
             if self._trace and chunk.seq in self._pending and getattr(self.llm, "fell_back", 0) != fell:
                 self._pending[chunk.seq]["timings"][f"llm_fb:{lang}"] = 1
@@ -832,6 +882,14 @@ class LivePipeline:
         # or that would be heard too late to feel live, is not made; its caption has already gone out.
         unheard = self.s.live_tts_only_heard and not bus.listeners(lang)
         too_late = -spare > self.s.live_sync_late_skip_ms if target is not None else lag_ms > self.s.live_skip_after_ms
+        if too_late and not unheard and self.s.v1_live_late_shorten:
+            # v1: a late line is said in a shorter version; it is skipped only when it is far too late.
+            late_by = -spare if target is not None else lag_ms
+            limit = self.s.live_sync_late_skip_ms if target is not None else self.s.live_skip_after_ms
+            shorter = await self._shorter(lang, text, late_by, limit)
+            if shorter:
+                text, too_late = shorter, False
+                timings[f"shortened:{lang}"] = 1
         if unheard or too_late:
             for t in [timings, *[t for _, t in rest]]:
                 t[f"skipped:{lang}"] = "unheard" if unheard else "late"
@@ -903,6 +961,8 @@ class LivePipeline:
                         speed = max(speed, want_tempo(per_byte * size / speed) * speed)
                         speed = min(speed, self.s.live_fit_max_tempo)
                     pcm, rate = await self.gpu.synth(self._gpu_sid or self.sess.id, text, lang, speed=speed)
+                    if self.s.v1_live_backcheck:
+                        pcm, rate = await self._checked(lang, text, pcm, rate, speed, target, timings)
                     spoke_at = speed / base
                     # The pace is taken from the speech alone: the silence around a short line would read as slow speech.
                     spoken = au.trim_pcm_silence(au.trim_pcm_silence(pcm, start=True, end=False), start=False, end=True)
@@ -985,10 +1045,125 @@ class LivePipeline:
         timings[f"t_audio_done:{lang}"] = self.sess.now_ms()
         self.sess.bus.broadcast({"type": "stats", **self.stats()})
 
+    # ---------- v1 (each used only with its flag on) ----------
+    def _spec_kw(self, lang: str, text: str) -> dict[str, Any]:
+        """What `_translate` would ask of the translator for these words, worked out now."""
+        behind = self._lag.get(lang, 0) if self.sync_delay() else self._playhead.get(lang, 0) - self.sess.now_ms()
+        kw: dict[str, Any] = {"brief": True} if self.s.live_brief and behind > self.s.live_brief_after_ms else {}
+        pace = self._dub_ms_per_word.get(lang)
+        if self.s.live_length_budget and pace:
+            share = 1.15 if not kw else 0.9 if behind <= 2000 else 0.6
+            n_src = len(text.split())
+            fit_words = max(2, int(n_src * self._src_ms_per_word * share / pace))
+            if fit_words < n_src * 1.5:
+                kw["max_words"] = fit_words
+        if self._gpu_planned(lang):
+            kw["native"] = True
+        return kw
+
+    def _spec_start(self, text: str) -> "dict[str, asyncio.Task[str]]":
+        """`V1_SPEC_TRANSLATE`: translate `text` for every language now, before its final transcript arrives."""
+        ctx = list(self.context)
+
+        async def one(lang: str) -> str:
+            call = self.llm.translate_chunk(text, lang, self.glossary, ctx, **self._spec_kw(lang, text))
+            return str(await asyncio.wait_for(call, TRANSLATE_TIMEOUT_S))
+        tasks = {lang: asyncio.create_task(one(lang)) for lang in self.sess.langs}
+        for task in tasks.values():
+            task.add_done_callback(lambda t: t.cancelled() or t.exception())   # read later, or not at all
+        return tasks
+
+    async def _spec_result(self, chunk: Chunk, lang: str) -> str | None:
+        """The translation that was started ahead for this phrase, or None (then it is translated the usual way)."""
+        task = (self._spec_for.get(chunk.seq) or {}).pop(lang, None)
+        if task is None:
+            return None
+        try:
+            text = await task
+        except asyncio.CancelledError:
+            if not task.cancelled():
+                raise
+            return None
+        except Exception:  # noqa: BLE001 - the usual call follows
+            return None
+        if text and chunk.seq in self._pending:
+            self._pending[chunk.seq]["timings"][f"spec:{lang}"] = 1
+        return text or None
+
+    async def _shorter(self, lang: str, text: str, late_by: int, limit: int) -> str | None:
+        """`V1_LIVE_LATE_SHORTEN`: a version of a late line with about 40% of its words, or None (then it is
+        skipped as before): when it is later than `v1_late_skip_factor` times the limit, or no shorter line came."""
+        n = len(text.split())
+        if late_by > limit * self.s.v1_late_skip_factor or n < 5:
+            return None
+        want = max(3, round(n * 0.4))
+        try:
+            out = await asyncio.wait_for(self.llm.shorten(text, lang, want * 0.45, max_words=want), 4.0)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            log.warning("live shorten failed: %s", e)
+            return None
+        out = (out or "").strip()
+        return out if out and len(out.split()) < n else None
+
+    async def _hear_back(self, lang: str, text: str, pcm: bytes, rate: int) -> float | None:
+        """Share of a dubbed line's words that the scorer hears back (0-1), or None when there is no scorer."""
+        if self._stages is None:
+            from app.v1.stages import Stages
+            self._stages = Stages("live", self.engine or "cloud", key=self.sess.id)
+        if not self._stages.names("score"):
+            return None
+        wav = Path(tempfile.gettempdir()) / f"bd_v1_check_{self.sess.id}_{lang}_{self.sess.now_ms()}.wav"
+        try:
+            audio = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype="<i2").astype(np.float32) / 32768.0
+            await asyncio.to_thread(au.write_wav, wav, audio, rate)
+            got = await asyncio.wait_for(self._stages.score(wav, text, lang), 4.0)
+            return float(got["backcheck"]) if got.get("backcheck") is not None else None
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 - no verdict
+            log.info("live back-check: no verdict (%s)", str(e)[:120])
+            return None
+        finally:
+            wav.unlink(missing_ok=True)
+
+    async def _checked(self, lang: str, text: str, pcm: bytes, rate: int, speed: float, target: int | None,
+                       timings: dict[str, Any]) -> tuple[bytes, int]:
+        """`V1_LIVE_BACKCHECK`: hear the line back. With time to spare before it is due, a line that came out
+        wrong is made once more and the better one is kept; without it, the score is only recorded."""
+        room = target - self.sess.now_ms() if target is not None else 0
+        if room < 2500:
+            async def later() -> None:
+                score = await self._hear_back(lang, text, pcm, rate)
+                if score is not None:
+                    timings[f"backcheck:{lang}"] = round(score, 2)
+            self.tasks.append(asyncio.create_task(later()))
+            return pcm, rate
+        score = await self._hear_back(lang, text, pcm, rate)
+        if score is None:
+            return pcm, rate
+        timings[f"backcheck:{lang}"] = round(score, 2)
+        if score >= self.s.v1_backcheck_min or target is None or target - self.sess.now_ms() < 1500:
+            return pcm, rate
+        try:
+            pcm2, rate2 = await self.gpu.synth(self._gpu_sid or self.sess.id, text, lang, speed=speed)
+        except Exception as e:  # noqa: BLE001 - the first version is spoken
+            log.info("live back-check: second version failed (%s)", str(e)[:120])
+            return pcm, rate
+        again = await self._hear_back(lang, text, pcm2, rate2) if target - self.sess.now_ms() >= 1200 else None
+        if again is None or again > score:
+            timings[f"redone:{lang}"] = 1
+            if again is not None:
+                timings[f"backcheck:{lang}"] = round(again, 2)
+            return pcm2, rate2
+        return pcm, rate
+
     async def _chunk_done(self, seq: int) -> None:
         p = self._pending.get(seq)
         if not p:
             return
+        self._spec_for.pop(seq, None)
         p["left"] -= 1
         if p["left"] > 0:
             return
