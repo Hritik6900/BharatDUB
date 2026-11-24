@@ -9,9 +9,11 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 for f in V1_ROUTER V1_PHRASE_DYNAMIC V1_SPEC_TRANSLATE V1_TTS_SERVER V1_TTS_MAYA V1_LIVE_STOCK_DEFAULT \
          V1_LIVE_LATE_SHORTEN V1_LIVE_BACKCHECK V1_LLM_PREFIX_CACHE V1_STUDIO_HQ V1_FIT_115 \
          V1_BREAKER V1_LIVE_DEGRADE V1_API_LOG \
-         V1_LIVE_BUDGET V1_LIVE_RATECTRL V1_LIVE_NATIVE_SPEED V1_LIVE_WARMSTART V1_EN_SINGLE_VOICE; do export "$f=false"; done
+         V1_LIVE_BUDGET V1_LIVE_RATECTRL V1_LIVE_NATIVE_SPEED V1_LIVE_WARMSTART V1_EN_SINGLE_VOICE \n         V1_HQ_JUDGE V1_HQ_CALIBRATE V1_HQ_ADAPTIVE V1_HQ_NORMALISE V1_HQ_AUTO_GLOSSARY V1_HQ_REVIEW; do export "$f=false"; done
 export V1_TRACE=true
 for pair in "$@"; do export "$pair"; done
 export DATA_DIR="${V1_DATA_DIR:-$ROOT/data-v1}/ab/$NAME" PUBLIC_API_BASE="http://localhost:$PORT"
 mkdir -p "$DATA_DIR"
-cd "$ROOT/backend" && exec .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port "$PORT"
+cd "$ROOT/backend"
+PY=".venv/bin/python"; [ -x "$PY" ] || PY=".venv/Scripts/python.exe"   # the second on Windows (Git Bash)
+exec "$PY" -m uvicorn app.main:app --host 127.0.0.1 --port "$PORT"

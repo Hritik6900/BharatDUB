@@ -62,7 +62,7 @@ async def one_job(a: argparse.Namespace, name: str, api: str, hq: bool, k: int) 
         per_lang = {}
         for lang in langs:
             b = (await c.get(f"/api/v1/jobs/{jid}/backcheck", params={"lang": lang}, timeout=600)).json()
-            per_lang[lang] = {key: b.get(key) for key in ("scored", "backcheck_mean", "backcheck_by_words", "speed_max", "flagged", "takes")}
+            per_lang[lang] = {key: b.get(key) for key in ("scored", "backcheck_mean", "backcheck_by_words", "speed_max", "flagged", "takes", "judges", "rule")}
             per_lang[lang]["lines"] = len(b.get("lines") or [])
         res["per_lang"] = per_lang
         means = [v["backcheck_mean"] for v in per_lang.values() if v["backcheck_mean"] is not None]

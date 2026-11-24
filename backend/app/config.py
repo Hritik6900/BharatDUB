@@ -253,6 +253,21 @@ class Settings(BaseSettings):
     v1_hq_backcheck_min: float = 0.9    # share of words heard back for a version to pass
     v1_hq_similarity_min: float = 0.0   # speaker similarity to pass; 0 = measured and stored, not a gate
     v1_fit_max_speed: float = 1.15
+    # v1.1 Studio HQ toward 96% (app/v1/hq/judge.py, calibrate.py, normalise.py, glossary.py, review.py)
+    v1_hq_judge: bool = False           # the heard-back judge is the best speech-to-text per language, the next one when it fails, and every line records who judged it
+    v1_hq_judge_order: str = "prisma,whisper_gpu,qa_server"   # judges in order; one that does not hear a language is left out for it
+    v1_hq_judge_by_lang: str = ""       # another order for single languages: "hi-IN=whisper_gpu,prisma;ta-IN=prisma"
+    v1_hq_calibrate: bool = False       # /studio/calibrate and its routes: a person labels dubbed lines blind, the judge is compared with the labels
+    v1_hq_calibrate_min_labels: int = 30    # under this many labels (or under 5 of either kind) no threshold is recommended
+    v1_hq_adaptive: bool = False        # one take first; more (up to v1_hq_adaptive_max) only when its score is under the threshold
+    v1_hq_adaptive_max: int = 5
+    v1_hq_adaptive_same_stop: bool = False  # adaptive: no further take once two takes were heard back as the very same words (measured: 11% fewer takes, a lower-scored take kept on 3 of 76 lines)
+    v1_hq_adaptive_min: float = 0.0     # the threshold for "make more takes"; 0 = v1_hq_backcheck_min
+    v1_hq_takes_fixed: int = 0          # measurement only: always make this many takes of a line in our voice and keep the best (0 = off)
+    v1_hq_normalise: bool = False       # numbers, dates, the rupee sign, % and short forms written out by rule in the target language before the voice (hi, bn, ta, en)
+    v1_hq_auto_glossary: bool = False   # names, brands and repeated English terms found in the job's transcript are used as its glossary
+    v1_hq_auto_glossary_max: int = 40
+    v1_hq_review: bool = False          # the hosted model reviews every translated line against the written rubric and may edit; every edit is logged
     v1_hq_duck_db: float = -9.0         # sidechain ducking: how far the background goes down under speech
     v1_hq_loudness_lufs: float = -16.0  # 0 = no loudness normalisation
     # Cost per minute on the numbers page: nothing is shown for a rate that is 0 (not set).

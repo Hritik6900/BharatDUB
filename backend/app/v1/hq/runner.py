@@ -25,6 +25,9 @@ from app.shared import audio_utils as au
 from app.shared import cache
 from app.studio.stages import fit
 from app.v1 import trace
+from app.v1.hq import glossary as hqgloss
+from app.v1.hq import normalise as hqnorm
+from app.v1.hq import review as hqreview
 from app.v1.hq import text as hqtext
 from app.v1.hq import voice as hqvoice
 from app.v1.stages import StageFailed, Stages
@@ -115,6 +118,13 @@ async def phase_b(r: Any, ctx: Any, meta: dict[str, Any], st: Stages, langs: lis
     if not segs:
         return
     hq = meta.setdefault("hq", {})
+    if r.s.v1_hq_auto_glossary:
+        # Names, brands and repeated English terms of this video, found in its first hearing: this job's glossary.
+        if "glossary_auto" not in hq:
+            first = [s.get("src_text_raw") or s["src_text"] for s in segs]
+            hq["glossary_auto"] = hqgloss.candidates(first, known=glossary, limit=r.s.v1_hq_auto_glossary_max)
+            r._write_meta(ctx.dir, meta)
+        glossary = list(dict.fromkeys([*glossary, *hqgloss.terms(hq["glossary_auto"])]))
     if not hq.get("text_done"):
         async with r._stage(ctx, "clean"):
             raw = [s.get("src_text_raw") or s["src_text"] for s in segs]
@@ -127,6 +137,10 @@ async def phase_b(r: Any, ctx: Any, meta: dict[str, Any], st: Stages, langs: lis
                 cleaned = await hqtext.cleanup(st, lines, glossary)
                 hq["cleaned_lines"] = sum(1 for a, b in zip(lines, cleaned) if a != b)
                 lines = cleaned
+                if r.s.v1_hq_review:   # a cleaned line that is no longer the line that was heard is put back
+                    kept = [c if c == o or hqreview.keeps_source(o, c) else o for o, c in zip(raw, lines)]
+                    hq["transcript_put_back"] = sum(1 for a, b in zip(lines, kept) if a != b)
+                    lines = kept
             except StageFailed as e:
                 r._warn(ctx, f"The transcript was not cleaned ({e})"[:300])
             for s, old, new in zip(segs, raw, lines):
@@ -148,11 +162,14 @@ async def phase_b(r: Any, ctx: Any, meta: dict[str, Any], st: Stages, langs: lis
             pace = float(r.s.gpu_voice_pace_ms or 450) if native else STOCK_PACE_MS
             src = [s["src_text"] for s, _ in todo]
             limits = [hqtext.word_limit(sl, s["end_s"] - s["start_s"], len(s["src_text"].split()), pace) for s, sl in todo]
+            extra = [f for f in ("v1_hq_review", "v1_hq_normalise", "v1_hq_auto_glossary") if getattr(r.s, f)]
+            first = [s.get("src_text_raw") or s["src_text"] for s, _ in todo]
             key = au.cache_key(hqtext.PROMPT_VERSION, src, limits, lang, sorted(glossary), native,
-                               ",".join(st.names("translate")), ",".join(st.names("review")))
+                               ",".join(st.names("translate")), ",".join(st.names("review")),
+                               *([extra, first] if extra else []))   # with the v1.1 flags off: the key it always had
             out = cache.get_json("translate_hq", key)
             if out is None or len(out) != len(src):
-                out = await translate_lines(r, ctx, st, src, limits, lang, glossary, native, hq)
+                out = await translate_lines(r, ctx, st, src, limits, lang, glossary, native, hq, first=first)
                 cache.put_json("translate_hq", key, out)
             for (s, _), line in zip(todo, out):
                 if s["id"] in existing:
@@ -163,9 +180,12 @@ async def phase_b(r: Any, ctx: Any, meta: dict[str, Any], st: Stages, langs: lis
 
 
 async def translate_lines(r: Any, ctx: Any, st: Stages, src: list[str], limits: list[int], lang: str,
-                          glossary: list[str], native: bool, hq: dict[str, Any]) -> list[str]:
+                          glossary: list[str], native: bool, hq: dict[str, Any], *,
+                          first: list[str] | None = None) -> list[str]:
+    s = r.s
     try:
-        out = await hqtext.translate_timed(st, src, limits, lang, glossary, native)
+        out = await hqtext.translate_timed(st, src, limits, lang, glossary, native,
+                                           terms=glossary if s.v1_hq_auto_glossary else None)
     except StageFailed:
         out = None
     ctx.usage["llm_calls"] = ctx.usage.get("llm_calls", 0) + 1
@@ -183,7 +203,16 @@ async def translate_lines(r: Any, ctx: Any, st: Stages, src: list[str], limits: 
                 pass
     stats = hq.setdefault(f"text:{lang}", {})
     try:
-        out, stats["reviewed_changed"] = await hqtext.review(st, src, out, limits, lang, glossary, native)
+        if s.v1_hq_review:     # the hosted model against the written rubric; every edit is logged (hq/review.py)
+            out, stats["review"] = await hqreview.review(st, src, out, limits, lang, glossary, native,
+                                                         heard=first, job_id=ctx.job_id)
+            stats["reviewed_changed"] = stats["review"]["edited"]
+            if stats["review"].get("error"):
+                r._warn(ctx, f"The {lang} translation was not reviewed ({stats['review']['error']})"[:300])
+        else:
+            out, stats["reviewed_changed"] = await hqtext.review(st, src, out, limits, lang, glossary, native)
+        if s.v1_hq_normalise and hqnorm.covered(lang):   # by rule first; the model only sees what the rules left
+            out, stats["normalised_by_rule"] = hqnorm.spoken_lines(out, lang, native)
         out, stats["normalised"] = await hqtext.normalise(st, out, lang, native)
         ctx.usage["llm_calls"] = ctx.usage.get("llm_calls", 0) + 2
     except StageFailed as e:
@@ -227,14 +256,15 @@ async def phase_c(r: Any, ctx: Any, meta: dict[str, Any], st: Stages, lang: str)
         fields = {"text": best.text, "audio_path": str(out.relative_to(ctx.dir)), "fit_speed": speed,
                   "flagged": flag, "flag_reason": "; ".join(best.why) if flag else "",
                   "qa": {"backcheck": best.backcheck, "similarity": best.similarity, "by": best.scored_by,
-                         "provider": best.provider},
-                  "alts": [v.public() for v in made], "picked": best.idx}
+                         "provider": best.provider, **({"passed_over": best.passed_over} if best.passed_over else {})},
+                  "alts": [v.public(heard=bool(r.s.v1_hq_judge or r.s.v1_hq_calibrate)) for v in made], "picked": best.idx}
         await r.store.update("translations", tr["id"], fields)
         if r.s.v1_trace:
             trace.studio_line(ctx.job_id, lang, seg["idx"], mode="studio_hq", words=len(best.text.split()),
                               slot_s=round(slot_s, 3), dur_s=round(best.dur_s, 3), speed=speed,
                               native_speed=best.engine_speed, tts=best.provider, clone=vspec["kind"] == "clone",
                               backcheck=best.backcheck, similarity=best.similarity, scored_by=best.scored_by,
+                              judge_passed_over=best.passed_over or None,
                               versions=len(made), flagged=flag, fallback=best.provider not in ("indicf5", "timbre") or
                               (vspec["kind"] == "clone" and best.provider == "timbre" and st.own_voice(lang, vspec)),
                               shortened=best.text != tr["text"],

@@ -181,6 +181,8 @@ def _hq_fields(t: dict[str, Any]) -> dict[str, Any]:
     if "alts" not in t:
         return {}
     keep = ("idx", "provider", "text", "dur_s", "speed", "backcheck", "similarity", "passed", "why")
+    if get_settings().v1_hq_judge:
+        keep += ("scored_by",)     # who judged each take; what was heard stays on the server
     return {"flagged": bool(t.get("flagged")), "flag_reason": t.get("flag_reason") or "", "qa": t.get("qa"),
             "picked": t.get("picked"), "alts": [{k: a.get(k) for k in keep} for a in t.get("alts") or []]}
 
@@ -323,7 +325,7 @@ async def job_backcheck(job_id: str, lang: str) -> dict[str, Any]:
         path = runner.job_dir(job_id) / str(t.get("audio_path")) if t and t.get("audio_path") else None
         if not t or path is None or not path.is_file():
             continue
-        key = au.cache_key("eval-backcheck-1", au.sha256_file(path), t["text"], lang, ",".join(st.names("score")))
+        key = au.cache_key("eval-backcheck-1", au.sha256_file(path), t["text"], lang, ",".join(st.judges(lang)))
         got = cache.get_json("score_eval", key)
         if got is None:
             try:
@@ -331,16 +333,88 @@ async def job_backcheck(job_id: str, lang: str) -> dict[str, Any]:
                 cache.put_json("score_eval", key, got)
             except StageFailed as e:
                 got = {"backcheck": None, "by": "", "error": str(e)[:160]}
-        from app.v1.qa import HEARD_RULE, heard_share
-        if got.get("backcheck") is not None and "heard" in got and got.get("rule") != HEARD_RULE:
-            got = {**got, "backcheck": round(heard_share(t["text"], got["heard"]), 3)}
+        from app.v1.qa import heard_share, rule_now
+        if got.get("backcheck") is not None and "heard" in got and got.get("rule") != rule_now():
+            got = {**got, "backcheck": round(heard_share(t["text"], got["heard"], rule_now()), 3)}
         lines.append({"idx": s["idx"], "words": len(t["text"].split()), "backcheck": got.get("backcheck"),
                       "by": got.get("by"), "fit_speed": t.get("fit_speed"), "flagged": bool(t.get("flagged")),
                       "takes": len(t.get("alts") or []) or 1})
     scored = [x for x in lines if x["backcheck"] is not None]
     words = sum(x["words"] for x in scored)
-    return {"job_id": job_id, "lang": lang, "lines": lines, "scored": len(scored),
+    judges: dict[str, int] = {}
+    for x in scored:
+        judges[str(x["by"] or "")] = judges.get(str(x["by"] or ""), 0) + 1
+    return {"job_id": job_id, "lang": lang, "lines": lines, "scored": len(scored), "judges": judges, "rule": rule_now(),
             "backcheck_mean": round(sum(x["backcheck"] for x in scored) / len(scored), 4) if scored else None,
             "backcheck_by_words": round(sum(x["backcheck"] * x["words"] for x in scored) / words, 4) if words else None,
             "speed_max": max((x["fit_speed"] or 1.0 for x in lines), default=None),
             "flagged": sum(1 for x in lines if x["flagged"]), "takes": sum(x["takes"] for x in lines)}
+
+
+# ---------- v1.1: calibrating the heard-back judge (V1_HQ_CALIBRATE) ----------
+def _calibrate_on() -> None:
+    if not get_settings().v1_hq_calibrate:
+        raise HTTPException(404, "The calibration page is switched off (V1_HQ_CALIBRATE).")
+
+
+class CalibrationLabel(BaseModel):
+    id: str
+    label: str      # good | bad | undo
+
+
+@router.get("/api/v1/calibrate/next")
+async def calibrate_next(lang: str | None = None, n: int = 10) -> dict[str, Any]:
+    """Takes to label, blind: the id, the language and the words the take should say. Never a score."""
+    _calibrate_on()
+    from app.v1.hq import calibrate
+    its = await calibrate.items(runner.store)
+    done = set(calibrate.labels())
+    return {"items": [calibrate.blind(i) for i in calibrate.queue(its, done, lang, max(1, min(n, 50)))],
+            "takes": len(its), "labelled": len(done & {i["id"] for i in its}),
+            "langs": sorted({str(i["lang"]) for i in its})}
+
+
+@router.get("/api/v1/calibrate/audio/{item_id}")
+async def calibrate_audio(item_id: str) -> FileResponse:
+    _calibrate_on()
+    from app.v1.hq import calibrate
+    item = next((i for i in await calibrate.items(runner.store) if i["id"] == item_id), None)
+    if item is None:
+        raise HTTPException(404, "not found")
+    return FileResponse(item["path"], media_type="audio/wav", headers={"Cache-Control": "no-store"})
+
+
+@router.post("/api/v1/calibrate/labels")
+async def calibrate_label(body: CalibrationLabel) -> dict[str, Any]:
+    _calibrate_on()
+    from app.v1.hq import calibrate
+    if body.label not in (*calibrate.LABELS, "undo"):
+        raise HTTPException(400, "label is good, bad or undo")
+    item = next((i for i in await calibrate.items(runner.store) if i["id"] == body.id), None)
+    if item is None:
+        raise HTTPException(404, "not found")
+    calibrate.add_label(item, body.label)
+    return {"ok": True, "labelled": len(calibrate.labels())}
+
+
+@router.get("/api/v1/calibrate/summary")
+async def calibrate_summary() -> dict[str, Any]:
+    """Agreement between the labels and the judge, and the flag threshold the labels point to (or why none)."""
+    _calibrate_on()
+    from app.v1.hq import calibrate
+    return await calibrate.summary(runner.store)
+
+
+# ---------- v1.1: glossary candidates from a job's transcript (V1_HQ_AUTO_GLOSSARY) ----------
+@router.get("/api/v1/jobs/{job_id}/glossary-candidates")
+async def glossary_candidates(job_id: str) -> dict[str, Any]:
+    """Names, brands and repeated English terms found in this job's transcript. Proposals: nothing is saved."""
+    if not get_settings().v1_hq_auto_glossary:
+        raise HTTPException(404, "Glossary candidates are switched off (V1_HQ_AUTO_GLOSSARY).")
+    await _job_or_404(job_id)
+    from app.v1.hq import glossary as hqgloss
+    segs = await runner.store.select("segments", order="idx", job_id=job_id)
+    lines = [s.get("src_text_raw") or s.get("src_text") or "" for s in segs]
+    known = await runner.glossary()
+    return {"job_id": job_id, "candidates": hqgloss.candidates([t for t in lines if t.strip()], known=known,
+                                                               limit=get_settings().v1_hq_auto_glossary_max)}

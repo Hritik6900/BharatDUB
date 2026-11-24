@@ -14,10 +14,11 @@ health endpoints and the shared GPU servers' own, and answered every time.
 | Router | provider order, timeouts and fallbacks per step from `backend/config/routing.yaml` | works; the shipped file builds the same providers as v0 |
 | Live changes | dynamic phrase sizes, short-line merge, translation ahead, late-line shortening, back-check, session glossary, stock default, fixed-rules-first prompt | built, each behind a flag; measured (section 2) |
 | Studio HQ | two hearings merged, cleaned transcript, translation with a word limit per line, review, numbers as words, takes scored and the best kept, flagged lines, sidechain ducking, loudness, jobs phase by phase; an editor with every take and a one-click swap | works end to end on real jobs with the models that are loaded |
+| Studio HQ, v1.1 WS3 | the judge per language with a corrected counting rule, old jobs scored again without making a voice line, a calibration page (`/studio/calibrate`), adaptive takes, a rule-based normaliser for four languages, glossary candidates from the transcript, a rubric review by the hosted model with every edit logged, a guard on the transcript | built, each behind a flag; measured on three videos (section 2) |
 | New model servers | batching voice server, Maya 2, Indic Transcribe, QA, big translation model: code, containers, stub mode | stubs tested; **no real model loaded** (GPU memory, licences) |
 | Eval | Live comparison across backends, Studio standard against HQ, key words on the hard set, one script for all | works; `EVAL_REPORT.md` |
 | Operations | demo check, warm-up, backup, GPU mode switch, runbook | demo check and warm-up ran; backup and mode switch not run |
-| Tests | 61 new tests; 159 pass in all, 1 skipped (Postgres store: no database here) | |
+| Tests | 61 new tests; 159 pass in all, 1 skipped (Postgres store: no database here). After v1.1 WS3: 275 pass, 1 skipped | |
 
 Not as the build notes described, and why:
 
@@ -41,7 +42,7 @@ Numbers are from `EVAL_REPORT.md` (three runs per Live setup, one run per Studio
 |---|---|---|
 | `V1_TRACE` | on in every run; no error from it | **on** |
 | `V1_ROUTER` | same providers as with it off; first audio 2.4 s against 2.3-2.7 s | **on** (needed for the HQ path's provider lists to be changed in one file) |
-| `V1_STUDIO_HQ` | words heard back 92.5% (91.1-93.5) against 89.2% (84.9-93.4) for standard; about 3 times the time (255 s against 82 s for a 50 s video); a third of the lines flagged | **on** as a choice per job; use it for samples. It is under the 96% target |
+| `V1_STUDIO_HQ` | words heard back 92.5% (91.1-93.5) against 89.2% (84.9-93.4) for standard; about 3 times the time (255 s against 82 s for a 50 s video); a third of the lines flagged. **Corrected by v1.1 WS3: by the fixed counting rule the same output is 95.5% against 91.1%; rerun 25 Nov: 95.9% against 90.6%, 128 s against 67 s** | **on** as a choice per job, **together with `V1_HQ_JUDGE` and `V1_HQ_REVIEW`**: without the second, two of three test videos were dubbed from a damaged transcript. Under the 96% target |
 | `V1_FIT_115` | on in the HQ runs: largest speed-up 1.15x; the test videos hardly needed speeding up | on with HQ; its effect on videos that need more speed-up is covered by tests only |
 | `V1_PHRASE_DYNAMIC` | session's first audio 1.7 s earlier when a voice is ready at the start (5.9 -> 4.1 s, stock voices); no gain with a voice learned from the stream; 5 points fewer phrases on time on dense speech (69.6% -> 64.5%) | **your call**: worth it for a streamer's opening line, costs timing afterwards |
 | `V1_LIVE_LATE_SHORTEN` | 1-3 lines a run said shorter, skips 4.7 -> 1.7 a run | **your call**: fewer lost lines; measured only inside a bundle whose timing was worse |
@@ -56,9 +57,16 @@ Numbers are from `EVAL_REPORT.md` (three runs per Live setup, one run per Studio
 | `V1_LIVE_RATECTRL` (v1.1) | with the budget: within 0.25 s 83.1%, within 1 s 91.8%, p90 1.11; inside the spread against the budget alone; 15 lines a run at 1.4x | off until someone has heard 1.4x |
 | `V1_LIVE_NATIVE_SPEED` (v1.1) | acts on 6.6 lines a run, all Tamil; no number moved | **off** |
 | `V1_LIVE_WARMSTART` (v1.1) | first 10 phrases of a session, Punjabi + Tamil, 5 runs each way: first audio p95 4.27 s -> 3.80 s (lower in 4 of 5 pairs) with the final build, 3.86 s -> 4.79 s with the first build; "off" alone moved 0.41 s between the two batches; the median did not move; 4-6 of 20 lines in a stock voice either way. Nothing was cold on this setup. The matched stock voice was only measured on a female speaker (the voices v0 uses anyway) | **your call**: no proven gain in speed; its other parts (male stock voice for a male speaker, the softened change of voice) need ears |
+| `V1_HQ_JUDGE` (v1.1 WS3) | the counting rule no longer takes points off Bengali for a letter stored two ways: Bengali +5.6 to 6.3 points on the same HQ output, Tamil unchanged, 25 flags become 15; every line records its judge (the hosted one answered every hearing; the second judge exists for Hindi only and was never needed) | **on** whenever HQ is on |
+| `V1_HQ_REVIEW` (v1.1 WS3) | 24 of 76 lines edited by the hosted reviewer (wrong number, misspelt name, changed meaning among them); a cleaned transcript line that is no longer the line heard is put back: 0 such lines against 25 of 38 in the HQ jobs without it. Words heard back 94.5% against 95.9%: lower, and not because the dub is worse as far as the lines read show | **on** whenever HQ is on (it is the only thing that stops the transcript damage); ears needed on its edits |
+| `V1_HQ_ADAPTIVE` (v1.1 WS3) | against five takes of every line: 61% less voice time (206 s against 524 s over three videos), and on the same takes the same take kept on all 76 lines. Against v1's own rule: the same number of takes (143) | on or off makes little difference today; **on** if the flag line is ever raised |
+| `V1_HQ_AUTO_GLOSSARY` (v1.1 WS3) | 16 names and terms proposed over three videos; effect on the dub not separated from the review's | **your call**; harmless |
+| `V1_HQ_NORMALISE` (v1.1 WS3) | nothing to do on the test videos (no digits); unit tests for Hindi, Bengali, Tamil, English | on for those four languages once a video with numbers has been heard |
+| `V1_HQ_CALIBRATE` (v1.1 WS3) | the page works on real takes; **no labels yet**, so no agreement figure and no recommended flag line | **on**, and thirty labels per language from someone who speaks it |
 | `V1_EN_SINGLE_VOICE` (v1.1) | English + Punjabi, 3 runs each: stock lines between copied ones 4.7 a session (10.1%) and 9 changes of voice with it off, none with it on. Every line in the hosted copy: within 1 s 86.6% -> 73.7% where the copy existed, first audio 0.73 s later than a stock line. So `auto` takes the one stock voice. The hosted stock voice refused 59% of its lines that night (the copy none) | **on** with `auto` if one voice matters more than the speaker's voice in English; `V1_EN_VOICE=copy` when the stock voice is failing or the copied voice matters more than timing |
 
-Against the targets: Studio words heard back 92.5% (target 96%): not reached. Live first audio 2.3-2.5 s through
+Against the targets: Studio words heard back 92.5% (target 96%): not reached (v1.1 WS3: 95.9% by the corrected
+rule in a rerun, still not reached, and the figure does not see a damaged transcript; `EVAL_REPORT.md` section 6). Live first audio 2.3-2.5 s through
 the link (target 1.8 s) and on time 56-70% (target 90%): not reached, and no Live flag moves either. Hard-audio
 key words: hosted 71.3 of 80 (target 73), our Whisper 52. "Warm and green five minutes after a VM restart": not
 tested.
@@ -91,6 +99,9 @@ measured 1.8 s first audio there; `NEEDS_APPROVAL.md` item 3), not these flags.
 | 19 | Two or three dense recordings of about 10 minutes, your own content, for the Live replay (v1.1 WS1) | the files in `data-v1\eval\dense\`; hosted speech-to-text for the minutes replayed |
 | 20 | Which English voice (`V1_EN_VOICE`), and whether the session should move to the copy by itself when the stock voice fails (v1.1 WS2) | your ears and a decision |
 | 21 | The session start measured with a recorded voice (Streamer Mode), a male speaker, and the English voices on a night the hosted voice is healthy (v1.1 WS2) | a voice recorded in v1 with consent; hosted calls for about 20 short sessions |
+| 22 | A second heard-back judge for Tamil, Bengali and the other languages (v1.1 WS3): the QA server's Whisper | item 6 |
+| 23 | Labels on `/studio/calibrate` (v1.1 WS3) | thirty per language from a speaker of it |
+| 24 | Five comparison backends left running on 8111-8115 (v1.1 WS3) | three PowerShell lines; they could not be stopped from inside this work |
 
 ## 4. Decisions needed
 
@@ -104,6 +115,15 @@ measured 1.8 s first audio there; `NEEDS_APPROVAL.md` item 3), not these flags.
    routing file reviews with the hosted model until then. Sizes on offer: 12B (10.3 GB) or 31B (23.3 GB).
 4. **Which Live flags to switch on** (section 2: two are "your call").
 5. **Where v1 runs.** On the VM (items 2-4) before any number here is quoted as the product's.
+6. **Studio HQ's transcript steps (v1.1 WS3).** With the new flags off, HQ's "merge the hearings" and "clean"
+   steps damaged the transcript of two of three test videos on both days they ran (every line holding the line
+   before it; a transcript in Latin letters with first words lost). `V1_HQ_REVIEW` puts such lines back. Decide
+   whether HQ may be offered at all without it, and whether the second hearing by our Whisper is worth keeping:
+   it is the source of the Latin lines, and the hosted hearing measured better on the same audio (section 3
+   of `EVAL_REPORT.md`).
+7. **What "96% heard back" should mean (v1.1 WS3).** The judge counts a spelling it writes differently as a
+   word not heard, and counts a dub of the wrong sentence as heard. Until someone has labelled lines on
+   `/studio/calibrate`, neither the 96% target nor the flag line of 90% is tied to what a listener hears.
 
 ## 5. Start v1 and run the demo check
 

@@ -396,3 +396,59 @@ Work that was deferred because it needs the GPU VM, a forbidden command, or a de
 - **Verify:** `first.md` in each folder: first audio p50 / p95 of the first 10 phrases, lines in a stock voice
   (with a recorded voice: 0 expected in both).
 - **Rollback:** nothing to undo; `V1_LIVE_WARMSTART=false`.
+
+## 22. A second judge for Tamil, Bengali and the other languages, v1.1 WS3
+
+- **What:** with `V1_HQ_JUDGE` the heard-back judge is the hosted speech-to-text first and a Whisper next. The
+  Whisper that runs today (:9030) is a Hindi and Hinglish model, so it is a second judge for Hindi lines only.
+  For every other language there is no second judge: when the hosted service does not answer, a take is stored as
+  "not checked" (spoken, not flagged, reported). The second judge for those languages is the multilingual Whisper
+  of the QA server (item 6). The backend side is built and tested with a fake server: once `V1_QA_URL` is set,
+  `qa_server` is in the judge order after the other two (`V1_HQ_JUDGE_ORDER=prisma,whisper_gpu,qa_server`).
+- **Why deferred:** item 6 needs a shell on the VM.
+- **Commands:** those of item 6, then in v1's `backend/.env`: `V1_QA_URL=http://127.0.0.1:9045`, `V1_HQ_JUDGE=true`.
+- **Expected GPU memory:** 0 on CPU (item 6).
+- **Verify:** `GET /api/v1/jobs/<id>/backcheck?lang=ta-IN` on a finished job shows `judges` (who scored how many
+  lines). To see the second judge work, run one job with `V1_HQ_JUDGE_BY_LANG=ta-IN=qa_server` and compare its
+  scores with the hosted judge's on the same job (`python -m eval.v1.rescore --hear-all`).
+- **Rollback:** empty `V1_QA_URL`.
+- **Before trusting it:** how the QA server's Whisper scores against the hosted judge on the same takes has not
+  been measured (the server has never run with its real model). Two judges' scores are not comparable until it has.
+
+## 23. Labels for the calibration page, v1.1 WS3
+
+- **What:** `/studio/calibrate` needs a person who speaks the language to label takes good or bad: at least 30 per
+  language with 5 of each kind before a flag line is recommended (`CALIBRATION.md`). Until then
+  `V1_HQ_BACKCHECK_MIN=0.9` is the value v1 started with, not a measured one, and "flagged lines" is a count
+  nobody has checked by ear.
+- **Why deferred:** it needs ears, for Tamil and Bengali a speaker of each.
+- **Commands (laptop only):** `V1_HQ_CALIBRATE=true` and `V1_HQ_JUDGE=true` in v1's `backend\.env`, restart the
+  backend, open `http://localhost:3100/studio/calibrate`. The takes of the three test videos are there once
+  `python -m eval.v1.rescore --data ..\data-v1 --jobs a69b4e0b,7782d82a,6bb779d8 --out ..\data-v1\eval\ws3
+escore --write-hearings`
+  has run (done in this work; it reads the cache only).
+- **GPU memory:** none.
+- **Rollback:** `V1_HQ_CALIBRATE=false`; delete `data-v1\calibration\labels.jsonl` to start over.
+
+## 24. Five comparison backends left running on ports 8111-8115, v1.1 WS3
+
+- **What:** five v1 comparison backends started for the Studio measurement on 25 Nov 2026 are still running,
+  idle: 8111 (`ws3-std`), 8112 (`ws3-hq`), 8113 (`ws3-fixed`), 8114 (`ws3-adapt`), 8115 (`ws3-new`). They hold
+  those ports, some memory, and nothing else: no job is running on them, and they are not v0, the v1 backend on
+  8110, a model server or the tunnel.
+- **Why deferred:** they were started through Git Bash, where stopping the task ends the shell around the
+  server and leaves the server. Ending a process by its id was not among the things this work was allowed to do.
+- **Commands (PowerShell on the laptop):**
+  ```powershell
+  Get-NetTCPConnection -LocalPort 8111,8112,8113,8114,8115 -State Listen | Select-Object LocalPort, OwningProcess
+  Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -match '--port 811[1-5]' } |
+      Select-Object ProcessId, CommandLine        # check: only the five comparison backends
+  Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -match '--port 811[1-5]' } |
+      ForEach-Object { Stop-Process -Id $_.ProcessId }
+  ```
+- **GPU memory:** none.
+- **Verify:** `curl http://127.0.0.1:8111/health` (and 8112-8115) no longer answers; `scripts/v1/v0-check.sh` still
+  says v0 answers; `http://127.0.0.1:8110/api/v1/health` still answers.
+- **Rollback:** nothing to undo. From now on comparison backends are started with `scripts\v1\ab-server.ps1` from
+  PowerShell, where stopping the task stops the server (checked on 8116-8118 in the same work).
+

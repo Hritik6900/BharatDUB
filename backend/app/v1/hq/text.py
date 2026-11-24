@@ -100,14 +100,16 @@ def word_limit(slot_s: float, speech_s: float, src_words: int, pace_ms: float, s
 
 
 async def translate_timed(st: Stages, lines: list[str], limits: list[int], target: str, glossary: list[str],
-                          native: bool) -> list[str] | None:
+                          native: bool, terms: list[str] | None = None) -> list[str] | None:
     lang = LANG_NAMES.get(target, target)
     items = [{"line": t, "max_words": m} for t, m in zip(lines, limits)]
     system = (f"You dub an Indian video into {lang}. The items are its lines in order, each with `max_words`: how many "
               f"{lang} words fit the time that line has. Translate every line into natural spoken {lang}, the way a "
               "creator talks on camera, keeping the tone and the same words for the same things across lines. Use at "
               "most `max_words` words; when the full meaning does not fit, keep the main point. "
-              + script_rule(target, native, glossary) +
+              + script_rule(target, native, glossary)
+              + (f" Names and terms of this video (keep every one that a line has, and write each the same way "
+                 f"every time): {', '.join(terms)}." if terms else "") +
               " Return ONLY a JSON array of strings, same length and order.")
     out = await _array(st, system, items)
     if out is None:

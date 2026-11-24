@@ -69,6 +69,13 @@ are not in `api/`; their timing per phrase is in `sessions/` and `trace/`.
 voice; `ws2-off` also holds the one flag-off session of a first English attempt that was stopped). In those, a line with `copied_voice` 0 or 1 and no `first_audio_ms` and no `skipped` is one the hosted
 voice refused (25 Nov 2026: HTTP 502 on many stock lines).
 
+`jobs/index.csv` rows and `trace/` folders named `ws3-*` are the Studio jobs of the v1.1 WS3 measurement (25 Nov
+2026, `docs/v1/EVAL_REPORT.md` section 6): `ws3-std` (standard), `ws3-hq` (HQ with the judge), `ws3-fixed` (five
+takes of every line), `ws3-adapt` (adaptive takes), `ws3-new` (every WS3 flag on), `ws3-new-first` (a first build
+of the same). A `studio_line` record in those traces has `scored_by` (who judged the line), `backcheck`,
+`versions` (takes made) and `flagged`; `hq_review_edit` is one edit by the review: the rule that failed, words
+and letters before and after, taken or not, the model. No line of text is in either.
+
 The v1.1 fields are in a record only where they were measured (a backend with the trace or the dense-speech
 flags on, from 24 Nov 2026). `sessions/ws1-*/` and `trace/ws1-*/` are the comparison backends of the v1.1 WS1
 measurement (`docs/v1/LIVE_DENSE_REPORT.md`): off, budget, ctl (budget + controller), native, tight.

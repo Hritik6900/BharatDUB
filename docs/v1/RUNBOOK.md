@@ -85,6 +85,12 @@ change. What each one does, and what was measured, is in `PROGRESS.md` and `EVAL
 | `V1_LIVE_NATIVE_SPEED` | v1.1: our voice engine is asked to speak a line that must be shorter up to 1.2x faster itself, never under 320 ms a word; the rest by tempo as before | off: tempo only |
 | `V1_LIVE_WARMSTART` | v1.1 session start: one tiny translation per target language, our voice engines asked for their state (and one short line per language on every engine process when a streamer's stored voice is on them), one tiny hosted line per language the hosted voice will open in; a streamer's stored voice is sent to the engines when the session is created; a stock voice is chosen once per language by the speaker's pitch (male or female, where the language has both) and kept; the change to the copied voice is softened (fade out, fade in, level) | off: v0's warm-up (one translation, first language) and the usual stock voices |
 | `V1_EN_SINGLE_VOICE` | v1.1: English in a GPU-engine session is spoken in one voice for the whole session (`V1_EN_VOICE`), never chosen line by line | off: the hosted copy when 2 s are spare, else a stock voice |
+| `V1_HQ_JUDGE` | v1.1 Studio HQ: a dubbed line is heard back by the best speech-to-text for its language (hosted first, then our GPU Whisper where it hears the language, which is Hindi only, then the QA server's Whisper once it runs), the next one when the first fails; the comparison treats the two ways of storing one letter as one spelling; every take, line and trace record says who judged it | off: the `score` list of the routing file and v1's comparison |
+| `V1_HQ_CALIBRATE` | `/studio/calibrate` and its routes: label takes blind, agreement with the judge, a recommended flag line (`CALIBRATION.md`) | off: the routes answer 404, the page says it is off |
+| `V1_HQ_ADAPTIVE` | one take of a line first; more, up to `V1_HQ_ADAPTIVE_MAX` (5), only while the best score is under `V1_HQ_ADAPTIVE_MIN` (0 = the flag line) | off: up to `V1_HQ_NBEST` (4) until a take passes |
+| `V1_HQ_NORMALISE` | numbers, decimals, dates, clock times, the rupee and dollar sign, %, units and short forms are written out by rule in Hindi, Bengali, Tamil and English before the voice sees the line; abbreviations in capitals letter by letter for our own voice | off: the model-written step alone, as v1 |
+| `V1_HQ_AUTO_GLOSSARY` | names, brands and repeated English terms found in a job's transcript are used as that job's glossary (never saved to the shared one); `GET /api/v1/jobs/<id>/glossary-candidates` | off |
+| `V1_HQ_REVIEW` | the hosted model reviews every translated line against the written rubric (meaning, numbers and names, spoken register, fits the slot) and may edit; a cleaned transcript line that changed script or lost its English terms is put back | off: v1's plain review |
 | `V1_STORE` | `postgres` (with `POSTGRES_DSN`) | `json` |
 
 Not a flag but a setting: `LIVE_FIT_MAX_TEMPO=1.2` caps the Live speed-up at 1.2x (v0: 1.3).
@@ -101,6 +107,18 @@ has it; `stock`), `V1_EN_COPY_LEAD_MS=3500`, `V1_WARM_FADE_MS=150`, `V1_WARM_LEV
 `GET /api/live/sessions/<id>/metrics` shows `warm` (what each warm-up call took, the speaker's pitch, the stock
 voice chosen per language and why) and `en_voice`. On a night when the hosted stock voice refuses lines (HTTP 502,
 "technical difficulties"), `V1_EN_VOICE=copy` keeps English audible: the hosted copy answered every line then.
+
+The Studio HQ flags of v1.1 WS3 all need `V1_STUDIO_HQ` and act on HQ jobs only. Settings beside them:
+`V1_HQ_JUDGE_ORDER=prisma,whisper_gpu,qa_server`, `V1_HQ_JUDGE_BY_LANG=` (e.g. `hi-IN=whisper_gpu,prisma`),
+`V1_HQ_BACKCHECK_MIN=0.9` (the flag line; the calibration page recommends a value once there are labels),
+`V1_HQ_ADAPTIVE_MAX=5`, `V1_HQ_ADAPTIVE_MIN=0`, `V1_HQ_ADAPTIVE_SAME_STOP=false` (`true`: no further take once
+two takes were heard back as exactly the same words; fewer takes, a little lower score), `V1_HQ_CALIBRATE_MIN_LABELS=30`, `V1_HQ_AUTO_GLOSSARY_MAX=40`.
+`V1_HQ_TAKES_FIXED=5` makes every line five times whatever it scores: a measurement aid, not for normal use.
+Review edits: sizes and the failed rule in the trace (kind `hq_review_edit`), the words in
+`<DATA_DIR>/hq_review/<job>.jsonl` only. Old jobs scored again without making a voice line:
+`python -m eval.v1.rescore --data <DATA_DIR> --jobs <ids> --out <dir>` (from `backend/`).
+The Studio comparison of WS3: five comparison backends and `scripts/v1/eval-studio-ws3.sh` (its head says which),
+then `python -m eval.v1.studio_table <out folder> --ab <data>/ab`.
 
 The dense-speech flags (v1.1 WS1; measured in `LIVE_DENSE_REPORT.md`) have their numbers as settings:
 `V1_BUDGET_SHARE=1.0` (the dub may take this share of the slot), `V1_BUDGET_OVER=1.15`, `V1_BUDGET_REASK_TIMEOUT_S=2.5`,

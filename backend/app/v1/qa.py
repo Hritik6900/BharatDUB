@@ -15,23 +15,37 @@ from app.providers.base import ProviderError
 
 
 HEARD_RULE = "spaces-aside-1"   # which rule a stored score was worked out with (see heard_share)
+HEARD_RULE_NFC = "nfc-2"        # the same rule on normalised letters (`V1_HQ_JUDGE`)
 
 
-def _words(text: str) -> list[str]:
+def _words(text: str, nfc: bool = False) -> list[str]:
+    if nfc:
+        # One letter can be stored two ways: Bengali য় ড় ঢ় and the Devanagari nukta letters exist as one code
+        # point and as letter + dot. A translation model writes one, a speech-to-text the other, and the two
+        # look and sound the same. Seen on the first HQ jobs: a Bengali line heard back word for word scored 86%,
+        # and every take of it scored the same. Normalising both sides makes them one spelling. Joiners that
+        # cannot be seen are dropped instead of splitting the word.
+        text = unicodedata.normalize("NFC", text)
+        text = "".join(c for c in text if unicodedata.category(c) != "Cf")
     kept = "".join(c if unicodedata.category(c)[0] in "LMN" else " " for c in text.lower())
     return kept.split()
 
 
-def heard_share(said: str, heard: str) -> float:
+def rule_now(settings: Settings | None = None) -> str:
+    return HEARD_RULE_NFC if (settings or get_settings()).v1_hq_judge else HEARD_RULE
+
+
+def heard_share(said: str, heard: str, rule: str = HEARD_RULE) -> float:
     """Share of the words in `said` that a listener got (0-1).
 
     A word counts when it was heard as a word (the same word, or one with the same first four letters), or when
     its letters are there in what was heard with the spaces set aside. The second rule is for spelling, not for
     hearing: a dub says "pi si aar" as three words and the speech-to-text writes "PCR" as one, or splits a long
     compound in two; the first rule alone counted those lines as half lost (seen on the first HQ run: the same
-    low score on every take of such a line).
+    low score on every take of such a line). `rule` = HEARD_RULE_NFC compares normalised letters (see `_words`).
     """
-    want, got = _words(said), _words(heard)
+    nfc = rule == HEARD_RULE_NFC
+    want, got = _words(said, nfc), _words(heard, nfc)
     if not want:
         return 0.0
     have = set(got)

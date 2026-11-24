@@ -733,3 +733,273 @@ the English voice does not reach it.
   `GET /api/live/sessions/<id>/metrics` shows `warm` (the calls, the speaker's pitch, the stock voice per
   language and why) and `en_voice`.
 - **Roll back:** `V1_LIVE_WARMSTART=false`, `V1_EN_SINGLE_VOICE=false` (the defaults) and restart the backend.
+
+## v1.1 WS3: Studio HQ toward 96% (25 Nov 2026)
+
+Six flags, all off by default, all acting on HQ jobs only (`V1_STUDIO_HQ`). With them off an HQ job makes the
+same calls, stores the same fields and keeps the same cache keys as before (tests below).
+
+### Found first: the judge had been taking points off Bengali for nothing
+
+Before anything was built the takes of the 23 Nov HQ jobs were read: what the dub should say against what the
+judge heard, for every kept take under 90%. The judge was already the hosted speech-to-text for every one of the
+269 stored takes of the seven HQ jobs (`scored_by: prisma`); the fault was in the comparison. One Bengali letter can be stored two ways
+(য়, ড়, ঢ় as one code point, or as the base letter and a dot under it). The translation model writes one form,
+the speech-to-text the other; on screen they are the same letter, and v1 counted them as different words. A
+Bengali line heard back word for word scored 86% ("স্নাইপার দিয়ে হেডশট মারলাম, কী দারুণ ক্লাচ!": the word
+"দিয়ে" was "missed"), and every take of it scored the same, which is why Bengali lines were flagged with the
+same score on all four takes. Devanagari has the same two forms (क़ ख़ ग़ ज़ ड़ ढ़ फ़); Tamil does not.
+
+### Built
+
+- **Judge (`V1_HQ_JUDGE`, `app/v1/hq/judge.py`, `qa.py`).**
+  - Who hears a line back is a table per language: `V1_HQ_JUDGE_ORDER=prisma,whisper_gpu,qa_server`, with
+    `V1_HQ_JUDGE_BY_LANG` for single languages. A judge that does not hear a language is left out for it. Our
+    Whisper on :9030 is a Hindi and Hinglish model (`language="hi"` is fixed in the engine), so it is a second
+    judge for Hindi lines only; it writes Latin letters, which the local model puts into Devanagari before the
+    comparison, and a transcript that cannot be put into Devanagari is no judgement. The QA server's multilingual
+    Whisper (:9045) is the third judge and hears every language; it has never run (`NEEDS_APPROVAL.md` items 6, 22).
+    So today: Hindi has two judges, Tamil, Bengali and the rest have one, and a take nobody could hear is stored
+    as "not checked", spoken, not flagged, as before.
+  - The comparison brings both texts to one spelling of every letter (Unicode NFC) and drops joiners that cannot
+    be seen instead of splitting a word at them (`qa.HEARD_RULE_NFC`, "nfc-2"). Nothing else about the rule moved:
+    a test holds the old and the new rule to the same result on lines without such letters.
+  - Recorded: every take stores `scored_by`, the rule and (new) what was heard; the line's `qa` has `by` and, when
+    a judge was passed over, `passed_over`; the trace's `studio_line` has `scored_by` and `judge_passed_over`;
+    `GET /api/v1/jobs/<id>/backcheck` returns `judges` (who scored how many lines) and `rule`.
+  - A score stored under another rule is worked out again from what was heard, without hearing again
+    (`hq/voice.py`, the eval route, the calibration page).
+- **Re-scoring old jobs (`python -m eval.v1.rescore`).** Reads a backend's store and cache, never writes them.
+  Takes: the hearing of that day from the score cache, counted by the rule in use. Finished lines: the file in the
+  job folder, or, when the job has expired and its folder is gone (uploads are kept for 24 h), the kept take
+  fitted to its slot again. `--hear` lets the judge hear what is not in the cache, `--write-hearings` puts the
+  hearings where the calibration page finds them.
+- **Calibration (`V1_HQ_CALIBRATE`, `app/v1/hq/calibrate.py`, four routes, `web/app/studio/calibrate/page.tsx`,
+  `docs/v1/CALIBRATION.md`).** Plays a take with the words it should say and nothing else, takes good / bad /
+  skip (keys g, b, s), one undo. Labels in `<DATA_DIR>/calibration/labels.jsonl`. Shows agreement at the flag line
+  in use with its four counts, and a recommended flag line: the cut with the highest balanced accuracy over the
+  labels. Under 30 labels, or under 5 of either kind, it recommends nothing and says how many are missing; with
+  none it says "No labels yet". Labels on takes scored under another rule are counted apart, not mixed in.
+- **Adaptive takes (`V1_HQ_ADAPTIVE`, `hq/voice.py`).** One take; more, up to `V1_HQ_ADAPTIVE_MAX` (5), only while
+  the best score is under `V1_HQ_ADAPTIVE_MIN` (0 = the flag line), and none once two takes were heard back as
+  exactly the same words when `V1_HQ_ADAPTIVE_SAME_STOP` is set (off by default, measured below). v1 already
+  stopped at the first take that passed, with a limit of 4; what is new is the limit of 5 and a threshold of
+  its own. `V1_HQ_TAKES_FIXED=N` makes every take regardless, to
+  have something to compare with.
+- **Normaliser (`V1_HQ_NORMALISE`, `hq/normalise.py`).** Rules, no model, before the voice sees the line (and
+  before v1's model-written step, which then only sees what the rules left): whole numbers to 99,99,99,999 counted
+  the Indian way, decimals, native digits, `dd/mm/yyyy` dates, clock times, ₹ / Rs. / INR with lakh, crore and
+  thousand, $, %, ranges, km kg cm mm ml GB MB, Dr. Mr. Mrs. vs. etc., & + = @, and for our own voice (which reads
+  only the language's own letters) abbreviations in capitals letter by letter. **Covered: Hindi, Bengali, Tamil,
+  English. Not covered: Telugu, Kannada, Malayalam, Marathi, Gujarati, Punjabi** (their lines are left to the
+  model step as before; the number words of those six were not written because nobody here can check them).
+  The rules know no grammar: a case ending after a figure stays as the translator wrote it.
+- **Auto-glossary (`V1_HQ_AUTO_GLOSSARY`, `hq/glossary.py`).** From the job's first hearing, by rule: names (a
+  capitalised word in Latin letters, runs of them, a capital inside a word), abbreviations (DNA, T20), English
+  terms said in two or more lines of a transcript in another script, and, as proposals only, long words of the
+  transcript's own script said in three or more lines. Used for this job's cleaning, translation and review;
+  stored in the job's `meta.json`; never written to the shared glossary.
+  `GET /api/v1/jobs/<id>/glossary-candidates` shows them for any job.
+- **Review (`V1_HQ_REVIEW`, `hq/review.py`).** The hosted model (the `gemini` provider object of `providers/`,
+  through the router's walk with its timeout; the routing file's `review` list when it is not configured) gets
+  every line with the source, the first hearing where it differs, and the word limit, and the rubric: meaning
+  kept; numbers and names kept; natural spoken register; fits the slot. It answers ok or the failed rule, the
+  corrected line and a note. A line failed without a corrected line is asked for once more. An edit in the wrong
+  script, empty, or over the word limit is refused. Every edit, taken or refused: the trace gets kind
+  `hq_review_edit` (job, language, line, rule, words and letters before and after, taken, model: no text),
+  `<DATA_DIR>/hq_review/<job>.jsonl` gets the same with the source, both lines and the note. A test checks that
+  none of the words reach the trace.
+  The flag also guards the transcript: a merged or cleaned line that is no longer the line that was heard is
+  put back (`keeps_source`; what it found is the next heading).
+
+### Found second: the HQ transcript steps change what the video says, and heard-back cannot see it
+
+Heard-back compares the dub with its own text. It says nothing about whether that text is what the speaker said.
+Reading the stores of the HQ jobs (the first hearing, kept as `src_text_raw`, against the line after v1's "merge
+the hearings" and "clean" steps) showed, on 23 Nov and again in today's reruns with every v1.1 flag off:
+
+- **Video C (`class12c`): 12 of 13 lines hold the line before them.** The merge step gives the model each line
+  with the line before and after as context, and the model answered with the line before. Every dubbed line from
+  the second on says what was said one line earlier; the last line of the video is never said. This job scored
+  93.3% heard back today and 91.1% on 23 Nov.
+- **Video B (`class12b`): all 13 lines came back in Latin letters** (the script our Whisper writes), three
+  of them without their first words: "जल्दी से chat में बताओ" became "Main batao", "oxygen की कमी से ..." lost
+  "oxygen", "embryo के अलग अलग stage ..." lost "embryo". 98.1% heard back today.
+- Video A: no line changed in either run.
+
+So two of the three HQ jobs behind the 23 Nov figure, and behind today's "HQ as v1 built it" figure, dub a
+transcript that is not what was said. With `V1_HQ_REVIEW` a cleaned line that is no longer the line that was
+heard is put back (`keeps_source`: every English term of the first hearing still there, the words of the
+transcript's own script still there in that script, not more than four words in ten gone). In today's all-flags
+jobs: video A 1 line changed (Pastor to Pasteur), video B 1 (a capital letter), video C 12 merged, 8 put back,
+the 4 left are a capital letter, a spelling, punctuation and one added "इस"; by the same rule none of the 38
+lines is "not the line heard". The guard is a rule about words, not a proof that a line is right.
+
+### Measured
+
+Three videos of twelve spoken lines (`class12`, `class12b`, `class12c`; 24, 26 and 26 dubbed lines a job), Tamil
++ Bengali, GPU engine, the voice copied from the video with consent, as on 23 Nov. **One job per video and
+setup**, 25 Nov 2026 01:48-02:45 IST, one job at a time, no stream live on v0 or v1 before any job. Every
+finished line (the audio that is in the video, after fitting) heard back by the hosted speech-to-text and counted
+by the corrected rule; all 380 lines of the 15 jobs were judged by it, none by a fallback. Mean
+(lowest-highest video). Raw: `data-v1/eval/ws3/run1/` (`table.md`, `table.json`), stores in `data-v1/ab/ws3-*`.
+
+Setups (comparison backends, `scripts/v1/eval-studio-ws3.sh`): **standard** = every flag off; **HQ** = v1's HQ
+(`V1_STUDIO_HQ`, `V1_FIT_115`, `V1_ROUTER`) with `V1_HQ_JUDGE`; **fixed 5** = HQ + `V1_HQ_TAKES_FIXED=5`;
+**adaptive** = HQ + `V1_HQ_ADAPTIVE` (with the same-words stop on); **all flags** = adaptive + `V1_HQ_NORMALISE`
++ `V1_HQ_AUTO_GLOSSARY` + `V1_HQ_REVIEW`. Fixed 5 and adaptive were given the HQ job's transcript and translation
+from its cache, so those three speak the same lines; their "total" has no transcription or translation in it.
+
+| | Standard | HQ | Fixed 5 | Adaptive | All flags |
+|---|---|---|---|---|---|
+| **Words heard back** | 90.6% (88.4-93.0) | **95.9%** (93.3-98.1) | 96.1% (92.3-99.1) | 95.0% (93.2-97.8) | **94.5%** (93.2-96.5) |
+| Video A / B / C | 88.4 / 90.4 / 93.0 | 96.3 / 98.1 / 93.3 | 96.8 / 99.1 / 92.3 | 94.0 / 97.8 / 93.2 | 93.2 / 93.9 / 96.5 |
+| Tamil A / B / C | 82.9 / 95.5 / 90.7 | 96.6 / 97.8 / 87.5 | 96.6 / 99.0 / 87.0 | 93.1 / 99.0 / 88.7 | 90.7 / 94.3 / 96.2 |
+| Bengali A / B / C | 94.0 / 85.4 / 95.2 | 95.9 / 98.4 / 99.2 | 96.9 / 99.2 / 97.6 | 94.9 / 96.5 / 97.6 | 95.7 / 93.5 / 96.8 |
+| Total time A / B / C (s) | 81 / 54 / 66 | 133 / 117 / 136 | 193 / 195 / 199 | 86 / 86 / 101 | 140 / 129 / 130 |
+| Voice stage A / B / C (s) | 23 / 24 / 25 | 73 / 67 / 79 | 170 / 176 / 178 | 62 / 66 / 79 | 77 / 73 / 75 |
+| Takes made A / B / C | 24 / 26 / 26 | 45 / 45 / 53 | 120 / 130 / 130 | 43 / 45 / 55 | 53 / 52 / 51 |
+| Lines flagged A / B / C (of 24 / 26 / 26) | not scored in the job | 5 / 3 / 7 | 3 / 1 / 7 | 6 / 4 / 8 | 8 / 9 / 4 |
+| Transcript lines that are not the line heard A / B / C | does not merge | 0 / 13 / 12 | 0 / 13 / 12 | 0 / 13 / 12 | 0 / 0 / 0 |
+
+**Target: 96% of words heard back. Not reached.** HQ: 95.9% over the three videos (two of three videos over 96%,
+the third 93.3%), and two of those three dubs are of a damaged transcript. All flags, the setup whose dubs say
+what the videos say: 94.5%, with one video of three over 96%.
+
+**Before and after.** The judge did not change (hosted speech-to-text then and now); the counting rule did. The
+23 Nov figures in `EVAL_REPORT.md` section 2 are by the old rule and are not comparable with today's. The 23 Nov
+output was scored again by the new rule from the hearings of that day (`eval.v1.rescore`), which makes it so:
+
+| | 23 Nov, as reported (old rule) | 23 Nov output, new rule | 25 Nov rerun, new rule |
+|---|---|---|---|
+| Standard, words heard back | 89.2% (84.9-93.4) | 91.1% (87.3-95.3) | 90.6% (88.4-93.0) |
+| HQ, words heard back | 92.5% (91.1-93.5) | 95.5% (93.9-96.7) | 95.9% (93.3-98.1) |
+| HQ Tamil A / B / C | 95.8 / 97.4 / 90.2 | 95.8 / 97.4 / 90.2 (no such letters in Tamil) | 96.6 / 97.8 / 87.5 |
+| HQ Bengali A / B / C | 90.1 / 89.6 / 92.1 | 96.1 / 95.9 / 97.7 | 95.9 / 98.4 / 99.2 |
+| HQ lines flagged, of 76 | 25 | 15 (the same kept takes under 90% by the new rule) | 15 |
+| HQ takes made | 179 | 179 | 143 |
+| HQ total time A / B / C (s) | 222 / 312 / 232 | the same jobs | 133 / 117 / 136 |
+| Standard total time A / B / C (s) | 84 / 78 / 84 | the same jobs | 81 / 54 / 66 |
+
+- What could be scored again: all 179 takes of the three 23 Nov HQ jobs (their audio is in the cache and their
+  hearings in the score cache) and all 152 finished lines. The HQ jobs' folders had expired, so their 76 finished
+  lines were made again from the kept take and its slot (the fit step is the same ffmpeg call); 75 of them matched
+  the stored hearing by content, 1 did not and was heard again (one hosted call). The 76 standard lines were in
+  their job folders. Nothing was synthesised. What could not: nothing was missing for these six jobs.
+- The new rule moved Bengali by 5.6 to 6.3 points on the HQ jobs and 2.7 to 4.6 on the standard ones, and Tamil
+  by nothing. Ten of the 25 flags of 23 Nov were this spelling fault.
+- **So HQ did not get better between 23 and 25 Nov: it had been at 95.5% all along and was reported as 92.5%.**
+  The 0.4 point between the two HQ columns is inside what one job a video shows (the same standard pipeline gave
+  93.9% and 82.9% for Tamil on video A on the two days).
+- HQ is about half the time it took on 23 Nov (128 s against 255 s a video). Part is fewer takes (143 against
+  179: Bengali lines that used to "fail" on every take now pass on the first), part is that one 23 Nov job had
+  moved to the hosted copy of the voice; how much is the hour of the night was not separated.
+
+**Adaptive against fixed takes, same lines.**
+
+| | Fixed 5 | Adaptive | |
+|---|---|---|---|
+| Voice stage, three videos (s) | 524 (170 / 176 / 178) | 206 (62 / 66 / 79) | **61% less** (64 / 62 / 56) |
+| Whole job as run here (s) | 193 / 195 / 199 | 86 / 86 / 101 | 56 / 56 / 49% less |
+| Takes | 380 | 143 | |
+| Words heard back, finished lines | 96.1% (92.3-99.1) | 95.0% (93.2-97.8) | 1.1 points lower, in separate jobs |
+| Lines flagged, of 76 | 11 | 18 | |
+
+- The two columns are separate jobs with their own takes, and a take is a random draw: the 1.1 points are not a
+  clean measure of the rule. The clean one is the rule applied to the 380 takes the fixed jobs made, in the order
+  they were made (`eval.v1.studio_table`, scores of the takes before fitting): best of five 96.8%; "one take, more
+  only under 90%, at most five" keeps the same take on all 76 lines (96.8%) with 145 takes instead of 380; the
+  first take alone 93.8%. **Heard-back did not change, for 62% fewer takes.**
+- With the same-words stop (`V1_HQ_ADAPTIVE_SAME_STOP`, as the adaptive jobs ran): 129 takes, 96.3%, a
+  lower-scored take kept on 3 of 76 lines. It is off by default after this: 16 takes are not worth 3 lines.
+- Against v1's own rule (up to four takes until one passes) adaptive saves nothing: both made 143 takes (voice
+  stage 73 s and 69 s a video). v1 was already adaptive; what was missing was the number for fixed takes.
+- Picking among takes is still where HQ's gain is: first take 93.6%, kept take 96.4% in the HQ jobs (29 of 76
+  lines needed more than one take).
+
+**The text flags (all-flags jobs).**
+
+- **Review:** 76 lines read, 24 edits, all taken (12 numbers and names, 9 meaning, 2 register, 1 length); 4
+  lines failed without a corrected line were asked for again and came back corrected. The notes include a wrong
+  number ("one hour" for "one and a half hours"), a place name misspelt, a verb that changed the meaning
+  ("gave the vaccine" for "made the vaccine"), subject terms that had dropped out. Two languages, hosted model,
+  77 model calls in the three jobs (HQ without the flags: 42). Whether an edit was right was read from its note,
+  not judged by a speaker of Tamil or Bengali.
+- **A first build was measured too** (three jobs, before the "ask again" step and the stricter transcript
+  guard): 94.8% (93.0-95.8), 30 edits of which 2 refused; one of the two was the wrong verb above, named by the
+  reviewer and left in the dub because no corrected line came with it. That is why the step was added.
+- **Auto-glossary:** 16 candidates over the three videos (Edward Jenner, Sensex, Nifty, Valorant, BGMI, RBC, DNA,
+  RNA, PCR, oxygen; and "Pastor", the first hearing's spelling of Pasteur, which the cleaning step corrected).
+  Not proposed: names said once in lower case by the hosted speech-to-text (hemoglobin, jet). Its effect on the
+  dub was not separated from the review's.
+- **Normaliser:** did nothing in these jobs (0 lines changed by rule, 0 by the model step): the test videos say
+  their numbers as words ("पांच सौ point", "डेढ़ घंटे") and the translator writes them as words. **Not measured
+  on real material**; tested by unit tests only (below).
+- **The all-flags jobs score lower on heard-back than HQ (94.5% against 95.9%, 21 lines flagged against 15),**
+  first build and final build alike on videos A and B. Read line by line, the flagged lines are mostly a
+  spelling the judge writes differently for the same sound (Bengali নিচে / নীচে, হলো / হল; Tamil ஐந்நூறு / ஐநூறு,
+  யாரு / யார், ஆகுறத / ஆகிறத, பிராப்ளம் / ப்ராப்ளம்) and English terms in the other script, of which the reviewed
+  lines have more because the review keeps them. On video B the HQ job is also dubbing a transcript with words
+  missing, which is easier to say. Whether those lines sound wrong to a person is what the calibration page is
+  for; nobody has listened.
+
+**Calibration:** no labels yet, so no agreement figure and no recommended flag line. The page was opened
+against a backend holding the takes of a real job: 53 takes offered, blind, audio served, summary "no labels
+yet". The takes of the 23 Nov jobs are prepared for it (189 hearings written to `data-v1/calibration/`).
+
+**Not measured:** more than one job per video and setup (the spread between two equal jobs is large: see Tamil on
+video A); speaker similarity; any language but Tamil and Bengali; **Hindi as a target** (our Whisper as second
+judge was tested with fakes only, and the hosted judge writes English words in Latin letters where a Hindi dub
+for our voice has them in Devanagari: its score on Hindi will be too low until that is looked at); the judge
+failing in a real job (it never did: 0 lines passed over); the normaliser on a video with digits; the glossary
+alone; a video with music; a long video; the same-words stop off in a real job (the default now; its numbers
+above are from the fixed jobs' takes).
+
+### Mistakes made in this work, and what they cost
+
+- **The first fixed-5 and adaptive jobs were spoken by the hosted copy of the voice, not by our engine.** The
+  script copied the HQ backend's `clone` cache to the other backends; the cached voice names a sample file in
+  the first backend's voices folder, our engine could not open it, and the job fell to the hosted copy (v1's
+  rule: the voice that speaks first keeps the job). Seen in the takes' `provider`, the two jobs were set aside
+  (`run1_bad/`), the script no longer copies `clone`, and both setups were run again on fresh backends. Cost: 150
+  lines on the hosted copy and their 150 hearings. It is also a fault waiting in the product: a cached copy of a
+  voice whose sample file is gone silently moves a whole job to the hosted copy, with one line in the warnings.
+- **Five comparison backends (ports 8111-8115) are still running.** They were started through Git Bash; stopping
+  their task ended the wrapper and left the server. Ending a process by its id is on the list of commands not to
+  run, so they were left, idle. The three started through PowerShell (8116-8118) stopped when their task was
+  stopped; `eval-studio-ws3.sh` now says to start backends that way.
+- Short test runs and one cache-reading script ran on the laptop while five of the jobs were running (a few
+  seconds of CPU each). The jobs' time is in the voice engine and the hosted calls; no job was repeated for it.
+- Hosted and GPU use of this work, all 20 jobs (15 counted, 3 from the first build of the all-flags setup, 2 set
+  aside, 1 of them stopped at render): 152 clips transcribed by the hosted service (437 s of audio), 1137 takes
+  and 480 finished lines heard back by it (and 1 old line for the re-scoring), 1224 voice lines (150 by the hosted copy), 187 model calls (the review's on the hosted
+  model), 18 voice copies made.
+
+- **Tests:** 275 pass, 1 skipped (was 241 + 1). New: `tests/test_v1_hq_ws3.py` (34: the six flags listed and off;
+  the two spellings of a letter equal only under the new rule and nothing else moved; judge off = the routing
+  list, the old rule, the old fields; judge on = first judge, who judged, who was passed over; our Whisper judges
+  Hindi only and a transcript it cannot put into Devanagari is no judgement; the QA server as third judge; the
+  order per language; a stored hearing scored again under the rule in use; take plans; adaptive one take, up to
+  five, its own threshold, the same-words stop on and off; fixed takes; number words of Hindi, Bengali, Tamil and
+  English against written-out values, every table whole and without repeats, every number up to a lakh different;
+  lines with the rupee sign, %, units, dates, clock times, lakh, titles, native digits and ranges in each of the
+  four; abbreviations spelled for our voice only; the six uncovered languages left alone; glossary candidates
+  from a Hindi and from a Latin transcript; review edits only what fails, refuses a wrong script and an
+  over-long line, logs every edit, and none of the words reach the trace; asks again for a failed line without a
+  correction; an unusable answer changes nothing; the transcript guard on lines taken from real jobs; a whole HQ job
+  with the text flags on; **a whole HQ job with every new flag off: the same model calls in the same order, the
+  same meta fields, the same fields on a stored take, no new folder**; calibration with no labels, the blind
+  queue over the score range, agreement and the recommended line on labelled takes, a stored hearing under the
+  rule in use, labels under another rule left out; the calibration and glossary routes 404 without their flags).
+  Website: `npx tsc --noEmit` clean.
+- **v0 after this workstream:** all nine checks ok (`scripts/v1/v0-check.sh`). Nothing of v0 was edited, started or
+  stopped. **Five comparison backends are left running** (8111-8115, see the mistakes above).
+- **Test by hand:** v1's `backend\.env`: `V1_HQ_JUDGE=true`, `V1_HQ_ADAPTIVE=true`, `V1_HQ_REVIEW=true`,
+  `V1_HQ_AUTO_GLOSSARY=true`, `V1_HQ_NORMALISE=true`, `V1_HQ_CALIBRATE=true`; restart the backend; dub a video on
+  `/studio` with the HQ choice; `/studio/calibrate` for the labels; `GET /api/v1/jobs/<id>/backcheck?lang=ta-IN`
+  for the judge of every line; `data-v1\hq_review\<job>.jsonl` for the review's edits. To repeat the comparison:
+  the head of `scripts/v1/eval-studio-ws3.sh`, then
+  `python -m eval.v1.studio_table ..\data-v1\eval\ws3\run1 --ab ..\data-v1\ab --names fixed=ws3-fixed2,adapt=ws3-adapt2,new=ws3-new2`
+  (from `backend\`; `--names` because this run's second set of backends had folders of their own).
+- **Roll back:** the six flags to `false` (the defaults) and restart the backend. Labels and review logs stay in
+  the data folder and do nothing while the flags are off.

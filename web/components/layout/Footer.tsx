@@ -19,6 +19,7 @@ const COLS = [
       { href: "/glossary", label: "Glossary" },
       { href: "/dashboard", label: "Dashboard" },
       { href: "/metrics-ui", label: "Numbers" },
+      { href: "/studio/calibrate", label: "Check the checker" },
       { href: "/health", label: "Status" },
     ],
   },

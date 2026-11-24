@@ -24,7 +24,8 @@ from app.shared import audio_utils as au
 from app.shared import cache
 from app.studio.stages import fit
 from app.studio.stages.voice import voice_id
-from app.v1.qa import HEARD_RULE, heard_share
+from app.v1.qa import _words as _qa_words
+from app.v1.qa import heard_share, rule_now
 from app.v1.stages import StageFailed, Stages
 
 CACHE_VERSION = "hq-voice-1"
@@ -46,6 +47,8 @@ class Version:
     passed: bool = False
     why: list[str] = field(default_factory=list)
     gpu_ms: float | None = None     # the voice engine's own time for this take, when it reported one
+    passed_over: list[str] = field(default_factory=list)   # `V1_HQ_JUDGE`: judges that failed before `scored_by` answered
+    rule: str = ""                  # the comparison rule the score was worked out with (qa.HEARD_RULE*)
 
     def rank(self, max_speed: float) -> float:
         """Higher is better: words understood first, then how far over the speed limit, then the voice."""
@@ -58,10 +61,21 @@ class Version:
         real = [w for w in self.why if not w.startswith("not checked")]
         return bool(real) and all(w.startswith("needs ") for w in real)
 
-    def public(self) -> dict[str, Any]:
+    def public(self, heard: bool = False) -> dict[str, Any]:
+        """The take as it is stored with its line. `heard` keeps what the judge heard (the v1.1 judge and the
+        calibration page work a score out again from it); the API never hands it out."""
         d = asdict(self)
-        d.pop("heard")
+        if not heard:
+            d.pop("heard")
+            d.pop("rule")
+        if not d["passed_over"]:
+            d.pop("passed_over")   # as before unless a judge was passed over
         return d
+
+
+def _judges(st: Any, lang: str) -> list[str]:
+    ask = getattr(st, "judges", None)
+    return list(ask(lang)) if ask else list(st.names("score"))
 
 
 def limits(s: Settings) -> tuple[float, float, float]:
@@ -122,7 +136,7 @@ async def score(st: Stages, v: Version, lang: str, slot_s: float, ref_wav: Path 
     max_speed, min_check, min_sim = limits(s)
     v.speed = round(fit.needed_speed(v.dur_s, slot_s), 3)
     key = au.cache_key("hq-score-1", au.sha256_file(v.path), v.text, lang, str(ref_wav.name if ref_wav else ""),
-                       ",".join(st.names("score")))
+                       ",".join(_judges(st, lang)))
     got = cache.get_json("score_hq", key)
     if got is None:
         try:
@@ -132,11 +146,13 @@ async def score(st: Stages, v: Version, lang: str, slot_s: float, ref_wav: Path 
         except StageFailed as e:
             got = {"backcheck": None, "similarity": None, "heard": "", "by": "", "error": str(e)[:160]}
     v.heard, v.scored_by = got.get("heard") or "", got.get("by") or ""
+    v.passed_over = list(got.get("passed_over") or [])
     v.similarity = got.get("similarity")
     v.backcheck = got.get("backcheck")
-    if v.backcheck is not None and got.get("rule") != HEARD_RULE:
-        # a score stored under an older rule: worked out again from what was heard, without hearing again
-        v.backcheck = round(heard_share(v.text, v.heard), 3)
+    rule = v.rule = rule_now(s)
+    if v.backcheck is not None and got.get("rule") != rule:
+        # a score stored under another rule: worked out again from what was heard, without hearing again
+        v.backcheck = round(heard_share(v.text, v.heard, rule), 3)
     v.why = []
     if v.backcheck is None:
         v.why.append("not checked: no scorer answered")
@@ -149,6 +165,34 @@ async def score(st: Stages, v: Version, lang: str, slot_s: float, ref_wav: Path 
     # A line nobody could check is not failed for it: it is spoken, and reported as unchecked.
     v.passed = not [w for w in v.why if not w.startswith("not checked")]
     return v
+
+
+def take_plan(s: Settings) -> tuple[int, float | None, bool]:
+    """(most takes of a line in our voice, the score under which another take is made or None for v1's rule
+    "until one passes", every take is made regardless).
+
+      as v1          up to `v1_hq_nbest`, until a take passes its whole check
+      adaptive       one take; more, up to `v1_hq_adaptive_max`, only while the best score is under the threshold
+      fixed          always `v1_hq_takes_fixed` takes (to measure what adaptive saves; not for normal use)
+    """
+    if s.v1_hq_takes_fixed > 0:
+        return int(s.v1_hq_takes_fixed), None, True
+    if s.v1_hq_adaptive:
+        return max(1, int(s.v1_hq_adaptive_max)), float(s.v1_hq_adaptive_min or s.v1_hq_backcheck_min), False
+    return max(1, int(s.v1_hq_nbest)), None, False
+
+
+def heard_twice(made: list[Version]) -> bool:
+    """Two takes of the same words at the same engine speed were heard back as exactly the same words."""
+    seen: set[tuple[float, str, tuple[str, ...]]] = set()
+    for v in made:
+        if not v.heard.strip():
+            continue
+        key = (v.engine_speed, v.text, tuple(_qa_words(v.heard, True)))
+        if key in seen:
+            return True
+        seen.add(key)
+    return False
 
 
 def pace_speed(v: Version, slot_s: float, s: Settings) -> float:
@@ -187,15 +231,28 @@ async def best_line(st: Stages, text: str, lang: str, vspec: VoiceSpec, slot_s: 
         if speed > 1.03:
             await add(text, speed=speed)
     engine_speed = max((v.engine_speed for v in made), default=1.0)
+    most, need, fixed = take_plan(s)
+
     def another_take_helps() -> bool:
+        if fixed:        # measurement: every take is made, whatever the first one scored
+            return True
+        if need is not None:   # `V1_HQ_ADAPTIVE`: more takes only while no take's words were heard back well enough
+            if any(v.backcheck is None or v.backcheck >= need for v in made):
+                return False
+            # ... and, with `v1_hq_adaptive_same_stop`, not once two takes were heard as the very same words: then
+            # it is mostly the wording or the judge's spelling that costs the points. Off by default: on the takes
+            # of three videos it saved 16 of 145 takes and kept a lower-scored take on 3 of 76 lines.
+            return not (s.v1_hq_adaptive_same_stop and heard_twice(made))
         return not any(v.passed or v.only_too_long for v in made)
 
     if another_take_helps():
         if own:   # the engine draws a new random start each time: another take is another chance
-            while len(made) < max(1, s.v1_hq_nbest) and another_take_helps():
+            while len(made) < most and another_take_helps():
                 if await add(text, speed=engine_speed) is None:
                     break
-        if another_take_helps():
+        if fixed:
+            pass     # the candidate voices are not part of a fixed count
+        elif another_take_helps():
             for name in st.names("candidates"):
                 if await add(text, provider=name) and made[-1].passed:
                     break

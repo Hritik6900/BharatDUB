@@ -64,6 +64,13 @@ class Stages:
     def names(self, stage: str) -> list[str]:
         return self.r.chain(self.mode, self.engine, stage)
 
+    def judges(self, lang: str) -> list[str]:
+        """Who hears a dubbed line of this language back, in order (the `score` list unless `V1_HQ_JUDGE` is on)."""
+        if self.r.s.v1_hq_judge:
+            from app.v1.hq import judge
+            return judge.chain(self, lang)
+        return self.names("score")
+
     # ---------- the six steps ----------
     async def transcribe(self, wav: str | Path, lang: str = "indic-auto", **kw: Any) -> STTResult:
         """The first provider that hears the clip."""
@@ -187,6 +194,9 @@ class Stages:
     async def score(self, wav: Path, text: str, lang: str, ref_wav: Path | None = None) -> dict[str, Any]:
         """How good a dubbed line is: `backcheck` (share of its words heard back, 0-1), `similarity` (its voice
         against the speaker's, when a provider measures it, else None), `heard` and `by` (who scored)."""
+        if self.r.s.v1_hq_judge:   # the best speech-to-text per language, the next one when it fails (hq/judge.py)
+            from app.v1.hq import judge
+            return await judge.score(self, wav, text, lang, ref_wav)
         async def call(name: str) -> dict[str, Any]:
             if name == "qa_server":
                 from app.v1.qa import QAClient
