@@ -5,24 +5,30 @@
       backcheck   share of the line's words that were heard back (0-1)
       similarity  cosine similarity of speaker embeddings, dubbed line against the speaker's sample (`ref`)
   POST /diarize  multipart: audio  -> {segments: [{start, end, speaker}]}
+  POST /similarity  multipart: audio, ref  -> {similarity}   (the speaker model alone; no words are heard)
   GET  /health
   GET  /gpu      what `nvidia-smi` says on this machine (memory, use, temperature, power, memory per process);
                  read-only, loads nothing. The status page shows it as the GPU: from the laptop the card cannot be seen.
 
-Models and licences (checked 23 Nov 2026):
+Models and licences (checked 23 Nov 2026; the speaker model again on 25 Nov 2026, docs/v1/MODELS.md):
   hear-back   Whisper large-v3-turbo through faster-whisper (MIT; 809 M parameters). The live Whisper on 9030 is a
               Hindi/Hinglish model and cannot hear Tamil or Bengali back; this one can, with lower accuracy on the
               smaller languages (its card says so). `QA_STT_MODEL` picks another one.
   similarity  SpeechBrain ECAPA-TDNN `speechbrain/spkrec-ecapa-voxceleb` (Apache-2.0). NOT ECAPA2, which earlier
-              measurements used: its licence is CC-BY-NC-4.0, non-commercial.
+              measurements used: its licence is CC-BY-NC-4.0, non-commercial. `QA_SPK_MODEL` picks another one,
+              but only a model listed in SPK_LICENCES as open to commercial use is loaded; any other (ECAPA2
+              included) is refused unless QA_SPK_ALLOW_NONCOMMERCIAL=1 is set for a measurement that ships nothing.
   diarization pyannote `speaker-diarization-community-1` (CC-BY-4.0, gated: accept its terms and set HF_TOKEN).
               Off unless QA_DIARIZE=1.
 
-`QA_DEVICE=cpu` (the default) keeps it off the GPU: a Studio line of a few seconds is scored in a few seconds on
-CPU, and the card has no room beside v0's servers. `QA_DEVICE=cuda` needs about 2-5 GB (not measured here).
+`QA_DEVICE=cpu` (the default) keeps it off the GPU; the deploy kit also starts it with no CUDA device visible, so
+it cannot take GPU memory. `QA_DEVICE=cuda` needs about 2-5 GB (not measured here). `QA_HEAR=0` leaves the
+speech-to-text out (speaker similarity only); `QA_THREADS` limits the CPU threads (default 4: the machine's CPU is
+shared with the engines).
 
-STATUS: NOT run with real models on the build machine. `V1_STUB=1` starts it without them: it "hears" the text it
-was given and reports a fixed similarity, so the backend's scoring path can be tested end to end.
+STATUS: the speaker model was run on a laptop CPU (25 Nov 2026, docs/v1/MODELS.md); the speech-to-text and the
+diarization were NOT run with real models. `V1_STUB=1` starts it without them: it "hears" the text it was given
+and reports a fixed similarity, so the backend's scoring path can be tested end to end.
 """
 import asyncio
 import tempfile
@@ -40,6 +46,14 @@ DEVICE = env("QA_DEVICE", "cpu")
 STT_MODEL = env("QA_STT_MODEL", "large-v3-turbo")
 SPK_MODEL = env("QA_SPK_MODEL", "speechbrain/spkrec-ecapa-voxceleb")
 DIARIZE = env("QA_DIARIZE", "0") == "1"
+HEAR = env("QA_HEAR", "1") == "1"
+THREADS = int(env("QA_THREADS", "4"))
+ALLOW_NONCOMMERCIAL = env("QA_SPK_ALLOW_NONCOMMERCIAL", "0") == "1"
+# Speaker models whose licence was read on the model's own page: id (lower case) -> (licence, commercial use allowed).
+SPK_LICENCES = {
+    "speechbrain/spkrec-ecapa-voxceleb": ("Apache-2.0", True),
+    "jenthe/ecapa2": ("CC-BY-NC-4.0", False),
+}
 DIAR_MODEL = env("QA_DIAR_MODEL", "pyannote/speaker-diarization-community-1")
 
 app = FastAPI(title="BharatDb v1 QA")
@@ -47,7 +61,16 @@ whisper: Any = None
 speaker: Any = None
 diarizer: Any = None
 lock = asyncio.Lock()
-state = {"scores": 0, "ms": 0.0}
+state: dict[str, Any] = {"scores": 0, "ms": 0.0, "compares": 0, "compare_ms": 0.0, "speaker_refused": ""}
+
+
+def speaker_licence(model: str | None = None) -> tuple[str, bool]:
+    """(licence, may it be used in a product) for a speaker model; a model nobody checked counts as not allowed."""
+    return SPK_LICENCES.get((model or SPK_MODEL).lower(), ("not checked", False))
+
+
+def speaker_allowed(model: str | None = None) -> bool:
+    return speaker_licence(model)[1] or ALLOW_NONCOMMERCIAL
 
 
 def words(text: str) -> list[str]:
@@ -67,10 +90,19 @@ def words_heard(said: str, heard: str) -> float:
 
 def _load() -> None:
     global whisper, speaker, diarizer
-    from faster_whisper import WhisperModel
-    whisper = WhisperModel(STT_MODEL, device=DEVICE, compute_type="float16" if DEVICE == "cuda" else "int8")
-    from speechbrain.inference.speaker import EncoderClassifier
-    speaker = EncoderClassifier.from_hparams(source=SPK_MODEL, run_opts={"device": DEVICE})
+    if DEVICE != "cuda":
+        import torch
+        torch.set_num_threads(max(1, THREADS))
+    if HEAR:
+        from faster_whisper import WhisperModel
+        whisper = WhisperModel(STT_MODEL, device=DEVICE, compute_type="float16" if DEVICE == "cuda" else "int8",
+                               cpu_threads=max(1, THREADS))
+    if speaker_allowed():
+        speaker = _load_speaker()
+    else:
+        state["speaker_refused"] = (f"{SPK_MODEL} is not loaded: its licence ({speaker_licence()[0]}) is not one that "
+                                    "was checked as open to commercial use")
+        print("[qa] " + state["speaker_refused"])
     if DIARIZE:
         import os
 
@@ -78,10 +110,32 @@ def _load() -> None:
         diarizer = Pipeline.from_pretrained(DIAR_MODEL, token=os.environ.get("HF_TOKEN"))
 
 
+def _load_speaker() -> Any:
+    from speechbrain.inference.speaker import EncoderClassifier
+    kwargs: dict[str, Any] = {"source": SPK_MODEL, "run_opts": {"device": DEVICE}}
+    try:                                    # copy the files instead of linking them: links need rights Windows may not give
+        from speechbrain.utils.fetching import LocalStrategy
+        kwargs["local_strategy"] = LocalStrategy.COPY
+    except ImportError:
+        pass
+    try:
+        return EncoderClassifier.from_hparams(**kwargs)
+    except TypeError:                       # an older SpeechBrain without `local_strategy`
+        kwargs.pop("local_strategy", None)
+        return EncoderClassifier.from_hparams(**kwargs)
+
+
 @app.on_event("startup")
 async def startup() -> None:
     if not STUB:
         await asyncio.get_running_loop().run_in_executor(None, _load)
+
+
+def _similarity(a: np.ndarray, b: np.ndarray) -> float | None:
+    """Cosine similarity of the two speakers' embeddings; None when there is no speaker model or under 0.5 s of sound."""
+    if speaker is None or len(a) <= 8000 or len(b) <= 8000:
+        return None
+    return round(float(np.dot(_embed(a), _embed(b))), 3)
 
 
 def _hear(path: str, lang: str) -> str:
@@ -115,13 +169,10 @@ async def score(audio: UploadFile = File(...), text: str = Form(...), lang: str 
         try:
             async with lock:
                 loop = asyncio.get_running_loop()
-                heard = await loop.run_in_executor(None, _hear, path, lang)
+                heard = await loop.run_in_executor(None, _hear, path, lang) if whisper is not None else ""
                 sim = None
                 if ref_raw:
-                    a, b = read_mono(raw, 16000), read_mono(ref_raw, 16000)
-                    if len(a) > 8000 and len(b) > 8000:
-                        ea, eb = await loop.run_in_executor(None, _embed, a), await loop.run_in_executor(None, _embed, b)
-                        sim = round(float(np.dot(ea, eb)), 3)
+                    sim = await loop.run_in_executor(None, _similarity, read_mono(raw, 16000), read_mono(ref_raw, 16000))
         except Exception as e:  # noqa: BLE001
             raise HTTPException(500, f"scoring failed: {str(e)[:200]}") from e
         finally:
@@ -130,6 +181,30 @@ async def score(audio: UploadFile = File(...), text: str = Form(...), lang: str 
     state["scores"] += 1
     state["ms"] += ms
     return {"heard": heard, "backcheck": round(words_heard(text, heard), 3), "similarity": sim, "ms": round(ms)}
+
+
+@app.post("/similarity")
+async def similarity(audio: UploadFile = File(...), ref: UploadFile = File(...)) -> dict[str, Any]:
+    """The speaker model alone: how close the voice in `audio` is to the voice in `ref` (cosine, -1 to 1)."""
+    raw, ref_raw = await audio.read(), await ref.read()
+    if len(raw) < 800 or len(ref_raw) < 800:
+        raise HTTPException(422, "empty audio")
+    t0 = time.perf_counter()
+    if STUB:
+        sim: float | None = 1.0 if raw == ref_raw else 0.5
+    elif speaker is None:
+        raise HTTPException(503, state["speaker_refused"] or "no speaker model is loaded")
+    else:
+        try:
+            async with lock:
+                sim = await asyncio.get_running_loop().run_in_executor(
+                    None, _similarity, read_mono(raw, 16000), read_mono(ref_raw, 16000))
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(500, f"comparison failed: {str(e)[:200]}") from e
+    ms = (time.perf_counter() - t0) * 1000
+    state["compares"] += 1
+    state["compare_ms"] += ms
+    return {"similarity": sim, "ms": round(ms), "model": SPK_MODEL}
 
 
 @app.post("/diarize")
@@ -163,6 +238,13 @@ async def gpu() -> dict[str, Any]:
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
-    return {"ok": STUB or whisper is not None, "stub": STUB, "device": DEVICE, "model": STT_MODEL,
-            "speaker_model": SPK_MODEL, "diarization": bool(diarizer) or (STUB and DIARIZE),
-            "scores": state["scores"], "score_ms_avg": round(state["ms"] / state["scores"]) if state["scores"] else None}
+    licence, commercial = speaker_licence()
+    loaded = (whisper is not None or not HEAR) and (speaker is not None or bool(state["speaker_refused"]))
+    return {"ok": STUB or loaded, "stub": STUB, "device": DEVICE, "model": STT_MODEL if HEAR else None,
+            "hear": HEAR and (STUB or whisper is not None),
+            "speaker_model": SPK_MODEL, "speaker_licence": licence, "speaker_commercial_use": commercial,
+            "speaker_loaded": STUB or speaker is not None, "speaker_refused": state["speaker_refused"] or None,
+            "diarization": bool(diarizer) or (STUB and DIARIZE),
+            "scores": state["scores"], "score_ms_avg": round(state["ms"] / state["scores"]) if state["scores"] else None,
+            "compares": state["compares"],
+            "compare_ms_avg": round(state["compare_ms"] / state["compares"]) if state["compares"] else None}

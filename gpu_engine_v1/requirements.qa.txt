@@ -5,4 +5,5 @@ numpy==1.26.4
 soundfile==0.13.0
 faster-whisper==1.1.1
 speechbrain==1.0.2
+ruamel.yaml<0.19      # hyperpyyaml (speechbrain's config reader) breaks on 0.19: 'Loader' object has no attribute 'max_depth' (seen 25 Nov 2026)
 # diarization (QA_DIARIZE=1) needs: pyannote.audio>=4.0 and a Hugging Face token that accepted the model terms

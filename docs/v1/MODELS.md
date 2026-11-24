@@ -82,3 +82,86 @@ with AI4Bharat; its public page did not list this model, so the ranking rests on
   the whole window to itself). The start script defaults to 12B.
 - Maya 2: keep as a Studio HQ candidate or drop; judged by ear and by the QA scores once it can be loaded.
 - Speaker similarity threshold: unset (`V1_HQ_SIMILARITY_MIN=0`) until the new model's scale is measured.
+
+## v1.1 WS5: checked again on 25 Nov 2026 (the big translation model, the speaker model)
+
+Read on the models' own pages on 25 Nov 2026. "The page" is the model's Hugging Face page unless said otherwise.
+Nothing here was loaded on the GPU.
+
+### Big translation model: 12B first
+
+| | `google/gemma-4-12B-it-qat-w4a16-ct` | `google/gemma-4-31B-it-qat-w4a16-ct` |
+|---|---|---|
+| The page exists, under the `google` organisation | yes | yes |
+| Licence tag on the page | apache-2.0 | apache-2.0 |
+| Gated | no gating notice on the page | no gating notice on the page |
+| Format | 4-bit weights, 16-bit activations (w4a16), quantization-aware training, compressed-tensors "for native, optimized inference with vLLM" | the same |
+| Parameters (the page's safetensors figure) | about 13 B | 33 B (its table says 30.7 B) |
+| Files | one `model.safetensors` of 10.3 GB (file list) | not read again (23.3 GB on 23 Nov) |
+| Latest commit seen | `1d2c2d7f2466070e69d6fb3fd5ce9a7d75f2f6ee` ("Add response_template to tokenizer_config.json (#9)", "4 months ago") | not read |
+| Serving line on the page | none (a Transformers example only); a Google reply in discussion 2 gives `vllm serve google/gemma-4-12B-it-qat-w4a16-ct --max-model-len 32768 --gpu-memory-utilization 0.90` | `vllm serve "google/gemma-4-31B-it-qat-w4a16-ct"` |
+
+**Verified:** the exact ids, the licence tag, that neither page shows a gate, the format, the 12B file size and
+commit.
+
+**Not verified:**
+- the licence text itself (the pages carry the tag `apache-2.0`, not the text);
+- GPU memory: no page gives a figure. The deploy kit gives the 12B server 14 GB and the 31B server 27 GB (weights
+  plus room for vLLM's cache). These are our estimates; `smoke.sh big-llm` prints what the server really holds;
+- **a vLLM version that starts the 12B checkpoint.** Discussion 2 on its page reports two start failures:
+  `'Gemma4UnifiedVisionConfig' object has no attribute 'num_soft_tokens'` (9-11 Jun), which pull request 5 fixed
+  in the checkpoint's own `config.json` (merged 12 Jun; it names vLLM issue 45039), and
+  `RuntimeError: Shape mismatch: a.size(1) = 4096, size_k = 8192` on a nightly build (12 and 15 Jun). Google asked
+  on 6 Aug whether anybody still sees the second; nobody answered. No version is named as working. v0's
+  translation server runs vLLM 0.34.0, which is what the kit starts the 12B model with: whether it works is known
+  only after the first start. The kit switches image and audio input off (`--limit-mm-per-prompt`), as v0's start
+  script does;
+- how well either translates Hinglish into Indian languages. That is what `backend/eval/v1/llm_ab.py` is for; its
+  rule for "wins" is in the file and in `NEEDS_APPROVAL.md` item 9.
+
+The pages recommend sampling at temperature 1.0, top_p 0.95, top_k 64. Our translation prompts use 0.2-0.3, as
+with the small model: that is our choice, not the page's.
+
+**31B on this card:** by the estimates it does not fit. An HQ window leaves about 24 GB free (40 less the voice
+engines' 12, separation 1.4, speech-to-text 2.5), and 27 GB plus 4 GB of headroom is 31. It would need the voice
+engines stopped too, or a second card.
+
+### QA server's speaker model: `speechbrain/spkrec-ecapa-voxceleb`
+
+| Checked | Result | Where |
+|---|---|---|
+| Licence | `apache-2.0` | the page's licence tag, and the same field in the model's API record (`cardData.license`) |
+| Gated | no (`gated: false`) | API record |
+| Version seen | commit `0f99f2d0ebe89ac095bcc5903c4dd8f72b367286`, last changed 18 Feb 2025 | API record |
+| What it is | ECAPA-TDNN speaker embeddings; trained on VoxCeleb 1 and 2; 16 kHz mono; EER 0.80% on VoxCeleb1-test (cleaned) | the page |
+| Commercial use | the page says nothing against it and asks: "Please, cite SpeechBrain if you use it for your research or business." | the page |
+| Link | https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb | |
+
+**Verdict:** open to commercial use by its licence. It was already the server's model (since 23 Nov); no switch was
+needed. What changed: the server now loads a speaker model only when it is listed in `SPK_LICENCES`
+(`qa_server.py`) as checked and open to commercial use. `QA_SPK_MODEL` names another model; ECAPA2
+(`Jenthe/ECAPA2`, CC-BY-NC-4.0) and any model nobody checked are refused, the server says why in `/health`, and it
+goes on scoring words without a similarity. `QA_SPK_ALLOW_NONCOMMERCIAL=1` lifts that for a measurement that ships
+nothing.
+
+**Not verified:** the licence text (tag only), and the standing of the training data: the VoxCeleb page
+(robots.ox.ac.uk/~vgg/data/voxceleb) states no licence at all, only a request to cite and a privacy notice. Whether
+weights trained on it carry any limit is a legal question this check cannot settle. It is in the decisions list.
+
+**Run on CPU (laptop, Ryzen 7 7435HS, 4 threads, no CUDA device visible, SpeechBrain 1.1.2 with torch 2.15 CPU;
+one run, 20 comparisons a row after 2 warm-up calls; a comparison embeds both clips):**
+
+| Pair | Similarity (one pair) | Time per comparison: mean (range) |
+|---|---|---|
+| the eval reel's speaker, two cuts of 7 s | 0.883 | 765 ms (727-797) |
+| the same speaker, two cuts of 3 s | 0.765 | 378 ms (343-440) |
+| that speaker against the voice of a made class video, 7 s each | 0.142 | 752 ms (700-831) |
+| the same 7 s clip twice | 1.000 | 800 ms (696-952) |
+
+Loading the model took 38.8 s the first time (with its download). The similarities are single pairs of one
+speaker: they show the scale has room between "same" and "other", not where a threshold belongs. Not measured: the
+Whisper half of the server (not run), the machine's CPU, and the versions the kit installs there (SpeechBrain 1.0.2
+with torch 2.5.1; the run above used 1.1.2 because that is what installs on this laptop's Python 3.13).
+
+Found on the way: SpeechBrain's config reader (hyperpyyaml 1.2.3) fails with ruamel.yaml 0.19
+(`'Loader' object has no attribute 'max_depth'`); `requirements.qa.txt` now asks for `ruamel.yaml<0.19`.

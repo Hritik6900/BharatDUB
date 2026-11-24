@@ -31,3 +31,7 @@ data-v1/
 .env.v1
 
 .run-v1/
+
+# v1 deploy kit: environments, pid files and logs it makes beside the servers
+gpu_engine_v1/run/
+gpu_engine_v1/.venvs/

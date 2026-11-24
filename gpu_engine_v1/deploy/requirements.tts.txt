@@ -1,0 +1,8 @@
+# :9041 IndicF5 with batching (torch comes first, from the CUDA index; see kit.py)
+git+https://github.com/AI4Bharat/IndicF5.git
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+soundfile==0.13.0
+safetensors==0.5.2
+huggingface_hub==0.27.1

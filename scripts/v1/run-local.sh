@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Start v1 without containers: backend on 127.0.0.1:8110, website on 127.0.0.1:3100. v0 is not touched.
 #   scripts/v1/run-local.sh            start both (builds the site when it has not been built)
+#   V1_SKIP_WEB=1 scripts/v1/run-local.sh   the backend only
 #   scripts/v1/stop-local.sh           stop what this script started (and only that)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -16,6 +17,11 @@ cd "$ROOT/backend"
 [ -d .venv ] || { python3 -m venv .venv && .venv/bin/pip install -q torch torchaudio --index-url https://download.pytorch.org/whl/cpu && .venv/bin/pip install -q -r requirements.txt; }
 nohup .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port "$BACKEND_PORT" > "$RUN/backend.log" 2>&1 &
 echo $! > "$RUN/backend.pid"
+# V1_SKIP_WEB=1: the backend alone (on the GPU machine, with the website still served from the laptop).
+if [ "${V1_SKIP_WEB:-0}" = "1" ]; then
+  echo "v1 backend: http://127.0.0.1:$BACKEND_PORT/api/v1/health   (website not started: V1_SKIP_WEB=1)   logs: $RUN"
+  exit 0
+fi
 
 cd "$ROOT/web"
 [ -d node_modules ] || npm ci --no-audit --no-fund

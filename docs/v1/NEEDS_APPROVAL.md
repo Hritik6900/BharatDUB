@@ -1,65 +1,432 @@
-# v1: needs approval
+# v1: what waits for you, as one checklist
 
-Work that was deferred because it needs the GPU VM, a forbidden command, or a decision. Each entry: what, why, exact commands, expected GPU memory, rollback.
+Work from the top. Every item says what it is, why it waits, the exact commands, what it does to the GPU's memory,
+how to see that it worked and how to undo it. Nothing in this list was run by the build: it needs the GPU machine,
+a command the build was not allowed to use, or your decision.
 
-## 1. Find v0's processes and paths on the VM, and measure GPU memory per process
+**Who does what**
 
-- **What:** list the processes behind ports 9001-9003, 9010, 9020, 9030 (9040 is off), their code folders, and the
-  GPU memory each one holds.
-- **Why deferred:** this build ran on the laptop; no shell on the VM was used (the tunnel and SSH were not to be
-  touched).
-- **Commands (read-only, on the VM):**
-  ```bash
-  ss -ltnp | grep -E ':(900[1-3]|9010|9020|9021|9030|9040)\b'
-  ps -eo pid,etimes,cmd | grep -E 'voice_engine|sep_engine|stt_engine|vllm|mio_engine' | grep -v grep
-  nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv
-  nvidia-smi --query-gpu=memory.used,memory.free,memory.total --format=csv
-  ```
-- **Expected GPU memory:** none (read-only).
-- **Then:** put the paths into the local rules file as read-only, and replace the table in `DISCOVERY.md` section 6.
-  Known so far: the engines were installed under `~/voice_engine` for user `ocr`.
-- **Rollback:** nothing to roll back.
+| Mark | Meaning |
+|---|---|
+| **VM** | commands on the GPU machine (through `ssh`), written out below |
+| **LAPTOP** | commands on this PC only |
+| **YOU** | a decision, a recording, a label or a price: no command does it for you |
 
-## 2. Docker on the VM
+**Where things are.** Commands are for PowerShell in the v1 checkout (`C:\Users\hriti\Desktop\BharatDUB-v1`)
+unless an item says otherwise. The key is the file `C:\Users\hriti\Downloads\test4-ocr_ssh_key`, the machine is
+`ocr@34.47.88.232`. Inside a quoted remote command never write a `$`: PowerShell would replace it.
 
-- **What:** `docker-compose.v1.yml` (project `bharatdb-v1`) needs Docker Engine with the compose plugin and, for
-  GPU containers, the NVIDIA container toolkit.
-- **Why deferred:** installing them needs `sudo` and system packages (forbidden), and it is not known whether they
-  are already there. The laptop has no Docker, so the compose file was written but never run.
-- **Commands (check first):**
-  ```bash
-  docker --version && docker compose version
-  docker info | grep -i -E 'runtimes|nvidia'
-  ```
-  If missing (the user runs these): Docker's own install guide for the VM's distribution, then
-  `sudo usermod -aG docker ocr`, then the NVIDIA container toolkit guide.
-- **Meanwhile:** `scripts/v1/run-local.sh` starts the v1 backend and website without containers.
-- **Expected GPU memory:** none. **Rollback:** `docker compose -p bharatdb-v1 -f docker-compose.v1.yml down`.
+**Three rules for every VM item**
 
-## 3. Put v1 on the VM
+1. **The card first.** Before anything new is loaded:
+   ```powershell
+   ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "nvidia-smi --query-gpu=memory.used,memory.free,memory.total --format=csv"
+   ```
+   A server may start only when **free - needed >= 4 GB**. The deploy kit (`gpu_engine_v1/deploy/`) reads
+   `nvidia-smi` itself and refuses otherwise; the "Card" line of each item gives the numbers.
+2. **CUDA MPS is running on the machine: never touch it.** No item starts, stops or configures it. The kit only
+   says whether it runs. (The new servers run outside MPS, the way v0's translation model does.)
+3. **v0's servers are not touched** (9001-9003 voice, 9010 separation, 9020 translation, 9030 speech-to-text,
+   9040 second voice), with one exception that is always marked: an **HQ window** stops the translation model on
+   9020 for a while (part C). The kit binds only 9041-9045 and stops only what it started (its own pid file).
 
-- **What:** v1 was built and run on the laptop (backend 8110, website 3100, engines through the SSH forwards).
-  The design has it on the VM, next to the engines.
-- **Why deferred:** needs a shell on the VM, and `/srv/bharatdb-v1` needs `sudo` once.
-- **Commands (the user runs the first two lines):**
-  ```bash
-  sudo mkdir -p /srv/bharatdb-v1/data && sudo chown -R $USER /srv/bharatdb-v1
-  cd /srv/bharatdb-v1 && git clone <repo url> app && cd app && git checkout v1
-  cp backend/.env.example backend/.env      # fill in the keys; DATA_DIR=/srv/bharatdb-v1/data
-  scripts/v1/run-local.sh                    # without containers
-  # or, with Docker (item 2): cp .env.v1.example .env.v1 && docker compose -p bharatdb-v1 -f docker-compose.v1.yml --env-file .env.v1 up -d --build
-  scripts/v1/demo-check.sh
-  ```
-- **Expected GPU memory:** none (the backend's Demucs and VAD fallbacks run on CPU).
-- **Rollback:** `scripts/v1/stop-local.sh` or `docker compose -p bharatdb-v1 -f docker-compose.v1.yml down`. v0 is
-  not involved.
+**The deploy kit in one look** (items 4, 8, 9, 10, 11 use it; `gpu_engine_v1/README.md`):
 
-## 4. Domain, HTTPS and the demo password
+```powershell
+scp -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes -r gpu_engine_v1 ocr@34.47.88.232:~/
+ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "bash ~/gpu_engine_v1/deploy/start.sh <server>"
+ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "bash ~/gpu_engine_v1/deploy/smoke.sh <server>"
+```
 
-- **What:** the `https` profile of the compose file (Caddy) needs a domain whose DNS points at the VM, ports 80
-  and 443 open in the VM's firewall, and a password hash.
-- **Why deferred:** DNS, firewall and cloud console changes are forbidden here.
+`<server>` is `qa`, `tts`, `maya`, `transcribe` or `big-llm`. `start.sh` builds the server's own Python environment
+on the first run (minutes; the model downloads on the first start), `smoke.sh` prints PASS or FAIL for each check,
+the time each took and the GPU memory the server holds. `stop.sh <server>` ends it; `status.sh` shows everything.
+The kit was tested on this PC with a stand-in `nvidia-smi` and stub servers; **no server has been started with its
+real model yet, and the kit has not run on Linux**: read what `start.sh` prints the first time.
+
+To reach the new servers from the laptop (the A/B kits and the status page need it), one more window, beside v0's
+tunnel and not touching it:
+
+```powershell
+ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -N -o IdentitiesOnly=yes -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -L 127.0.0.1:9041:127.0.0.1:9041 -L 127.0.0.1:9042:127.0.0.1:9042 -L 127.0.0.1:9043:127.0.0.1:9043 -L 127.0.0.1:9044:127.0.0.1:9044 -L 127.0.0.1:9045:127.0.0.1:9045 ocr@34.47.88.232
+```
+
+Other documents written before 25 Nov 2026 cite the old item numbers: the table at the end translates them.
+Items 16-18 take five minutes, need no VM and can be done at any time.
+
+---
+
+# Part A. Move the v1 backend to the GPU machine
+
+Why this is first: every Live phrase now crosses the tunnel several times (speech-to-text, translation, voice).
+With the backend beside the engines only the sound and the finished dub cross it. v0 measured this once, in its
+all-GPU mode (SPEC.md section 21, one run each): first audio p50 2.3 s through the tunnel, 1.8 s with the backend on
+the machine. v1 has not been measured there.
+
+## 1. Look at the machine (VM, read-only) (was item 1)
+
+- **What:** the processes behind 9001-9003, 9010, 9020, 9030, 9040, their folders, the GPU memory each holds, and
+  whether the machine has what items 2-11 need (Python with `venv`, ffmpeg, git, Docker, CPU cores, disk).
+- **Why it waits:** the build ran on the laptop and was not to open a shell on the machine. Every memory figure in
+  this file is an estimate until this is run.
 - **Commands:**
+  ```powershell
+  ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "nvidia-smi --query-gpu=memory.used,memory.free,memory.total --format=csv; nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv"
+  ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "ss -ltnp | grep -E ':(900[1-3]|9010|9020|9021|9030|9040|904[1-5]|8110) '; ps -eo pid,etimes,cmd | grep -E 'voice_engine|sep_engine|stt_engine|vllm|mio_engine|mps-control' | grep -v grep"
+  ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "python3 --version; python3 -m venv --help > /dev/null && echo venv-ok; which ffmpeg ffprobe git docker node; nproc; free -g | head -2; df -h ~ | tail -1"
+  ```
+- **Card:** nothing is loaded. **MPS:** running, never touch it (the second command shows it; that is all).
+- **Verify:** three answers. Write the per-process memory into `DISCOVERY.md` section 6 and, where a figure
+  differs from this file's estimates, use the measured one (`start.sh <server> --need-gb <measured>`).
+- **Roll back:** nothing to roll back.
+- **Known so far:** the engines were installed under `~/voice_engine` for user `ocr`. If `venv-ok` is missing,
+  the kit and item 2 cannot build environments: give them an existing interpreter (`--python`, item 4 says how).
+
+## 2. Start the v1 backend on the machine (VM + LAPTOP) (was item 3)
+
+- **What:** the v1 backend (port 8110) runs on the GPU machine; the website stays on the laptop (port 3100) and
+  reaches it through one forwarded port. Nothing of v0 moves.
+- **Why it waits:** needs a shell on the machine. No `sudo`: everything goes under `~/bharatdb-v1`.
+- **Commands** (the laptop's v1 backend keeps running until step 5):
+  ```powershell
+  # 1. the code as one file (no git sign-in needed on the machine), and the folder for it
+  git archive --format=tar -o data-v1\v1.tar v1
+  scp -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes data-v1\v1.tar ocr@34.47.88.232:~/
+  ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "mkdir -p ~/bharatdb-v1/app ~/bharatdb-v1/data && tar -xf ~/v1.tar -C ~/bharatdb-v1/app"
+  # 2. the settings with the keys (the file is copied, never shown), and your recorded voices
+  scp -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes backend\.env ocr@34.47.88.232:~/bharatdb-v1/app/backend/.env
+  scp -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes -r data-v1\voices data-v1\local_db.json ocr@34.47.88.232:~/bharatdb-v1/data/
+  # 3. look, then start (the first start builds the Python environment: several minutes)
+  ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "bash ~/bharatdb-v1/app/scripts/v1/vm-backend.sh --check"
+  ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "bash ~/bharatdb-v1/app/scripts/v1/vm-backend.sh"
+  # 4. on the laptop: stop the laptop's v1 backend (Ctrl+C in its window; the website on 3100 stays)
+  # 5. forward the backend's port, in a window of its own
+  ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -N -o IdentitiesOnly=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -L 127.0.0.1:8110:127.0.0.1:8110 ocr@34.47.88.232
+  ```
+  `vm-backend.sh` sets the data folder and the ffmpeg paths in the copied `.env` for the machine (the laptop's file
+  names Windows paths), starts the backend alone (`V1_SKIP_WEB=1 scripts/v1/run-local.sh`) and waits until it
+  answers. It was syntax-checked and never run.
+- **Card:** the backend takes no GPU memory (its own fallbacks for separation and voice detection run on CPU).
+  **MPS:** running, never touch it; the script does not.
+- **Verify:** in Git Bash on the laptop `scripts/v1/demo-check.sh` says READY and `scripts/v1/v0-check.sh` says v0
+  answers; `http://localhost:3100/health` is green; one Live session on `/live`. Then measure: the same run as
+  `EVAL_REPORT.md` section 1, once more.
+- **Roll back:** close the forward's window;
+  `ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "bash ~/bharatdb-v1/app/scripts/v1/stop-local.sh"`;
+  start the laptop's backend again (`powershell -File scripts\v1\run-local.ps1`). The laptop's data was only copied.
+- **Know before you start:** jobs in the copied store name files on the laptop and will not open there; voices and
+  streamer profiles carry over. Sessions made on the machine are not in the laptop's store afterwards. A newer
+  version of the code is the same first three lines again, then `stop-local.sh` and `vm-backend.sh`.
+  If ffmpeg is missing on the machine, Live works and Studio does not: say so and it goes into this list.
+
+## 3. Docker on the machine (VM, optional) (was item 2)
+
+- **What:** `docker-compose.v1.yml` and `gpu_engine_v1/docker-compose.models.yml` need Docker Engine with the
+  compose plugin and, for GPU containers, the NVIDIA container toolkit.
+- **Why it waits:** installing them needs `sudo`. **Nothing else in this list needs Docker any more**: the backend
+  starts with item 2 and the model servers with the deploy kit. Docker is only for HTTPS with Caddy (item 13) and
+  Postgres (item 14).
+- **Commands (check first; item 1 already says whether `docker` is there):**
+  ```powershell
+  ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "docker --version && docker compose version; docker info | grep -i -E 'runtimes|nvidia'"
+  ```
+  If missing: Docker's own install guide for the machine's distribution, then `sudo usermod -aG docker ocr`, then
+  the NVIDIA container toolkit guide. These are yours to run.
+- **Card:** none. **MPS:** running, never touch it (installing the container toolkit restarts nothing of ours,
+  but do it when nobody is live).
+- **Verify:** the command above prints versions. **Roll back:** `docker compose -p bharatdb-v1 -f docker-compose.v1.yml down`.
+
+---
+
+# Part B. On the machine, no GPU memory
+
+## 4. QA server on the machine's CPU (:9045) (VM) (was item 6)
+
+- **What:** `gpu_engine_v1/qa_server.py` with its real models on CPU: Whisper large-v3-turbo (hears a dubbed line
+  back in any of our languages) and a speaker model (how close the copied voice is to the speaker). It gives
+  Studio HQ its speaker-similarity score, a back-check that does not use the hosted one-request account, the scorer
+  of the live back-check, the second judge (item 6) and the card's numbers for the status page (item 5).
+- **Why it waits:** needs a shell on the machine and about 2 GB of model downloads.
+- **Licences (checked on the models' own pages, `MODELS.md`):** Whisper through faster-whisper MIT; the speaker
+  model `speechbrain/spkrec-ecapa-voxceleb` Apache-2.0, open to commercial use. The server loads only a speaker
+  model that is listed as checked; the one earlier numbers used (ECAPA2, non-commercial) is refused.
+- **Commands:**
+  ```powershell
+  scp -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes -r gpu_engine_v1 ocr@34.47.88.232:~/
+  ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "bash ~/gpu_engine_v1/deploy/start.sh qa"
+  ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "bash ~/gpu_engine_v1/deploy/smoke.sh qa"
+  ```
+  Then in the v1 backend's `backend/.env` (on the machine after item 2; on the laptop with the forward of the
+  intro): `V1_QA_URL=http://127.0.0.1:9045`, and restart the backend.
+- **Card:** needs 0 GB: the kit starts it with no CUDA device visible, so it cannot take GPU memory. The kit still
+  reads `nvidia-smi` and refuses when under 4 GB is free (nothing new on a card that full). **MPS:** running,
+  never touch it.
+- **Verify:** `smoke.sh qa` ends with `RESULT: PASS (4 of 4 checks ...)`; its `health` line says `device=cpu` and
+  `speaker=speechbrain/spkrec-ecapa-voxceleb (Apache-2.0)`; its `GPU memory` line says the server's processes hold
+  0.0 GB.
+- **Roll back:** `ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "bash ~/gpu_engine_v1/deploy/stop.sh qa"`;
+  empty `V1_QA_URL`. Scoring falls back to the hosted speech-to-text (words only).
+- **If the first start fails on the environment:** `start.sh qa --python <an interpreter that has the packages>`
+  skips building one. With Docker (item 3) the old way still works:
+  `docker compose -p bharatdb-v1-models -f gpu_engine_v1/docker-compose.models.yml --profile qa up -d --build`.
+- **Not measured:** the Whisper on the machine's CPU (how long a line takes to hear back), and what the server's
+  four CPU threads (`QA_THREADS`) do to a Live session running at the same time. Score a Studio job once while
+  nobody is live and read `score_ms_avg` in `curl -s http://127.0.0.1:9045/health`.
+- **Then (a decision inside, YOU):** the speaker scores are on a new scale. Measured on the laptop's CPU, one run:
+  two cuts of the eval reel's speaker 0.88 (7 s each) and 0.77 (3 s each), another voice 0.14. That is one
+  speaker, not a baseline: before `V1_HQ_SIMILARITY_MIN` is set, score your own recorded voice against itself and
+  against its copies (`POST /similarity` with two files).
+
+## 5. The card's real numbers on the status page (VM + LAPTOP) (was item 18)
+
+- **What:** the status page says "A100 (VM): unknown" until a server on the machine reports the card. The QA
+  server's read-only `GET /gpu` does (memory used, free and total, how busy, temperature, power, memory per
+  process). It loads nothing.
+- **Why it waits:** needs item 4.
+- **Commands:** item 4, then check: `ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "curl -s http://127.0.0.1:9045/gpu"`.
+  In the v1 backend's `backend/.env`: `V1_GPU_STATS_URL=http://127.0.0.1:9045/gpu` (this feeds the status page
+  only; `V1_QA_URL` of item 4 also does it). Restart the backend. With the backend still on the laptop, the forward
+  of the intro must be open.
+- **Card:** none (`/gpu` only reads `nvidia-smi`). **MPS:** running, never touch it.
+- **Verify:** `/health` shows the A100's free memory of 40 GB instead of "unknown";
+  `curl -s http://127.0.0.1:8110/api/v1/health` has `"gpu": {"total_gb": 40.0, ...}`.
+- **Roll back:** empty `V1_GPU_STATS_URL`; the page says "unknown" again.
+
+## 6. A second judge for Tamil, Bengali and the other languages (VM) (was item 22)
+
+- **What:** with `V1_HQ_JUDGE` the heard-back judge is the hosted speech-to-text first and a Whisper next. The
+  Whisper on 9030 is a Hindi and Hinglish model, so it is a second judge for Hindi lines only. For every other
+  language the second judge is the QA server's multilingual Whisper. The backend side is built and tested with a
+  fake server: once `V1_QA_URL` is set, `qa_server` is in the judge order after the other two
+  (`V1_HQ_JUDGE_ORDER=prisma,whisper_gpu,qa_server`). Until then a take the hosted judge cannot score is stored as
+  "not checked".
+- **Why it waits:** needs item 4.
+- **Commands:** item 4, then in the v1 backend's `backend/.env`: `V1_QA_URL=http://127.0.0.1:9045`, `V1_HQ_JUDGE=true`.
+- **Card:** none (item 4 is on CPU). **MPS:** running, never touch it.
+- **Verify:** `GET /api/v1/jobs/<id>/backcheck?lang=ta-IN` on a finished job shows `judges` (who scored how many
+  lines). To see the second judge work, run one job with `V1_HQ_JUDGE_BY_LANG=ta-IN=qa_server` and compare its
+  scores with the hosted judge's on the same job (`python -m eval.v1.rescore --hear-all`).
+- **Roll back:** empty `V1_QA_URL`.
+- **Before trusting it:** how the QA server's Whisper scores against the hosted judge on the same takes has not
+  been measured (it has never run with its real model). Two judges' scores are not comparable until it has.
+
+## 7. Who speaks when: diarization (VM + YOU) (was item 11)
+
+- **What:** pyannote's `speaker-diarization-community-1` for videos with more than one speaker (Studio HQ phase A).
+- **Why it waits:** the model is gated: someone has to accept its terms on Hugging Face (they share contact
+  details) and give the token; its licence (CC-BY-4.0) asks for attribution. Needs item 4.
+- **Commands** (after accepting the terms; the token is typed on the machine, never into a file in the repository):
+  ```powershell
+  ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "bash ~/gpu_engine_v1/deploy/stop.sh qa"
+  ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "~/gpu_engine_v1/.venvs/qa/bin/python -m pip install 'pyannote.audio>=4.0'"
+  ssh -t -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "read -s -p 'Hugging Face token: ' HF_TOKEN; export HF_TOKEN; QA_DIARIZE=1 bash ~/gpu_engine_v1/deploy/start.sh qa"
+  ```
+  The last line asks for the token on the machine (it is not shown and not stored) and hands it to the server's
+  process only.
+- **Card:** none (CPU). **MPS:** running, never touch it.
+- **Verify:** `smoke.sh qa` passes; `curl -s http://127.0.0.1:9045/health` on the machine says `"diarization": true`.
+- **Roll back:** `stop.sh qa`, then `start.sh qa` without `QA_DIARIZE`. Until then every line is treated as one
+  speaker, as in v0.
+
+---
+
+# Part C. On the machine, with GPU memory
+
+By the estimates v0's servers hold about 34 of the card's 40 GB, so about 6 GB is free and nothing in this part
+fits beside them (item 1 gives the real figures). Each item therefore runs inside an **HQ window**.
+
+**The HQ window (VM; the one place where a v0 server is stopped, by you).** The small translation model on 9020 is
+stopped; v0 and v1 Live then translate through the hosted model by themselves until it is back. Do it when nobody
+is live.
+
+```powershell
+# is anybody live? (both must print nothing)
+curl.exe -s http://127.0.0.1:8010/api/live/sessions | Select-String -SimpleMatch '"status":"live"'
+curl.exe -s http://127.0.0.1:8110/api/live/sessions | Select-String -SimpleMatch '"status":"live"'
+# OPEN: look at the process, stop that one, see the memory come back (about 10 s)
+ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "pgrep -af 'vllm serve google/gemma-4-E4B-i[t]'"
+ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "pkill -f 'vllm serve google/gemma-4-E4B-i[t]'"
+ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "nvidia-smi --query-gpu=memory.used,memory.free,memory.total --format=csv"
+# ... the item's own commands ...
+# CLOSE: first stop every server of this part that the kit started, then v0's own start script
+ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "bash ~/gpu_engine_v1/deploy/stop.sh big-llm; bash ~/gpu_engine_v1/deploy/stop.sh maya; bash ~/gpu_engine_v1/deploy/stop.sh transcribe; bash ~/gpu_engine_v1/deploy/stop.sh tts"
+ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "bash ~/voice_engine/start_llm.sh"
+curl.exe -s http://127.0.0.1:9020/v1/models      # answers again after a minute or two
+```
+
+- `[t]` in the pattern keeps `pkill` from matching the command that carries it. The pattern is the one v0's own
+  `start_llm.sh` uses; it does not match the 12B or 31B model.
+- v0's start script gives the small model half the card while it starts (about 20 GB): it comes back only when
+  the kit's GPU servers are stopped first.
+- **MPS is running: never touch it.** Neither opening nor closing the window does.
+- With Docker on the machine (item 3) `scripts/v1/gpu-mode.sh hq --run` and `normal --run` do the same switch and
+  start the big model as a container; without Docker do not use it (it would stop 9020 and then fail to start
+  anything). Either way every switch is your command.
+- Estimated free memory inside a window: about 24 GB (40 less the voice engines' 12, separation 1.4 and
+  speech-to-text 2.5; not measured).
+
+## 8. Maya 2 (:9042) and the voice A/B (VM + LAPTOP + YOU) (was item 10)
+
+- **What:** a second voice that also copies a voice **in English**, which IndicF5 cannot (it has no English; today
+  English lines go to the hosted copy or a stock voice). The kit speaks 20 fixed lines (6 English, 4 Hindi,
+  4 Tamil, 3 Bengali, 3 Punjabi: `gpu_engine_v1/ab/voice_lines.tsv`) with IndicF5 on 9001 and with Maya 2 in the
+  same recorded voice, and builds the blind pairs for the listening page `/listen-test`.
+- **Why it waits:** GPU memory (below), and Maya's server was written from its model card's example and has never
+  run: expect to fix details on the first start. The A/B needs Maya on the machine.
+- **Card:** needs 9.2 GB (the card's figure for loading; 7.7 GB steady), so **free must be at least 13.2 GB**:
+  only inside an HQ window. **MPS:** running, never touch it.
+- **Commands:**
+  ```powershell
+  # OPEN the HQ window (above), then:
+  scp -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes -r gpu_engine_v1 ocr@34.47.88.232:~/
+  ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "bash ~/gpu_engine_v1/deploy/start.sh maya"
+  ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "bash ~/gpu_engine_v1/deploy/smoke.sh maya"
+  # the A/B, from the laptop (the forward of the intro must be open; 9001 comes through v0's tunnel):
+  backend\.venv\Scripts\python.exe gpu_engine_v1\ab\maya_ab.py --store data-v1\local_db.json --voice <voice profile id> --out data-v1\eval\maya_ab
+  # afterwards: stop it and CLOSE the window
+  ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "bash ~/gpu_engine_v1/deploy/stop.sh maya"
+  ```
+  `<voice profile id>`: the id of a voice **recorded with consent** in v1 (`curl.exe -s http://127.0.0.1:8110/api/voices`
+  lists them). The kit takes the voice only from a profile with consent on record and has no other way in. It
+  refuses while a stream is live. It sends 40 lines in all and leaves one extra voice entry on the 9001 engine
+  until that engine is next restarted.
+- **Out:** `data-v1\eval\maya_ab\indicf5\<id>.wav` and `maya\<id>.wav` (the same names), `pairs\<id>_a.wav`,
+  `<id>_b.wav` and `pairs\pairs.json` (`pairs: [{id, lang, text, a, b, a_system, b_system}]`; which system is A
+  changes from pair to pair), `timing.json`. **The listening page's own builder script is the final word on the
+  format**: if it wants another shape, feed it the two folders; `--pairs-only` rebuilds `pairs\` without speaking.
+  For the six English lines IndicF5 is sent the line as it is; the pair is marked "IndicF5 was not trained on this
+  language", and a line it refuses is listed under `missing`.
+- **Verify:** `smoke.sh maya` ends with `RESULT: PASS (5 of 5 checks ...)` (Hindi, Tamil and English lines) and
+  prints the memory Maya holds: note it. The A/B prints the time to make a line for each system and the number of
+  pairs.
+- **Roll back:** `stop.sh maya`; `V1_TTS_MAYA=false` (the default). Close the window.
+- **Decision (YOU):** keep or drop, by ear on `/listen-test` and by the QA scores. To use it in Studio HQ:
+  `V1_MAYA_URL=http://127.0.0.1:9042`, `V1_TTS_MAYA=true`. It has no speed control, so its lines are fitted
+  afterwards; for Live it brings nothing over IndicF5 on timing. Its 9.2 GB do not fit beside v0 outside a window.
+
+## 9. Big translation model (:9044): 12B first, 31B only if 12B wins (VM + LAPTOP + YOU) (was item 9)
+
+- **What:** `google/gemma-4-12B-it-qat-w4a16-ct` (Google's own 4-bit checkpoint for vLLM; Apache-2.0, not gated,
+  one 10.3 GB file: checked on its page, `MODELS.md`) against the small model on 9020, on 40 fixed lines into
+  Tamil, Bengali and Punjabi, with a blind sheet for you and a rule for "wins" that was fixed before any result:
+  1. you preferred the 12B line in at least 60% of the pairs you decided, on at least 40 decided pairs;
+  2. in no language under 50% (at least 10 decided pairs each);
+  3. no more lines in a wrong script or with Latin letters than the small model, and no empty line;
+  4. its lines are not longer: median letters 12B / small at most 1.10;
+  5. fast enough for Studio: median at most 2.0 s a line in batches of 8.
+  Beside it the script says whether it would be fast enough for Live (median at most 0.6 s, 95th percentile at
+  most 1.0 s a phrase).
+- **Why it waits:** GPU memory, and stopping a v0 server is yours to do. Also unknown: whether the vLLM that v0's
+  server runs (0.34.0) starts this checkpoint. Its page's discussion reports start failures on earlier builds; one
+  cause was fixed in the checkpoint itself, the other has no confirmed fix (`MODELS.md`). `smoke.sh` tells.
+- **Card:** the kit gives vLLM 14 GB (weights 10.3 GB plus its cache; an estimate), so **free must be at least
+  18 GB**: only inside an HQ window. **MPS:** running, never touch it.
+- **Commands:**
+  ```powershell
+  # BEFORE the window, while 9020 is up: the small model's lines (laptop, in backend\)
+  cd backend
+  .venv\Scripts\python.exe -m eval.v1.llm_ab run --name current --url http://127.0.0.1:9020/v1 --model local --out ..\data-v1\eval\llm_ab
+  .venv\Scripts\python.exe -m eval.v1.llm_ab run --name current-live --mode live --url http://127.0.0.1:9020/v1 --model local --out ..\data-v1\eval\llm_ab
+  cd ..
+  # OPEN the HQ window (above), then:
+  scp -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes -r gpu_engine_v1 ocr@34.47.88.232:~/
+  ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "bash ~/gpu_engine_v1/deploy/start.sh big-llm"
+  ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "bash ~/gpu_engine_v1/deploy/smoke.sh big-llm"
+  # the 12B model's lines (laptop; the forward of the intro must be open)
+  cd backend
+  .venv\Scripts\python.exe -m eval.v1.llm_ab run --name big12 --url http://127.0.0.1:9044/v1 --model big --out ..\data-v1\eval\llm_ab
+  .venv\Scripts\python.exe -m eval.v1.llm_ab run --name big12-live --mode live --url http://127.0.0.1:9044/v1 --model big --out ..\data-v1\eval\llm_ab
+  # stop it and CLOSE the window, then the sheet
+  ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "bash ~/gpu_engine_v1/deploy/stop.sh big-llm"
+  .venv\Scripts\python.exe -m eval.v1.llm_ab sheet --a current --b big12 --out ..\data-v1\eval\llm_ab
+  # YOU: open data-v1\eval\llm_ab\side_by_side.csv, fill the `better` column with X, Y or same, save, then
+  .venv\Scripts\python.exe -m eval.v1.llm_ab verdict --a current --b big12 --out ..\data-v1\eval\llm_ab
+  ```
+  The model downloads on the first start (10.3 GB to `~/bharatdb-v1-models`; `start.sh` waits up to 30 minutes).
+  Each `run` sends 120 lines and waits while a stream is live.
+- **Verify:** `smoke.sh big-llm` ends with `RESULT: PASS (2 of 2 checks ...)` and prints the memory the server
+  holds: note it (afterwards `start.sh big-llm --need-gb <measured>`). `verdict` prints each check and
+  `VERDICT: big12 WINS over current`, `DOES NOT WIN`, or `NOT DECIDED` (too few votes).
+- **Roll back:** `stop.sh big-llm`, close the window. If 9020 does not come back, v0 and v1 keep translating
+  through the hosted model; run `bash ~/voice_engine/start_llm.sh` again and read `~/voice_engine/llm.log`.
+- **If 12B wins:** `V1_BIG_LLM_URL=http://127.0.0.1:9044/v1` in the v1 backend's `.env` for Studio HQ jobs run
+  inside a window (create them with `hold=true`, open the window, then `POST /api/v1/hq/batch`, `RUNBOOK.md`
+  section 5).
+- **31B, only then:** `start.sh big-llm --size 31b` (the kit gives it 27 GB: weights 23.3 GB plus cache, so free
+  must be at least 31 GB) and the same A/B with `--name big31`, compared with `--a big12 --b big31`. **By the
+  estimates it does not fit:** a window leaves about 24 GB free. It would need the voice engines stopped as well
+  (no Live and no Studio voice meanwhile) or a second card. That is a decision, not a deploy.
+- **Also yours:** Studio HQ's translation order when the big model is missing: the routing file says our small
+  model first, then the hosted one (`studio_hq.translate` in `backend/config/routing.yaml`); swap the two names if
+  a comparison says the hosted one translates better.
+
+## 10. Voice server with batching (:9041), `V1_TTS_SERVER` (VM) (was item 7)
+
+- **What:** one IndicF5 process that batches lines, to replace v0's three processes (about 12 GB) for v1.
+- **Why it waits:** GPU memory, and the batched path has never run (written from the library's interface): it must
+  be compared with v0's audio first.
+- **Card:** needs about 4 GB (an estimate from v0's engines), so **free must be at least 8 GB**: inside an HQ
+  window, or whenever item 1 shows that much free. **MPS:** running, never touch it.
+- **Commands:**
+  ```powershell
+  scp -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes -r gpu_engine_v1 ocr@34.47.88.232:~/
+  ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "bash ~/gpu_engine_v1/deploy/start.sh tts"
+  ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "bash ~/gpu_engine_v1/deploy/smoke.sh tts"
+  ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "curl -s http://127.0.0.1:9041/health"
+  ```
+  IndicF5 is gated on Hugging Face: the machine's account already downloaded it for v0. If the kit's own
+  environment cannot be built, v0's has everything: `start.sh tts --python ~/voice_engine/.venv2/bin/python`
+  (the interpreter is only run, nothing in it is changed).
+- **Verify:** `smoke.sh tts` ends with `RESULT: PASS (4 of 4 checks ...)` and prints the memory held. In `/health`:
+  `batching: true`, `batch_errors: 0`, and under load `largest_batch` at least 2. Compare the same sample and line
+  through 9001 and 9041 by ear. Then in the v1 backend's `.env`: `V1_TTS_SERVER_URL=http://127.0.0.1:9041`,
+  `V1_TTS_SERVER=true`.
+- **Roll back:** `V1_TTS_SERVER=false` (v1 goes back to 9001-9003 at once), then `stop.sh tts`.
+
+## 11. Indic Transcribe (:9043) (VM + YOU) (was item 8)
+
+- **What:** a second speech-to-text for Studio HQ (two hearings, merged by the translation model).
+- **Why it waits:** (a) GPU memory; (b) **licence, YOU:** hosting it as a service others call needs its authors'
+  written sign-off (`MODELS.md`); (c) the model is gated: its terms must be accepted on Hugging Face by the account
+  whose token is used.
+- **Card:** needs about 10 GB (9.2 GiB by its card), so **free must be at least 14 GB**: only inside an HQ window.
+  **MPS:** running, never touch it.
+- **Commands (inside an HQ window, after the licence decision):**
+  ```powershell
+  scp -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes -r gpu_engine_v1 ocr@34.47.88.232:~/
+  ssh -t -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "read -s -p 'Hugging Face token: ' HF_TOKEN; export HF_TOKEN; bash ~/gpu_engine_v1/deploy/start.sh transcribe"
+  ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "bash ~/gpu_engine_v1/deploy/smoke.sh transcribe"
+  ```
+  then `V1_TRANSCRIBE_URL=http://127.0.0.1:9043` in the v1 backend's `.env`.
+- **Verify:** `smoke.sh transcribe` ends with `RESULT: PASS (2 of 2 checks ...)` and prints the memory held.
+- **Roll back:** `stop.sh transcribe`, empty `V1_TRANSCRIBE_URL`; HQ then hears with the hosted speech-to-text only.
+
+## 12. Pin the model versions after the first downloads (VM) (was item 12)
+
+- **What:** model revisions are `main` in the kit and in `gpu_engine_v1/docker-compose.models.yml`. After a
+  server's first good start, fix what was downloaded so a later start cannot get another version.
+- **Commands:**
+  ```powershell
+  ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -o IdentitiesOnly=yes ocr@34.47.88.232 "ls ~/bharatdb-v1-models/hf/hub/*/snapshots/"
+  ```
+  The folder names are the full commit hashes. Start with them from then on, for example
+  `BIG_LLM_REVISION=<hash> bash ~/gpu_engine_v1/deploy/start.sh big-llm` (also `TTS_REVISION`, `MAYA_REVISION`,
+  `TRANSCRIBE_REVISION`, and the code commits `INDICF5_COMMIT`, `MAYA_COMMIT`). Seen on the pages on 25 Nov 2026:
+  12B `1d2c2d7f2466070e69d6fb3fd5ce9a7d75f2f6ee`, the speaker model `0f99f2d0ebe89ac095bcc5903c4dd8f72b367286`;
+  earlier, first characters only: Maya `87a83efd`, Indic Transcribe `e083ab7d`, IndicF5 `fb652a96`.
+- **Card:** none. **MPS:** running, never touch it. **Roll back:** leave the variable out (`main` again).
+- The container images were written but never built (no Docker here).
+
+---
+
+# Part D. Hosting, later
+
+## 13. Domain, HTTPS and the demo password (VM + YOU) (was item 4)
+
+- **What:** the `https` profile of `docker-compose.v1.yml` (Caddy) needs a domain whose DNS points at the machine,
+  ports 80 and 443 open in its firewall, and a password hash.
+- **Why it waits:** DNS, firewall and cloud console changes are yours; needs Docker (item 3).
+- **Commands (on the machine, in the checkout):**
   ```bash
   docker run --rm caddy:2.8-alpine caddy hash-password --plaintext '<the demo password>'
   # in .env.v1: V1_DOMAIN=<domain>  V1_DEMO_PASSWORD_HASH='<hash>'
@@ -67,197 +434,44 @@ Work that was deferred because it needs the GPU VM, a forbidden command, or a de
   docker compose -p bharatdb-v1 -f docker-compose.v1.yml --env-file .env.v1 --profile https up -d --build
   ```
 - **Note:** a browser gives the microphone only to an HTTPS page or to `localhost`. Until there is a domain, the
-  site works through an SSH forward of 3100 and 8110 to the laptop's `localhost`.
-- **Rollback:** `docker compose ... --profile https down`.
+  site works through the forwards (item 2).
+- **Card:** none. **MPS:** running, never touch it. **Roll back:** `docker compose ... --profile https down`.
 
-## 5. Postgres store (`V1_STORE=postgres`)
+## 14. Postgres store (`V1_STORE=postgres`) (VM) (was item 5)
 
 - **What:** `backend/app/v1/store_pg.py` keeps the store's rows in Postgres.
-- **Why deferred:** there was no database to run it against, so it has never been executed. Treat it as untested.
-- **Commands:**
+- **Why it waits:** there was no database to run it against, so it has never been executed. Treat it as untested.
+  Needs Docker (item 3) or a Postgres of your own.
+- **Commands (on the machine, in the checkout):**
   ```bash
   docker compose -p bharatdb-v1 -f docker-compose.v1.yml --env-file .env.v1 --profile postgres up -d postgres
   # backend/.env: V1_STORE=postgres  POSTGRES_DSN=postgresql://bharatdb:<password>@127.0.0.1:5440/bharatdb
   cd backend && TEST_POSTGRES_DSN=postgresql://bharatdb:<password>@127.0.0.1:5440/bharatdb python -m pytest tests/test_v1_store.py -q
   ```
-- **Rollback:** `V1_STORE=json` (the default). The JSON file is not migrated or deleted by switching.
+- **Card:** none. **MPS:** running, never touch it.
+- **Roll back:** `V1_STORE=json` (the default). The JSON file is not migrated or deleted by switching.
 
-## 6. QA server on the VM's CPU (:9045): back-check and speaker similarity
-
-- **What:** start `gpu_engine_v1/qa_server.py` with its real models (Whisper large-v3-turbo through
-  faster-whisper, SpeechBrain ECAPA) on CPU. It makes Studio HQ's speaker-similarity score possible, gives a
-  back-check that does not use the hosted one-request account, and is the scorer of the live back-check.
-- **Why deferred:** needs a shell on the VM (and Docker, item 2, or a Python environment there). About 2 GB of
-  model downloads. No licence question: MIT and Apache-2.0.
-- **Commands:**
-  ```bash
-  docker compose -p bharatdb-v1-models -f gpu_engine_v1/docker-compose.models.yml --profile qa up -d --build
-  curl -s http://127.0.0.1:9045/health
-  # v1 backend/.env:  V1_QA_URL=http://127.0.0.1:9045
-  ```
-- **Expected GPU memory:** 0 (CPU). With `QA_DEVICE=cuda` about 2-5 GB (not measured): do not use while the card
-  has under 9 GB free.
-- **Decision inside:** speaker similarity used ECAPA2 in earlier measurements; that model is non-commercial
-  (CC-BY-NC-4.0). The server uses SpeechBrain ECAPA instead; measure the real-person baseline again before any
-  threshold is set (`V1_HQ_SIMILARITY_MIN`).
-- **Rollback:** `docker compose ... --profile qa stop qa`; empty `V1_QA_URL`. Scoring falls back to the hosted
-  speech-to-text (words only).
-
-## 7. Voice server with batching (:9041), `V1_TTS_SERVER`
-
-- **What:** one IndicF5 process that batches lines, to replace v0's three processes (about 12 GB) for v1.
-- **Why deferred:** GPU memory. About 6 GB is free and the model's process is expected to need about 4 GB, which
-  leaves under the 4 GB of headroom the rule asks for. Also: the batched path has never run (written from the
-  library's interface) and must be compared with v0's audio first.
-- **Commands (when the card has at least 8 GB free, for example with Indic-Mio and one of nothing else loaded):**
-  ```bash
-  nvidia-smi --query-gpu=memory.free --format=csv
-  docker compose -p bharatdb-v1-models -f gpu_engine_v1/docker-compose.models.yml --profile tts up -d --build
-  curl -s http://127.0.0.1:9041/health          # batching, batch_errors
-  # compare: same sample and line through 9001 and 9041, listen, and check `largest_batch` >= 2 under load
-  # v1 backend/.env:  V1_TTS_SERVER_URL=http://127.0.0.1:9041   V1_TTS_SERVER=true
-  ```
-- **Expected GPU memory:** about 4 GB (v0's engines report 1.43 GB of tensors each; process totals not measured).
-- **Rollback:** `V1_TTS_SERVER=false` (v1 goes back to 9001-9003 at once), then stop the container.
-
-## 8. Indic Transcribe (:9043)
-
-- **What:** second speech-to-text for Studio HQ (two hearings, merged by the translation model).
-- **Why deferred:** (a) GPU memory: 9.2 GiB by its card, so only inside an HQ window; (b) licence: hosting it as
-  a service others call needs the authors' written sign-off (`MODELS.md`); (c) the model is gated: its terms must
-  be accepted on Hugging Face by the account whose token is used.
-- **Commands (inside an HQ window, after the licence decision):**
-  ```bash
-  export HF_TOKEN=...   # an account that accepted the model's terms; never commit it
-  docker compose -p bharatdb-v1-models -f gpu_engine_v1/docker-compose.models.yml --profile transcribe up -d --build
-  # v1 backend/.env:  V1_TRANSCRIBE_URL=http://127.0.0.1:9043
-  ```
-- **Expected GPU memory:** about 9 GB. **Rollback:** stop the container, empty `V1_TRANSCRIBE_URL`; HQ then hears
-  with the hosted speech-to-text only.
-
-## 9. Big translation model (:9044) and the HQ window
-
-- **What:** `scripts/v1/gpu-mode.sh hq --run` stops the small translation model (:9020) and starts a larger
-  Gemma 4 (4-bit QAT) on :9044; `normal --run` reverses it. During the window v0 and v1 Live translate through the
-  hosted model by themselves.
-- **Why deferred:** stopping a v0 server is forbidden here, and the script itself is on the list of commands not
-  to be run, so not even its dry run was executed: it was checked with `bash -n` and its read-only `status`
-  ran. Also open: which size (12B, 10.3 GB on disk; or 31B, 23.3 GB), and the vLLM image tag (`VLLM_TAG`): the
-  vLLM recipe for Gemma 4 names no minimum release.
-- **Commands (when nobody is live):**
-  ```bash
-  scripts/v1/gpu-mode.sh status
-  scripts/v1/gpu-mode.sh hq             # prints what it would do
-  VLLM_TAG=<release> scripts/v1/gpu-mode.sh hq --run
-  # v1 backend/.env:  V1_BIG_LLM_URL=http://127.0.0.1:9044/v1
-  scripts/v1/gpu-mode.sh normal --run   # afterwards
-  ```
-- **Expected GPU memory:** the window frees about 18 GB; 12B needs about 11-14 GB, 31B about 20-23 GB plus its
-  cache (estimates from the weights; measure with `nvidia-smi` on the first run).
-- **Rollback:** `scripts/v1/gpu-mode.sh normal --run`. If :9020 does not come back, v0 keeps translating through
-  the hosted model; start it with v0's own `start_llm.sh`.
-- **Before trusting it:** translate the eval lines with it and with the hosted model and compare; nobody has
-  published how the 4-bit models do on Hinglish into Indian languages.
-
-## 10. Maya 2 (:9042), `V1_TTS_MAYA`
-
-- **What:** a second candidate voice for Studio HQ's N-best.
-- **Why deferred:** GPU memory (7.7 GB steady, 9.2 GB while loading, by its card): only inside an HQ window and
-  not together with the 31B model. Never run here; its server was written from the model card's example.
-- **Commands:** `docker compose ... --profile maya up -d --build`, then `V1_MAYA_URL=http://127.0.0.1:9042` and
-  `V1_TTS_MAYA=true`. **Rollback:** `V1_TTS_MAYA=false`, stop the container.
-- **Decision:** keep or drop, by ear and by the QA scores. It has no speed control, so its lines are fitted
-  afterwards; for Live it brings nothing over IndicF5 on timing.
-
-## 11. Diarization (pyannote)
-
-- **What:** who speaks when, for videos with more than one speaker (Studio HQ phase A).
-- **Why deferred:** the model is gated (accept its terms, token needed) and its licence (CC-BY-4.0) asks for
-  attribution; needs the QA server (item 6) started with `QA_DIARIZE=1` and `HF_TOKEN`.
-- **Until then:** every line is treated as one speaker, as in v0. **Rollback:** `QA_DIARIZE=0`.
-
-## 12. Model versions to pin on first deployment
-
-- Model revisions are `main` in `gpu_engine_v1/docker-compose.models.yml` because only the first characters of
-  the current commit hashes are known here (Maya `87a83efd`, Indic Transcribe `e083ab7d`, IndicF5 `fb652a96`).
-  On the first download, read the full hash (`huggingface-cli scan-cache`) and set `TTS_REVISION`,
-  `MAYA_REVISION`, `TRANSCRIBE_REVISION`, `BIG_LLM_REVISION`, and the code commits `INDICF5_COMMIT`, `MAYA_COMMIT`.
-- The container images were written but never built (no Docker here).
-
-## 13. Backup bucket
+## 15. Backup bucket (VM + YOU) (was item 13)
 
 - **What:** `scripts/v1/backup.sh` copies v1's store, voice samples, trace and configuration (never keys) to a
   Cloud Storage bucket.
-- **Why deferred:** no bucket exists and creating one, or signing `gcloud` in, is a cloud-console change. The
+- **Why it waits:** no bucket exists and creating one, or signing `gcloud` in, is a cloud-console change. The
   script was syntax-checked only; with no bucket set it stops and copies nothing.
-- **Commands (the user):** create a bucket, sign in on the VM (`gcloud auth login` or a service account), then
+- **Commands:** create a bucket, sign in on the machine (`gcloud auth login` or a service account), then there:
   ```bash
   V1_BACKUP_BUCKET=gs://<bucket>/bharatdb-v1 scripts/v1/backup.sh --dry
   V1_BACKUP_BUCKET=gs://<bucket>/bharatdb-v1 scripts/v1/backup.sh
   ```
-  and, if wanted, a nightly line in the VM user's crontab.
-- **Also the user's:** a snapshot of the VM disk in the cloud console (Step 0 of the build notes), and one
-  rehearsal of the restore in `RUNBOOK.md` section 7 on another machine. Neither was done here.
-- **Rollback:** nothing to roll back; a backup only adds objects to the bucket.
+  and, if wanted, a nightly line in the machine user's crontab.
+- **Also yours:** a snapshot of the machine's disk in the cloud console, and one rehearsal of the restore in
+  `RUNBOOK.md` section 7 on another machine. Neither was done.
+- **Card:** none. **MPS:** running, never touch it. **Roll back:** nothing; a backup only adds objects to the bucket.
 
-## 14. Prices for the cost per minute
+---
 
-- **What:** `/metrics-ui` shows a cost per minute only for the rates that are set: `V1_GPU_RATE_PER_HOUR`,
-  `V1_STT_RATE_PER_MIN`, `V1_TTS_RATE_PER_1K_CHARS`, `V1_LLM_RATE_PER_CALL`, `V1_COST_CURRENCY`.
-- **Why deferred:** the prices are the user's to give (the real hourly rate of an A100 and the hosted vendors'
-  current prices). No figure was invented: all are 0, so no cost is shown.
-- **Note on the GPU part:** it counts the seconds of work the model servers reported, times the hourly rate. A GPU
-  that is rented by the hour costs the same when idle, so for one stream on one card the honest figure is the full
-  hourly rate divided by 60 per stream minute; the counted seconds show how much of the card a stream really uses.
+# Part E. On the laptop only
 
-## 15. Decisions that are the user's
-
-- **Indic Transcribe licence** (item 8): sign-off from its authors, or samples only.
-- **Big translation model** (item 9): 12B or 31B, and which vLLM image. v0's translation server runs vLLM 0.34.0
-  (read from its `/version`), which serves Gemma 4; that is the natural first choice for `VLLM_TAG`.
-- **Maya 2** (item 10): keep or drop after hearing it.
-- **Speaker similarity** (item 6): the model that earlier numbers used is non-commercial; the new scale has to be
-  measured before a threshold means anything.
-- **Which Live flags to switch on:** see `EVAL_REPORT.md`. The measured picture decides, not this list.
-- **Studio HQ's translation order** when the big model is missing: the routing file says our small model first,
-  then the hosted one (`studio_hq.translate`). The hosted model may translate better than the small one; swap the
-  two names in `backend/config/routing.yaml` if a comparison says so.
-
-## 16. Tunnel watchdog (`scripts\v1\tunnel-watchdog.ps1`), v1.1
-
-- **What:** a second window beside v0's `gpu_engine\tunnel.ps1`. Every 10 s it looks at the tunnel ports
-  (9001-9003, 9010, 9020, 9030, 9040) and tells four cases apart: the port answers; nothing listens (no ssh);
-  ssh listens and closes at once (the server on the GPU machine is down, the tunnel is fine); ssh listens and
-  nothing comes back (the link under ssh is dead). It also notes when this PC was asleep. Log:
-  `data-v1\tunnel-watchdog.log`.
-- **Why deferred:** it was written and not run: it may start `ssh` and, with one switch, end an `ssh.exe`; both are
-  the user's to do. Its syntax was checked with PowerShell's parser, and a copy of its port check was tried on
-  four local test ports (answers; hang, found after 3.0 s; closed; refused, found after 2.0 s). Whether a real
-  ssh shows "closed" for a dead server and "hang" for a dead link was reasoned, not seen.
-- **The choice about "restart only the tunnel":** v0's `tunnel.ps1` already restarts each ssh within 2 s of its
-  exit, and ssh exits about 10 s after the link dies (`ServerAliveInterval=5`, `ServerAliveCountMax=2`). A second
-  script starting ssh for the same ports would fight it. So:
-  - while a `tunnel.ps1` window runs, the watchdog starts nothing and ends nothing; it reports;
-  - when no `tunnel.ps1` window runs and a port has had no ssh for 20 s, it dials that group itself, with the
-    same ssh options as `tunnel.ps1` (needs `-Key` and `-Target`);
-  - a stuck ssh that it did not start is named in the log and left alone. Only with `-RestartStuck` does it end
-    that one `ssh.exe`, after checking that this process is the one listening on the hanging port and that its
-    command line forwards that port; `tunnel.ps1` then reconnects it. It never ends a PowerShell window or
-    another ssh.
-- **Run** (a new PowerShell window, in the v1 checkout):
-  ```powershell
-  # 1. report only: safe next to everything, changes nothing
-  powershell -ExecutionPolicy Bypass -File scripts\v1\tunnel-watchdog.ps1
-  # 2. also take over when the tunnel window is closed (the same key and target as tunnel.ps1)
-  powershell -ExecutionPolicy Bypass -File scripts\v1\tunnel-watchdog.ps1 -Key C:\path\to\key -Target user@gpu-host
-  # 3. also end a stuck ssh (read a day of the log from 1 or 2 first)
-  powershell -ExecutionPolicy Bypass -File scripts\v1\tunnel-watchdog.ps1 -Key C:\path\to\key -Target user@gpu-host -RestartStuck
-  ```
-- **GPU memory:** none. **Verify:** the window prints `WATCHDOG started (...)` and then nothing while all ports
-  answer; `Get-Content data-v1\tunnel-watchdog.log -Tail 20`. **Rollback:** Ctrl+C in its window (an ssh it
-  started ends with it; `tunnel.ps1`'s own are untouched).
-
-## 17. Stop the laptop sleeping on AC power, v1.1
+## 16. Stop the laptop sleeping on AC power (LAPTOP) (was item 17)
 
 - **What was found (read-only, Windows event log against the stream watcher's log, 24 Nov 2026):** all three
   "link stalls" of that day were this PC in Modern Standby, not the tunnel. The watcher's own lines already said
@@ -273,7 +487,7 @@ Work that was deferred because it needs the GPU VM, a forbidden command, or a de
   off, so the tunnel, the hosted services and the backend itself all stop. No breaker and no watchdog can work
   through that. Settings now (read with `powercfg /qh`): closing the lid on AC = Sleep; power button = Sleep;
   sleep after 180 min idle on AC; hibernate on AC = never.
-- **Why deferred:** these change the user's Windows power settings.
+- **Why it waits:** these change your Windows power settings.
 - **Commands** (PowerShell or cmd; no admin needed for the current power plan):
   ```powershell
   powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0     # closing the lid on AC: do nothing
@@ -290,85 +504,72 @@ Work that was deferred because it needs the GPU VM, a forbidden command, or a de
   # after a few hours: no new "entering Modern Standby" lines while on the charger
   Get-WinEvent -FilterHashtable @{LogName='System'; Id=506,507,42} -MaxEvents 10 | Format-Table TimeCreated, Id, Message -Wrap
   ```
-- **GPU memory:** none. **Rollback** (the values read on 24 Nov 2026):
+- **Card:** not involved. **Roll back** (the values read on 24 Nov 2026):
   ```powershell
   powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 1
   powercfg /change standby-timeout-ac 180
   powercfg /setactive SCHEME_CURRENT
   ```
+- After item 2 the backend no longer sleeps with the laptop, but the sound still comes from the laptop's browser:
+  this item stays worth doing.
 
-## 18. The GPU's real numbers on the status page (`GET /gpu` on the VM), v1.1
+## 17. Tunnel watchdog (`scripts\v1\tunnel-watchdog.ps1`) (LAPTOP) (was item 16)
 
-- **What:** the status page used to read the card of the machine the backend runs on, which on the laptop is its
-  own 6 GB card, and called it the GPU. It now says "A100 (VM): unknown" until a server on the GPU machine reports
-  the card. `gpu_engine_v1/qa_server.py` has a new read-only `GET /gpu` (what `nvidia-smi` says there: memory used,
-  free and total, how busy, temperature, power, memory per process). It loads nothing.
-- **Why deferred:** it needs the QA server running on the VM (item 6: CPU only) and, from the laptop, one more
-  forwarded port (9045), which v0's `tunnel.ps1` does not carry and which was not ours to add.
-- **Commands:** item 6 on the VM, then check there: `curl -s http://127.0.0.1:9045/gpu`. From the laptop, in a
-  window of its own (the same key and target as the tunnel):
+- **What:** a second window beside v0's `gpu_engine\tunnel.ps1`. Every 10 s it looks at the tunnel ports
+  (9001-9003, 9010, 9020, 9030, 9040) and tells four cases apart: the port answers; nothing listens (no ssh);
+  ssh listens and closes at once (the server on the GPU machine is down, the tunnel is fine); ssh listens and
+  nothing comes back (the link under ssh is dead). It also notes when this PC was asleep. Log:
+  `data-v1\tunnel-watchdog.log`.
+- **Why it waits:** it was written and not run: it may start `ssh` and, with one switch, end an `ssh.exe`; both are
+  yours to do. Its syntax was checked with PowerShell's parser, and a copy of its port check was tried on
+  four local test ports (answers; hang, found after 3.0 s; closed; refused, found after 2.0 s). Whether a real
+  ssh shows "closed" for a dead server and "hang" for a dead link was reasoned, not seen.
+- **The choice about "restart only the tunnel":** v0's `tunnel.ps1` already restarts each ssh within 2 s of its
+  exit, and ssh exits about 10 s after the link dies (`ServerAliveInterval=5`, `ServerAliveCountMax=2`). A second
+  script starting ssh for the same ports would fight it. So:
+  - while a `tunnel.ps1` window runs, the watchdog starts nothing and ends nothing; it reports;
+  - when no `tunnel.ps1` window runs and a port has had no ssh for 20 s, it dials that group itself, with the
+    same ssh options as `tunnel.ps1` (needs `-Key` and `-Target`);
+  - a stuck ssh that it did not start is named in the log and left alone. Only with `-RestartStuck` does it end
+    that one `ssh.exe`, after checking that this process is the one listening on the hanging port and that its
+    command line forwards that port; `tunnel.ps1` then reconnects it. It never ends a PowerShell window or
+    another ssh.
+- **Commands** (a new PowerShell window, in the v1 checkout):
   ```powershell
-  ssh -i C:\path\to\key -N -o IdentitiesOnly=yes -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -o ConnectTimeout=8 -L 127.0.0.1:9045:127.0.0.1:9045 user@gpu-host
+  # 1. report only: safe next to everything, changes nothing
+  powershell -ExecutionPolicy Bypass -File scripts\v1\tunnel-watchdog.ps1
+  # 2. also take over when the tunnel window is closed (the same key and target as tunnel.ps1)
+  powershell -ExecutionPolicy Bypass -File scripts\v1\tunnel-watchdog.ps1 -Key C:\Users\hriti\Downloads\test4-ocr_ssh_key -Target ocr@34.47.88.232
+  # 3. also end a stuck ssh (read a day of the log from 1 or 2 first)
+  powershell -ExecutionPolicy Bypass -File scripts\v1\tunnel-watchdog.ps1 -Key C:\Users\hriti\Downloads\test4-ocr_ssh_key -Target ocr@34.47.88.232 -RestartStuck
   ```
-  and in v1's `backend/.env`: `V1_GPU_STATS_URL=http://127.0.0.1:9045/gpu` (this feeds the status page only;
-  setting `V1_QA_URL` instead also switches the QA server's scoring in). Restart the v1 backend.
-- **GPU memory:** none (the QA server runs on CPU; `/gpu` only reads `nvidia-smi`).
-- **Verify:** `/health` shows the A100's free memory of 40 GB instead of "unknown";
-  `curl -s http://127.0.0.1:8110/api/v1/health` has `"gpu": {"total_gb": 40.0, ...}`.
-- **Rollback:** empty `V1_GPU_STATS_URL`; the page says "unknown" again.
+- **Card:** not involved. **Verify:** the window prints `WATCHDOG started (...)` and then nothing while all ports
+  answer; `Get-Content data-v1\tunnel-watchdog.log -Tail 20`. **Roll back:** Ctrl+C in its window (an ssh it
+  started ends with it; `tunnel.ps1`'s own are untouched).
 
-## 19. Two or three dense recordings of your own for the Live replay, v1.1 WS1
+## 18. Five comparison backends left running on ports 8111-8115 (LAPTOP) (was item 24)
 
-- **What:** 2-3 recordings of about 10 minutes each, your own content (or content you have the right to dub),
-  where the speaker talks almost without a pause: a class, a commentary, a rant. Any file ffmpeg reads (mp4, mkv,
-  m4a, wav). Put them in `data-v1\eval\dense\` (the folder is not in the repository; nothing in it is committed).
-- **Why deferred:** Live audio is never stored, so no real stream can be replayed. The only dense material on this
-  machine is one 24.9 s reel; `docs/v1/LIVE_DENSE_REPORT.md` is measured on that reel played eight times in a
-  row, which repeats the same 11-12 phrases and says nothing about a speaker who changes pace or topic over ten
-  minutes. The densest long sessions in the logs (62% speaking over 16 minutes on 24 Nov) left only their numbers.
-- **Commands (laptop only, no VM, no sudo; costs hosted speech-to-text for the minutes replayed):**
+- **What:** five v1 comparison backends started for the Studio measurement on 25 Nov 2026 are still running,
+  idle: 8111 (`ws3-std`), 8112 (`ws3-hq`), 8113 (`ws3-fixed`), 8114 (`ws3-adapt`), 8115 (`ws3-new`). They hold
+  those ports, some memory, and nothing else: no job is running on them, and they are not v0, the v1 backend on
+  8110, a model server or the tunnel.
+- **Why it waits:** they were started through Git Bash, where stopping the task ends the shell around the
+  server and leaves the server. Ending a process by its id was not among the things the build was allowed to do.
+- **Commands (PowerShell on the laptop):**
   ```powershell
-  # four comparison backends, each in its own window (they stop with Ctrl+C)
-  powershell -File scripts\v1\ab-server.ps1 -Port 8111 -Name m-off    -Flags "LIVE_SYNC_ADAPT=false"
-  powershell -File scripts\v1\ab-server.ps1 -Port 8113 -Name m-ctl    -Flags "LIVE_SYNC_ADAPT=false,V1_LIVE_BUDGET=true,V1_LIVE_RATECTRL=true"
-  cd backend
-  .venv\Scripts\python.exe -m eval.live_replay ..\data-v1\eval\dense\<file> --out ..\data-v1\eval\ws1\<name> `
-      --target off=http://127.0.0.1:8111 --target ctl=http://127.0.0.1:8113 --runs 3 --langs pa-IN,ta-IN
+  Get-NetTCPConnection -LocalPort 8111,8112,8113,8114,8115 -State Listen | Select-Object LocalPort, OwningProcess
+  Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -match '--port 811[1-5]' } |
+      Select-Object ProcessId, CommandLine        # check: only the five comparison backends
+  Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -match '--port 811[1-5]' } |
+      ForEach-Object { Stop-Process -Id $_.ProcessId }
   ```
-  The harness waits while a stream is live on 8010 or 8110 and skips the run if it is still live after 30 minutes.
-- **GPU memory:** none new (the engines that already run).
-- **Verify:** `data-v1\eval\ws1\<name>\summary.md` has one column per setting; `speaking share` in it says how
-  dense the recording really is.
-- **Rollback:** nothing to undo; stop the comparison backends.
+- **Card:** not involved.
+- **Verify:** `curl http://127.0.0.1:8111/health` (and 8112-8115) no longer answers; `scripts/v1/v0-check.sh` still
+  says v0 answers; `http://127.0.0.1:8110/api/v1/health` still answers.
+- **Roll back:** nothing to undo. From now on comparison backends are started with `scripts\v1\ab-server.ps1` from
+  PowerShell, where stopping the task stops the server (checked on 8116-8118 in the same work).
 
-## 20. The English voice, and what the session does when the stock voice fails, v1.1 WS2
-
-- **What:** two decisions. (a) `V1_EN_VOICE` for `V1_EN_SINGLE_VOICE`: `auto` takes the one stock voice, because
-  every line in the hosted copy was 13 points worse on time on the dense reel (`PROGRESS.md`, v1.1 WS2); `copy`
-  keeps your own voice in English at that cost, with one change of voice after the opening when the voice is
-  learned from the stream. (b) Whether a session in the stock voice should move once to the copy, and stay there,
-  when the stock voice stops answering. It does not today: on 25 Nov the hosted stock voice refused 59% of its
-  lines and `auto` left 42% of the English lines without audio, while the copy answered all of its lines.
-- **Why deferred:** (a) is a matter of which you would rather hear; nobody has listened. (b) changes a voice in
-  mid-session, which is what the flag exists to stop; it needs your yes.
-- **Commands (laptop only, no VM; costs hosted calls for the minutes spoken):**
-  ```powershell
-  powershell -File scripts\v1\ab-server.ps1 -Port 8112 -Name en-copy  -Flags "V1_LIVE_WARMSTART=true,V1_EN_SINGLE_VOICE=true,V1_EN_VOICE=copy"
-  powershell -File scripts\v1\ab-server.ps1 -Port 8113 -Name en-stock -Flags "V1_LIVE_WARMSTART=true,V1_EN_SINGLE_VOICE=true,V1_EN_VOICE=stock"
-  cd backend
-  .venv\Scripts\python.exe -m eval.live_replay ..\data-v1\eval\reel25.mp4 --out ..\data-v1\eval\ws2\hear `
-      --target copy=http://127.0.0.1:8112 --target stock=http://127.0.0.1:8113 --runs 1 --loops 8 --langs en-IN,pa-IN --keep-audio
-  ```
-  `--keep-audio` writes one WAV per dubbed line into `data-v1\eval\ws2\hear\runs\<setting>_r1\`; play the `en-IN_*.wav`
-  files in order. To live with one of them: `V1_EN_SINGLE_VOICE=true` and `V1_EN_VOICE=copy` or `stock` in v1's
-  `backend\.env`, restart the v1 backend.
-- **GPU memory:** none new.
-- **Verify:** `GET /api/live/sessions/<id>/metrics` has `"en_voice": "copy"` or `"stock"`;
-  `python -m eval.live_first ..\data-v1\eval\ws2\hear --data copy=..\data-v1\ab\en-copy --data stock=..\data-v1\ab\en-stock --lang en-IN`
-  shows "changes of voice" 1 and 0.
-- **Rollback:** `V1_EN_SINGLE_VOICE=false` and restart; English is chosen line by line again.
-
-## 21. What the session-start measurement could not cover, v1.1 WS2
+## 19. What the session-start measurement could not cover (LAPTOP + YOU) (was item 21)
 
 - **What:** (a) Streamer Mode with a recorded voice: `V1_LIVE_WARMSTART` sends the stored voice to the engines when
   the session is created and speaks one short line per language on every engine process; tested with a fake
@@ -376,7 +577,7 @@ Work that was deferred because it needs the GPU VM, a forbidden command, or a de
   a male voice was run, and nobody has heard whether the matched voice is the better one. (c) The English voices
   on a night the hosted stock voice is healthy: the stock voice's timing in `PROGRESS.md` is from a night it
   refused 59% of its lines.
-- **Why deferred:** (a) a comparison backend has an empty store, and a voice has to be recorded in v1 with consent
+- **Why it waits:** (a) a comparison backend has an empty store, and a voice has to be recorded in v1 with consent
   (v0's consent records are not copied; `scripts/v1/copy-voice-samples.sh` says why); your recorded voice was
   not used for a test you did not ask for. (b) needs a recording of a male speaker that is yours to dub. (c) needs
   another night and about 15 minutes of hosted calls.
@@ -392,63 +593,139 @@ Work that was deferred because it needs the GPU VM, a forbidden command, or a de
   (v1.1 WS2, "test by hand") on a recording of a male speaker; `warm.speaker` in the session's `/metrics` should
   say `male` and `warm.stock_voice` name Zayan (Punjabi), Dhruva (Bengali), Pranav (English); Tamil and Telugu
   stay female and say so. For (c): the three-backend run of `PROGRESS.md` once more.
-- **GPU memory:** none new.
+- **Card:** nothing new is loaded (the engines that already run).
 - **Verify:** `first.md` in each folder: first audio p50 / p95 of the first 10 phrases, lines in a stock voice
   (with a recorded voice: 0 expected in both).
-- **Rollback:** nothing to undo; `V1_LIVE_WARMSTART=false`.
+- **Roll back:** nothing to undo; `V1_LIVE_WARMSTART=false`.
 
-## 22. A second judge for Tamil, Bengali and the other languages, v1.1 WS3
+---
 
-- **What:** with `V1_HQ_JUDGE` the heard-back judge is the hosted speech-to-text first and a Whisper next. The
-  Whisper that runs today (:9030) is a Hindi and Hinglish model, so it is a second judge for Hindi lines only.
-  For every other language there is no second judge: when the hosted service does not answer, a take is stored as
-  "not checked" (spoken, not flagged, reported). The second judge for those languages is the multilingual Whisper
-  of the QA server (item 6). The backend side is built and tested with a fake server: once `V1_QA_URL` is set,
-  `qa_server` is in the judge order after the other two (`V1_HQ_JUDGE_ORDER=prisma,whisper_gpu,qa_server`).
-- **Why deferred:** item 6 needs a shell on the VM.
-- **Commands:** those of item 6, then in v1's `backend/.env`: `V1_QA_URL=http://127.0.0.1:9045`, `V1_HQ_JUDGE=true`.
-- **Expected GPU memory:** 0 on CPU (item 6).
-- **Verify:** `GET /api/v1/jobs/<id>/backcheck?lang=ta-IN` on a finished job shows `judges` (who scored how many
-  lines). To see the second judge work, run one job with `V1_HQ_JUDGE_BY_LANG=ta-IN=qa_server` and compare its
-  scores with the hosted judge's on the same job (`python -m eval.v1.rescore --hear-all`).
-- **Rollback:** empty `V1_QA_URL`.
-- **Before trusting it:** how the QA server's Whisper scores against the hosted judge on the same takes has not
-  been measured (the server has never run with its real model). Two judges' scores are not comparable until it has.
+# Part F. Yours: recordings, labels, choices, prices
 
-## 23. Labels for the calibration page, v1.1 WS3
+## 20. Two or three dense recordings of your own for the Live replay (YOU + LAPTOP) (was item 19)
+
+- **What:** 2-3 recordings of about 10 minutes each, your own content (or content you have the right to dub),
+  where the speaker talks almost without a pause: a class, a commentary, a rant. Any file ffmpeg reads (mp4, mkv,
+  m4a, wav). Put them in `data-v1\eval\dense\` (the folder is not in the repository; nothing in it is committed).
+- **Why it waits:** Live audio is never stored, so no real stream can be replayed. The only dense material on this
+  machine is one 24.9 s reel; `docs/v1/LIVE_DENSE_REPORT.md` is measured on that reel played eight times in a
+  row, which repeats the same 11-12 phrases and says nothing about a speaker who changes pace or topic over ten
+  minutes. The densest long sessions in the logs (62% speaking over 16 minutes on 24 Nov) left only their numbers.
+- **Commands (laptop only, no VM, no sudo; costs hosted speech-to-text for the minutes replayed):**
+  ```powershell
+  # two comparison backends, each in its own window (they stop with Ctrl+C)
+  powershell -File scripts\v1\ab-server.ps1 -Port 8111 -Name m-off    -Flags "LIVE_SYNC_ADAPT=false"
+  powershell -File scripts\v1\ab-server.ps1 -Port 8113 -Name m-ctl    -Flags "LIVE_SYNC_ADAPT=false,V1_LIVE_BUDGET=true,V1_LIVE_RATECTRL=true"
+  cd backend
+  .venv\Scripts\python.exe -m eval.live_replay ..\data-v1\eval\dense\<file> --out ..\data-v1\eval\ws1\<name> `
+      --target off=http://127.0.0.1:8111 --target ctl=http://127.0.0.1:8113 --runs 3 --langs pa-IN,ta-IN
+  ```
+  The harness waits while a stream is live on 8010 or 8110 and skips the run if it is still live after 30 minutes.
+  (Ports 8111 and 8113 are free only after item 18.)
+- **Card:** nothing new is loaded.
+- **Verify:** `data-v1\eval\ws1\<name>\summary.md` has one column per setting; `speaking share` in it says how
+  dense the recording really is.
+- **Roll back:** nothing to undo; stop the comparison backends.
+
+## 21. Labels for the calibration page (YOU) (was item 23)
 
 - **What:** `/studio/calibrate` needs a person who speaks the language to label takes good or bad: at least 30 per
   language with 5 of each kind before a flag line is recommended (`CALIBRATION.md`). Until then
   `V1_HQ_BACKCHECK_MIN=0.9` is the value v1 started with, not a measured one, and "flagged lines" is a count
   nobody has checked by ear.
-- **Why deferred:** it needs ears, for Tamil and Bengali a speaker of each.
+- **Why it waits:** it needs ears, for Tamil and Bengali a speaker of each.
 - **Commands (laptop only):** `V1_HQ_CALIBRATE=true` and `V1_HQ_JUDGE=true` in v1's `backend\.env`, restart the
   backend, open `http://localhost:3100/studio/calibrate`. The takes of the three test videos are there once
-  `python -m eval.v1.rescore --data ..\data-v1 --jobs a69b4e0b,7782d82a,6bb779d8 --out ..\data-v1\eval\ws3
-escore --write-hearings`
-  has run (done in this work; it reads the cache only).
-- **GPU memory:** none.
-- **Rollback:** `V1_HQ_CALIBRATE=false`; delete `data-v1\calibration\labels.jsonl` to start over.
+  `python -m eval.v1.rescore --data ..\data-v1 --jobs a69b4e0b,7782d82a,6bb779d8 --out ..\data-v1\eval\ws3\rescore --write-hearings`
+  has run (done in the WS3 work; it reads the cache only).
+- **Card:** not involved.
+- **Roll back:** `V1_HQ_CALIBRATE=false`; delete `data-v1\calibration\labels.jsonl` to start over.
 
-## 24. Five comparison backends left running on ports 8111-8115, v1.1 WS3
+## 22. The English voice, and what a session does when the stock voice fails (YOU + LAPTOP) (was item 20)
 
-- **What:** five v1 comparison backends started for the Studio measurement on 25 Nov 2026 are still running,
-  idle: 8111 (`ws3-std`), 8112 (`ws3-hq`), 8113 (`ws3-fixed`), 8114 (`ws3-adapt`), 8115 (`ws3-new`). They hold
-  those ports, some memory, and nothing else: no job is running on them, and they are not v0, the v1 backend on
-  8110, a model server or the tunnel.
-- **Why deferred:** they were started through Git Bash, where stopping the task ends the shell around the
-  server and leaves the server. Ending a process by its id was not among the things this work was allowed to do.
-- **Commands (PowerShell on the laptop):**
+- **What:** two decisions. (a) `V1_EN_VOICE` for `V1_EN_SINGLE_VOICE`: `auto` takes the one stock voice, because
+  every line in the hosted copy was 13 points worse on time on the dense reel (`PROGRESS.md`, v1.1 WS2); `copy`
+  keeps your own voice in English at that cost, with one change of voice after the opening when the voice is
+  learned from the stream. (b) Whether a session in the stock voice should move once to the copy, and stay there,
+  when the stock voice stops answering. It does not today: on 25 Nov the hosted stock voice refused 59% of its
+  lines and `auto` left 42% of the English lines without audio, while the copy answered all of its lines.
+  Item 8 may change this choice: Maya 2 would be a third English voice, your own, made on our card.
+- **Why it waits:** (a) is a matter of which you would rather hear; nobody has listened. (b) changes a voice in
+  mid-session, which is what the flag exists to stop; it needs your yes.
+- **Commands (laptop only, no VM; costs hosted calls for the minutes spoken):**
   ```powershell
-  Get-NetTCPConnection -LocalPort 8111,8112,8113,8114,8115 -State Listen | Select-Object LocalPort, OwningProcess
-  Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -match '--port 811[1-5]' } |
-      Select-Object ProcessId, CommandLine        # check: only the five comparison backends
-  Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -match '--port 811[1-5]' } |
-      ForEach-Object { Stop-Process -Id $_.ProcessId }
+  powershell -File scripts\v1\ab-server.ps1 -Port 8112 -Name en-copy  -Flags "V1_LIVE_WARMSTART=true,V1_EN_SINGLE_VOICE=true,V1_EN_VOICE=copy"
+  powershell -File scripts\v1\ab-server.ps1 -Port 8113 -Name en-stock -Flags "V1_LIVE_WARMSTART=true,V1_EN_SINGLE_VOICE=true,V1_EN_VOICE=stock"
+  cd backend
+  .venv\Scripts\python.exe -m eval.live_replay ..\data-v1\eval\reel25.mp4 --out ..\data-v1\eval\ws2\hear `
+      --target copy=http://127.0.0.1:8112 --target stock=http://127.0.0.1:8113 --runs 1 --loops 8 --langs en-IN,pa-IN --keep-audio
   ```
-- **GPU memory:** none.
-- **Verify:** `curl http://127.0.0.1:8111/health` (and 8112-8115) no longer answers; `scripts/v1/v0-check.sh` still
-  says v0 answers; `http://127.0.0.1:8110/api/v1/health` still answers.
-- **Rollback:** nothing to undo. From now on comparison backends are started with `scripts\v1\ab-server.ps1` from
-  PowerShell, where stopping the task stops the server (checked on 8116-8118 in the same work).
+  `--keep-audio` writes one WAV per dubbed line into `data-v1\eval\ws2\hear\runs\<setting>_r1\`; play the `en-IN_*.wav`
+  files in order. To live with one of them: `V1_EN_SINGLE_VOICE=true` and `V1_EN_VOICE=copy` or `stock` in v1's
+  `backend\.env`, restart the v1 backend. (Ports 8112 and 8113 are free only after item 18.)
+- **Card:** nothing new is loaded.
+- **Verify:** `GET /api/live/sessions/<id>/metrics` has `"en_voice": "copy"` or `"stock"`;
+  `python -m eval.live_first ..\data-v1\eval\ws2\hear --data copy=..\data-v1\ab\en-copy --data stock=..\data-v1\ab\en-stock --lang en-IN`
+  shows "changes of voice" 1 and 0.
+- **Roll back:** `V1_EN_SINGLE_VOICE=false` and restart; English is chosen line by line again.
 
+## 23. Prices for the cost per minute (YOU) (was item 14)
+
+- **What:** `/metrics-ui` shows a cost per minute only for the rates that are set: `V1_GPU_RATE_PER_HOUR`,
+  `V1_STT_RATE_PER_MIN`, `V1_TTS_RATE_PER_1K_CHARS`, `V1_LLM_RATE_PER_CALL`, `V1_COST_CURRENCY`.
+- **Why it waits:** the prices are yours to give (the real hourly rate of an A100 and the hosted vendors'
+  current prices). No figure was invented: all are 0, so no cost is shown.
+- **Note on the GPU part:** it counts the seconds of work the model servers reported, times the hourly rate. A GPU
+  that is rented by the hour costs the same when idle, so for one stream on one card the honest figure is the full
+  hourly rate divided by 60 per stream minute; the counted seconds show how much of the card a stream really uses.
+- **Card:** not involved. **Roll back:** set the rates to 0.
+
+## 24. The decisions in one place (YOU) (was item 15)
+
+- **Indic Transcribe licence** (item 11): sign-off from its authors, or samples only.
+- **Big translation model** (item 9): 12B if it wins by the rule; 31B does not fit beside the voice engines by the
+  estimates. Which vLLM: v0's translation server runs 0.34.0 (read from its `/version`) and the kit runs that
+  one; whether it starts the 12B checkpoint is not known until `smoke.sh` has run.
+- **Maya 2** (item 8): keep or drop after hearing it; whether English in your own voice from it replaces today's
+  English choice (item 22).
+- **Speaker similarity** (item 4): the model earlier numbers used is non-commercial and is refused now; the new
+  scale has to be measured on your voice before a threshold means anything.
+- **The speaker model's training data:** its licence is Apache-2.0, but it was trained on VoxCeleb, whose own page
+  states no licence (`MODELS.md`). If that matters for a contract, it is a question for a lawyer, not for this list.
+- **Which Live flags to switch on:** see `EVAL_REPORT.md`. The measured picture decides, not this list.
+- **Studio HQ's translation order** when the big model is missing (item 9, last line).
+
+---
+
+## Old number, new number
+
+| Was | Now | What | Kind |
+|---|---|---|---|
+| 1 | 1 | look at the machine | VM |
+| 2 | 3 | Docker | VM, optional |
+| 3 | 2 | the v1 backend on the machine | VM + LAPTOP |
+| 4 | 13 | domain, HTTPS, demo password | VM + YOU |
+| 5 | 14 | Postgres store | VM |
+| 6 | 4 | QA server on CPU | VM |
+| 7 | 10 | voice server with batching | VM |
+| 8 | 11 | Indic Transcribe | VM + YOU |
+| 9 | 9 | big translation model, HQ window | VM + LAPTOP + YOU |
+| 10 | 8 | Maya 2 and the voice A/B | VM + LAPTOP + YOU |
+| 11 | 7 | diarization | VM + YOU |
+| 12 | 12 | pin model versions | VM |
+| 13 | 15 | backup bucket | VM + YOU |
+| 14 | 23 | prices | YOU |
+| 15 | 24 | the decisions in one place | YOU |
+| 16 | 17 | tunnel watchdog | LAPTOP |
+| 17 | 16 | stop the laptop sleeping | LAPTOP |
+| 18 | 5 | the card's numbers on the status page | VM + LAPTOP |
+| 19 | 20 | dense recordings | YOU + LAPTOP |
+| 20 | 22 | the English voice | YOU + LAPTOP |
+| 21 | 19 | session-start measurement, the rest | LAPTOP + YOU |
+| 22 | 6 | second judge | VM |
+| 23 | 21 | labels for calibration | YOU |
+| 24 | 18 | five leftover comparison backends | LAPTOP |
+
+New in v1.1 WS5, inside the items above: the deploy kit (items 4, 8-11), the backend-only start on the machine
+(item 2), the voice A/B kit (item 8), the translation A/B with its rule (item 9), the licence guard on the speaker
+model (item 4).

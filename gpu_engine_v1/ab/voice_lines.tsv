@@ -1,0 +1,23 @@
+# The 20 fixed lines of the voice A/B (IndicF5 against Maya 2). id <tab> language <tab> line.
+# Ordinary stream sentences written for this test; no names, no personal data. Six are English on purpose:
+# IndicF5 has no English, and a copied voice in English is what Maya 2 would add.
+hi01	hi-IN	नमस्ते दोस्तों, आज की स्ट्रीम में आपका स्वागत है।
+hi02	hi-IN	अगर आपको यह वीडियो पसंद आया तो चैनल को सब्सक्राइब ज़रूर करें।
+hi03	hi-IN	यह लेवल थोड़ा मुश्किल है, लेकिन हम इसे पार कर लेंगे।
+hi04	hi-IN	कल शाम सात बजे फिर मिलते हैं, तब तक अपना ध्यान रखिए।
+ta01	ta-IN	வணக்கம் நண்பர்களே, இன்றைய நேரலைக்கு உங்களை வரவேற்கிறேன்.
+ta02	ta-IN	இந்த வீடியோ பிடித்திருந்தால் சேனலை சப்ஸ்கிரைப் செய்யுங்கள்.
+ta03	ta-IN	இந்த கேள்விக்கு சரியான பதில் என்ன என்று கமெண்டில் சொல்லுங்கள்.
+ta04	ta-IN	நாளை மாலை ஏழு மணிக்கு மீண்டும் சந்திப்போம்.
+bn01	bn-IN	নমস্কার বন্ধুরা, আজকের লাইভে আপনাদের স্বাগত জানাই।
+bn02	bn-IN	এই প্রশ্নটা একটু কঠিন, মন দিয়ে শুনুন।
+bn03	bn-IN	ভিডিওটা ভালো লাগলে চ্যানেলটা সাবস্ক্রাইব করতে ভুলবেন না।
+pa01	pa-IN	ਸਤ ਸ੍ਰੀ ਅਕਾਲ ਦੋਸਤੋ, ਅੱਜ ਦੀ ਸਟ੍ਰੀਮ ਵਿੱਚ ਤੁਹਾਡਾ ਸੁਆਗਤ ਹੈ।
+pa02	pa-IN	ਇਹ ਸਵਾਲ ਥੋੜ੍ਹਾ ਔਖਾ ਹੈ, ਧਿਆਨ ਨਾਲ ਸੁਣੋ।
+pa03	pa-IN	ਕੱਲ੍ਹ ਸ਼ਾਮ ਨੂੰ ਸੱਤ ਵਜੇ ਫਿਰ ਮਿਲਦੇ ਹਾਂ।
+en01	en-IN	Hello everyone, welcome back to the stream.
+en02	en-IN	If you enjoyed this video, please subscribe to the channel.
+en03	en-IN	This level is a little tricky, but I think we can clear it in one try.
+en04	en-IN	The answer to the last question was option three, well done if you got it.
+en05	en-IN	Let me read a few messages from the chat before we start.
+en06	en-IN	That is all for today, see you tomorrow at seven in the evening.

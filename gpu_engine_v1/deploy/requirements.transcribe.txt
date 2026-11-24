@@ -1,0 +1,8 @@
+# :9043 Indic Transcribe (torch comes first, from the CUDA index; see kit.py)
+transformers==4.47.1
+sentencepiece==0.2.0
+soundfile==0.13.0
+huggingface_hub==0.27.1
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
