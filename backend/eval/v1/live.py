@@ -30,8 +30,7 @@ KEYS = [  # (name in the result, where it comes from, unit)
     ("skipped_late", "trace.skipped_late", ""), ("at_speed_limit", "trace.at_speed_limit", ""),
     ("copied_voice_pct", "trace.copied_voice_pct", "%"), ("translate_p50_ms", "trace.translate_p50_ms", "ms"),
     ("session_first_audio_ms", "trace.session_first_audio_ms", "ms"),
-    ("translated_ahead", "trace.translated_ahead", ""), ("shortened", "trace.shortened", ""),
-    ("ahead_started", "trace.ahead_started", ""), ("ahead_dropped", "trace.ahead_dropped", ""),
+    ("shortened", "trace.shortened", ""),
     ("short_lines_joined", "trace.short_lines_joined", ""), ("short_lines_alone", "trace.short_lines_alone", ""),
     ("fallback_llm_pct", "trace.fallback_pct.llm", "%"), ("fallback_tts_pct", "trace.fallback_pct.tts", "%"),
 ]
@@ -136,7 +135,7 @@ async def main() -> None:
             rows.append(res)
             print(json.dumps({key: res.get(key) for key in ("target", "run", "ok", "first_audio_p50_ms", "on_time_pct",
                                                               "within_1s_pct", "session_first_audio_ms", "skipped_late",
-                                                              "translated_ahead", "error")}), flush=True)
+                                                              "error")}), flush=True)
             (out / "runs.json").write_text(json.dumps(rows, indent=1), encoding="utf-8")
         else:
             continue

@@ -1126,3 +1126,75 @@ learned from the reel.
   not a public poll.
 - The pitch video is 35 MB for 82 s (quality setting crf 21). The repository's hooks refuse files over 10 MB and
   video files are ignored anyway; it stays in the data folder.
+
+## v1.1 WS6: cleanup (25 Nov 2026)
+
+Two flags and their code are gone, and there is a recommended set of flags for v1's env file. No Live session,
+no Studio job and no comparison backend was run: nothing was measured in this workstream, every number below is
+quoted from an earlier entry. No flag was added. Nothing of v0 was touched.
+
+### Removed: `V1_SPEC_TRANSLATE` and `V1_LLM_PREFIX_CACHE`
+
+- **Why.** Neither earned its keep (Phase 5 above, `EVAL_REPORT.md` section 1.3).
+  Translation ahead: 4-6 early translations started a run, none used, in 5 runs; partials arrive about 470 ms
+  apart, so a pause is only certain when the final is arriving anyway; it cost 4-6 extra translation calls a
+  language a minute. Fixed rules first: 61.4% of prompt tokens came from the server's cache with the flag off and
+  with it on (40 calls each), call p50 379 ms against 420 ms: the cache was already on and already held each prompt.
+- **What went.**
+  `app/config.py`: `v1_spec_translate`, `v1_llm_prefix_cache`, and the setting `v1_spec_stable_ms`.
+  `app/v1/flags.py`, `tests/conftest.py`, `scripts/v1/ab-server.sh` and `.ps1`, `backend/.env.example`: the two names.
+  `app/live/pipeline.py`: the tracker and its table of early translations, the hooks at a partial, between
+  partials, when a phrase goes out, at the translation call and at the end of a session, and the three helpers
+  `_spec_kw`, `_spec_start`, `_spec_result`.
+  `app/v1/phrase.py`: `SpecTracker`; `rest_of` and `DynamicPhraser.rest`, which only it used. `same_words` stays:
+  the HQ transcript step uses it.
+  `app/providers/llm_local.py`: the reordered rules and temperature 0.1; the prompt and temperature 0.2 of the
+  flag-off path are what is left, unchanged.
+  Trace and numbers that existed only for them: `spec` on a phrase record, `spec_started`, `spec_used`,
+  `spec_dropped` and `partial_gap_ms` on `live_session_end`, the `spec_miss` event; `translated_ahead`,
+  `ahead_started`, `ahead_used`, `ahead_dropped` in the Live summary (`app/v1/metrics.py`) and in the columns of
+  `eval/v1/live.py`. Old trace files in `logs/` still hold those fields; nothing reads them any more.
+  `eval/v1/prefix.py` (the script that measured the prefix cache): deleted.
+  Tests: the three `SpecTracker` tests, the two pipeline tests of translation ahead, and the default-off case for
+  the flag. Docs: the two rows in `RUNBOOK.md`; `SUMMARY.md` and `EVAL_REPORT.md` now say "removed"; the flag
+  list quoted in `ARCHITECTURE.md`.
+  Not edited: the earlier entries of this file (they are the record of what was measured).
+- **An env file that still sets them.** `Settings` is declared with `extra="ignore"`: a name it does not know is
+  skipped, in the env file and in the process environment alike. The backend starts, the name switches nothing
+  on, and nothing warns about it. Checked two ways: a test loads an env file holding all three removed names, and
+  the settings and the app were loaded once against this checkout's own `backend/.env`, which still holds one
+  of the three names (counted by name, values not read; the file was not edited). The line can stay or go.
+- **To get them back:** the commit before this one, `bc48922` (`git show bc48922:backend/app/v1/phrase.py`, and
+  the same for `app/live/pipeline.py`, `app/providers/llm_local.py`, `eval/v1/prefix.py`, `tests/test_v1_phrase.py`).
+
+### Recommended flags for v1's `.env`
+
+Written out flag by flag, with the measured reason for each, in `RUNBOOK.md` section 3; short form in
+`SUMMARY.md` section 2; a ready block as comments at the end of `backend/.env.example`. Code defaults stay off
+and `backend/.env` was not edited: the flags take effect when the user copies the lines and restarts 8110.
+
+- On, as asked: `V1_TRACE`, `V1_ROUTER`, `V1_API_LOG`, `V1_STUDIO_HQ`, `V1_FIT_115`, `V1_LIVE_STOCK_DEFAULT`.
+- Where the reports and that list pull apart (said in the docs, not hidden):
+  1. `V1_STUDIO_HQ` without `V1_HQ_REVIEW`: WS3 found HQ dubbing two of three test videos from a damaged
+     transcript without it (25 of 38 lines against 0). The ready block switches `V1_HQ_REVIEW` and `V1_HQ_JUDGE`
+     on with HQ.
+  2. `V1_LIVE_STOCK_DEFAULT`: every v1.1 Live number was measured with a voice learned from the stream; with
+     this flag a `/live` session without a streamer profile never learns one. The only v1 runs in stock voices
+     (Phase 5, two languages, 3 runs) had first audio p50 5.1 s and 58.3% within 1 s, against 2.34 s and 83.3%
+     with the learned voice. The budget was not measured with stock voices.
+  3. `V1_BREAKER` + `V1_LIVE_DEGRADE` are not on the list and WS0 argues for them (4 of 22 phrases dubbed
+     through a 50 s stall with them off, all of 23-24 with them on). Commented in the ready block: the user's call.
+  4. `V1_LIVE_BUDGET` is recommended by WS1 for Punjabi-like languages but is one switch for every language, and
+     Tamil loses content with it. Commented in the ready block.
+- Also written down: `V1_FIT_115` acts on standard Studio jobs too, and was only measured inside HQ runs on
+  videos that hardly needed speeding up; `V1_API_LOG` writes under `logs/api/` inside the repository and its
+  cost per request was never measured.
+
+- **Tests:** 287 pass, 1 skipped (was 292 + 1: six tests of the removed code went, one is new).
+  New: `test_removed_flags_are_gone_and_an_env_file_that_still_sets_them_is_read` in `tests/test_v1_phrase.py`.
+  The flags-off tests of every other workstream pass unchanged.
+- **v0 after this workstream:** all nine checks ok (`scripts/v1/v0-check.sh`).
+- **Not done here, for whoever restarts 8110:** the running backend still has the old code until it is restarted.
+  `NEEDS_APPROVAL.md`, `MODELS.md` and `gpu_engine_v1/` were left alone (another workstream is editing them);
+  neither document named a removed flag at `bc48922`.
+- **Roll back:** `git revert` of this commit brings both flags and their code back, off by default.

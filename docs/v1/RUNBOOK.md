@@ -68,8 +68,6 @@ change. What each one does, and what was measured, is in `PROGRESS.md` and `EVAL
 | `V1_TRACE` | a record per Live phrase and Studio line; `/metrics-ui` fills | off: only logging stops |
 | `V1_ROUTER` | providers from `backend/config/routing.yaml` | off: v0's fixed table |
 | `V1_PHRASE_DYNAMIC` | first phrase 4-6 words, later 8-12, lines under 3 words join the next | off: 6-12 words |
-| `V1_SPEC_TRANSLATE` | a paused speaker's words are translated ahead of the final | off |
-| `V1_LLM_PREFIX_CACHE` | our translation model: fixed rules first, temperature 0.1 | off |
 | `V1_LIVE_LATE_SHORTEN` | a late line is said shorter instead of skipped | off: skipped as v0 |
 | `V1_LIVE_BACKCHECK` | a dubbed live line is heard back by the QA server, made again if wrong | off |
 | `V1_LIVE_STOCK_DEFAULT` | a Live session without a streamer profile speaks in stock voices | off: consent tick as v0 |
@@ -96,6 +94,74 @@ change. What each one does, and what was measured, is in `PROGRESS.md` and `EVAL
 | `V1_STORE` | `postgres` (with `POSTGRES_DSN`) | `json` |
 
 Not a flag but a setting: `LIVE_FIT_MAX_TEMPO=1.2` caps the Live speed-up at 1.2x (v0: 1.3).
+
+`V1_SPEC_TRANSLATE` and `V1_LLM_PREFIX_CACHE` no longer exist (removed in v1.1 WS6, `PROGRESS.md`). A line that
+still sets one of them in `backend/.env` is ignored: the backend starts as if it were not there.
+
+### Recommended settings for v1's `backend/.env` (v1.1 WS6)
+
+The code's defaults stay off. This is what to write into v1's own env file; a ready block is at the end of the v1
+part of `backend/.env.example`. Every number below is from `EVAL_REPORT.md`, `LIVE_DENSE_REPORT.md` or
+`PROGRESS.md`; nothing was measured for this list.
+
+**On** (the list that was asked for):
+
+| Flag | Why, and what is known about it |
+|---|---|
+| `V1_TRACE` | on in every measured run, no error from it; `/metrics-ui` and every report read it |
+| `V1_ROUTER` | one run with it on: the same providers in the trace, first audio 2.4 s against 2.3-2.7 s with it off; the HQ path's provider lists and the breaker runs used it |
+| `V1_API_LOG` | a log, not a speed or quality change; what it costs per request was not measured. It writes one line per outbound request (no bodies, no keys) under `logs/api/`, which is inside the repository: the folder grows with use |
+| `V1_STUDIO_HQ` | a choice per job, not a change to standard jobs. Words heard back 95.9% against 90.6% for standard (three videos, one job each, rerun of 25 Nov, corrected counting rule), 128 s against 67 s. See point 1 below before offering it |
+| `V1_FIT_115` | largest speed-up 1.15x in the HQ runs; the test videos hardly needed speeding up, so its effect on a video that does is covered by tests only. It acts on standard jobs too, not only HQ |
+| `V1_LIVE_STOCK_DEFAULT` | a product rule, covered by a test, never measured as a timing change. With it on a `/live` session without a streamer profile speaks in stock voices even when the consent tick is set. See point 2 below |
+
+**Every other flag:**
+
+| Flag | Recommended | The measured reason |
+|---|---|---|
+| `V1_HQ_REVIEW` | **on, with `V1_STUDIO_HQ`** | without it HQ's merge and clean steps damaged the transcript of two of three test videos: 25 of 38 lines no longer the line heard, 0 with it. 24 of 76 lines edited by the reviewer. Words heard back 94.5% against 95.9% without it (the figure cannot see a damaged transcript); its edits were not judged by ear |
+| `V1_HQ_JUDGE` | **on, with `V1_STUDIO_HQ`** | the counting rule no longer takes points off Bengali for a letter stored two ways: Bengali +5.6 to 6.3 points on the same output, Tamil unchanged, 25 flags become 15 |
+| `V1_BREAKER` and `V1_LIVE_DEGRADE` | **on, both together** (not on the list above: point 3) | all three GPU endpoints stalled for 50 s: flags off (1 run) 4 of 22 phrases translated and dubbed; on (3 runs) 23, 24, 23 of 23, 24, 23, in a stock voice, first audio median 3.1-3.5 s. Healthy calls stayed far under the limits (slowest voice line 1.36 s of 4 s, slowest translation 1.13 s of 3 s). The stall was made with a relay, not a real tunnel |
+| `V1_LIVE_BUDGET` | **on where Punjabi-like languages are the target; your call for Tamil** (point 4) | dense reel, Punjabi + Tamil, 5 runs: within 0.25 s 63.5% -> 80.6%, within 1 s 86.5% -> 92.3%, dub length over slot p90 1.42 -> 1.17, lines at 1.3x 46 -> 24 of 185; 15% fewer letters said; in Tamil 7 of 20 lines read had lost something that mattered |
+| `V1_LIVE_RATECTRL` | off | with the budget: 83.1% within 0.25 s against 80.6%, 91.8% within 1 s against 92.3%: inside the spread; it brings 1.4x on 15 lines a run, which nobody has heard |
+| `V1_LIVE_NATIVE_SPEED` | off | acted on 6.6 lines a run, all Tamil; no number moved |
+| `V1_LIVE_WARMSTART` | off (your call) | first audio p95 of the first 10 phrases 4.27 s -> 3.80 s over 5 runs each with the final build, 3.86 s -> 4.79 s with the first build, and "off" alone moved 0.41 s between batches: no proven gain. Its matched stock voice and softened change of voice need ears |
+| `V1_EN_SINGLE_VOICE` | on with `V1_EN_VOICE=auto` only if English is a target and one voice matters more than the copied one; else off | English + Punjabi, 3 runs each: stock lines between copied ones 4.7 a session and 9 changes of voice with it off, none with it on. Every English line in the hosted copy: within 1 s 86.6% -> 73.7% |
+| `V1_PHRASE_DYNAMIC` | off (your call: point 2) | a session's first audio 5.9 s -> 4.1 s when a voice is ready at the start (stock voices); 5 points fewer phrases on time on dense speech (69.6% -> 64.5%, voice learned from the stream) |
+| `V1_LIVE_LATE_SHORTEN` | off | skips 4.7 -> 1.7 a run, measured only inside a bundle whose timing was worse (56.0% on time against 69.6%); its own effect was not separated |
+| `V1_LIVE_BACKCHECK` | off | not measurable: no scorer until the QA server runs (`NEEDS_APPROVAL.md` item 6); it does nothing without one |
+| `V1_TTS_SERVER`, `V1_TTS_MAYA` | off | as of v1.1 WS4 neither server was loaded; nothing measured |
+| `V1_HQ_ADAPTIVE` | off | against v1's own rule the same number of takes (143); it only saves against five fixed takes (206 s against 524 s of voice time) |
+| `V1_HQ_NORMALISE` | off until a video with numbers has been heard | nothing to do on the three test videos (no digits); unit tests only |
+| `V1_HQ_AUTO_GLOSSARY` | off (your call; harmless) | 16 names and terms proposed over three videos; its effect on the dub was not separated from the review's |
+| `V1_HQ_CALIBRATE` | on when someone is going to label; it only adds a page | the page works on real takes; no labels yet, so no agreement figure |
+| `V1_LIVE_RECORD` | off | not a speed or quality change; on only for a session whose speaker agreed to a video being made (nothing deletes a recording by itself) |
+| `V1_LISTEN_TEST` | off until pairs exist in the data folder | no pairs and no ratings yet |
+| `V1_STORE` | `json` | `postgres` was never run against a database |
+
+Not a flag: `LIVE_FIT_MAX_TEMPO` stays at its default (phrases at the limit 20 -> 25 with 1.2; nobody has heard
+1.2x against 1.3x).
+
+**Where the reports and the list pull in different directions:**
+
+1. **`V1_STUDIO_HQ` without `V1_HQ_REVIEW`.** The list switches HQ on and not the review. v1.1 WS3 found that HQ
+   without it dubbed two of three test videos from a damaged transcript, and that the heard-back figure cannot
+   see it. So the ready block switches `V1_HQ_REVIEW` and `V1_HQ_JUDGE` on as well. If they are left off, do not
+   offer the HQ choice.
+2. **`V1_LIVE_STOCK_DEFAULT` against the Live measurements.** Every v1.1 Live number (budget, controller, warm
+   start, the breaker runs) was measured with the voice learned from the stream. With this flag on a `/live`
+   session without a streamer profile never learns a voice, so those numbers describe Streamer Mode sessions and
+   not `/live`. The only v1 runs in stock voices (two languages, three runs, flags off) had first audio p50 5.1 s
+   (2.6-6.6) and 58.3% (45.5-81.6) within 1 s, against 2.34 s and 83.3% with the learned voice on the same reel:
+   stock voices go through the hosted account one request at a time. The budget was not measured with stock
+   voices. And a voice that is ready at the start is the one case where `V1_PHRASE_DYNAMIC` gained something
+   (5.9 s -> 4.1 s to the session's first audio), so with stock default on that flag is worth a second look.
+3. **`V1_BREAKER` and `V1_LIVE_DEGRADE` are not on the list, and their report argues for them** more clearly than
+   for any other Live flag (4 of 22 phrases dubbed through a stall against all of them). The ready block has
+   them as a commented line. What is missing is a real stalled tunnel and more than one language.
+4. **`V1_LIVE_BUDGET` is one switch for the whole backend**, not per language: on, it shortens Tamil too, where
+   the timing gain is the largest (58% -> 78% within 0.25 s) and so is the loss of content. It is commented in
+   the ready block for that reason.
 
 The two reliability flags belong together (measured together, `PROGRESS.md` v1.1 WS0). Their limits are settings:
 `V1_BREAKER_TRANSLATE_TIMEOUT_S=3` and `V1_BREAKER_VOICE_TIMEOUT_S=4` (the whole time one live call may take on our

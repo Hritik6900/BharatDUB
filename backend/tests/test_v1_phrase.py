@@ -1,4 +1,4 @@
-"""v1 Live phrase logic: dynamic phrase sizes, short lines joined to the next, translation started ahead."""
+"""v1 Live phrase logic: dynamic phrase sizes, short lines joined to the next."""
 import asyncio
 
 import pytest
@@ -9,7 +9,7 @@ from app.live.pipeline import LivePipeline
 from app.live.session import LiveSession
 from app.providers.base import TranscriptEvent
 from app.providers.mock import MockTTS
-from app.v1.phrase import DynamicPhraser, ShortLineMerger, SpecTracker, n_words, rest_of, same_words
+from app.v1.phrase import DynamicPhraser, ShortLineMerger, n_words, same_words
 
 WORDS = "aaj hum ek naya game khelne wale hain aur ye bahut mazedaar hoga doston kyunki isme naye map aaye hain".split()
 
@@ -39,7 +39,6 @@ def test_first_phrase_is_only_the_first_of_the_session():
     assert len(first) == 1 and p.given == 1
     p.reset()                                                 # a reconnect of the recogniser: still not "first"
     assert grow(p, WORDS[:7], uid="b") == []                  # seven words are not enough for a later phrase
-    assert rest_of(p, "b", " ".join(WORDS[:7])) == " ".join(WORDS[:7])
 
 
 def chunk(seq: int, text: str, start: int = 0, end: int = 0) -> Chunk:
@@ -77,50 +76,6 @@ def test_long_lines_pass_straight_through_and_two_short_ones_join():
 def test_same_words_ignores_case_and_punctuation():
     assert same_words("Aaj hum khelenge.", "aaj hum khelenge")
     assert not same_words("aaj hum khelenge", "aaj hum nahi khelenge")
-
-
-def test_spec_starts_only_after_the_words_stood_still():
-    s = SpecTracker(stable_ms=300)
-    assert s.observe("aaj hum", 1000) is False             # first sight
-    assert s.observe("aaj hum khelenge", 1300) is False    # changed: the clock starts again
-    assert s.observe("aaj hum khelenge", 1600) is False    # partials come 300 ms apart: 300 ms still is ordinary
-    assert s.wait_ms() == 450                              # a gap and a half
-    assert s.due(1700) is False
-    assert s.due(1760) is True                             # the speaker paused: no new partial for 460 ms
-    s.begin({"ta-IN": DummyTask()})
-    assert s.due(2500) is False                            # already running
-    assert s.observe("ok", 2600) is False and s.tasks is None and s.dropped == 1   # the words moved on: dropped
-
-
-def test_spec_needs_two_words_and_fires_between_partials():
-    s = SpecTracker(stable_ms=300)
-    s.observe("haan", 0)
-    assert s.due(5000) is False                            # one word is not worth a call
-    s.observe("haan bilkul", 5100)
-    assert s.due(5300) is False and s.due(5400) is True    # no partial needed to notice the pause
-
-
-class DummyTask:
-    def __init__(self):
-        self.cancelled_ = False
-
-    def cancel(self):
-        self.cancelled_ = True
-
-
-def test_spec_is_used_for_the_same_words_and_dropped_for_others():
-    s = SpecTracker(stable_ms=0, min_words=1)
-    s.observe("aaj hum khelenge", 0)
-    assert s.observe("aaj hum khelenge", 10)
-    t = DummyTask()
-    s.begin({"ta-IN": t})
-    assert s.take("Aaj hum khelenge.") == {"ta-IN": t} and s.used == 1 and not t.cancelled_
-    s.observe("phir milte hain", 20)
-    s.observe("phir milte hain", 30)
-    t2 = DummyTask()
-    s.begin({"ta-IN": t2})
-    assert s.take("phir milenge") is None and t2.cancelled_ and s.dropped == 1
-    assert s.take("anything") is None                      # nothing running: nothing to use
 
 
 # ---------- in the pipeline ----------
@@ -181,27 +136,6 @@ async def test_pipeline_without_the_flag_sends_the_short_line_alone(monkeypatch)
     assert await captions(q) == ["ta-IN:Kaise?"]
 
 
-async def test_pipeline_uses_the_translation_started_ahead(monkeypatch):
-    p, llm, q = pipeline(monkeypatch, v1_spec_translate=True, v1_spec_stable_ms=50)
-    for _ in range(3):   # the same words in three partials, 60 ms apart: they stand still
-        p._on_stt(TranscriptEvent(kind="partial", text="aaj hum khelenge", stable_text="", utterance_id="a"))
-        await asyncio.sleep(0.06)
-    assert llm.calls == [("ta-IN", "aaj hum khelenge")] and p._spec.started == 1    # translated ahead, once
-    p._on_stt(TranscriptEvent(kind="final", text="Aaj hum khelenge.", utterance_id="a", audio_duration_ms=900))
-    assert await captions(q) == ["ta-IN:aaj hum khelenge"]                           # the early translation is the caption
-    assert len(llm.calls) == 1 and p._spec.used == 1                                 # no second call
-
-
-async def test_pipeline_translates_again_when_the_final_differs(monkeypatch):
-    p, llm, q = pipeline(monkeypatch, v1_spec_translate=True, v1_spec_stable_ms=50)
-    for _ in range(3):
-        p._on_stt(TranscriptEvent(kind="partial", text="aaj hum khelenge", stable_text="", utterance_id="a"))
-        await asyncio.sleep(0.06)
-    p._on_stt(TranscriptEvent(kind="final", text="Aaj hum nahi khelenge.", utterance_id="a", audio_duration_ms=900))
-    assert await captions(q) == ["ta-IN:Aaj hum nahi khelenge."]                     # the final's own words
-    assert p._spec.dropped == 1 and llm.calls[-1] == ("ta-IN", "Aaj hum nahi khelenge.")
-
-
 async def test_late_line_is_shortened_not_skipped(monkeypatch):
     p, llm, q = pipeline(monkeypatch, v1_live_late_shorten=True)
     text = "ஒன்று இரண்டு மூன்று நான்கு ஐந்து ஆறு ஏழு எட்டு ஒன்பது பத்து"
@@ -231,6 +165,20 @@ def test_stock_default_and_session_glossary(monkeypatch, tmp_path):
     assert c.post("/api/live/sessions", json={"target_langs": ["ta-IN"], "voice_from_stream": True}).status_code == 201
 
 
-@pytest.mark.parametrize("flag", ["v1_phrase_dynamic", "v1_spec_translate"])
+@pytest.mark.parametrize("flag", ["v1_phrase_dynamic"])
 def test_flags_default_off(flag):
     assert getattr(get_settings(), flag) is False
+
+
+def test_removed_flags_are_gone_and_an_env_file_that_still_sets_them_is_read(tmp_path):
+    """v1.1 WS6 took V1_SPEC_TRANSLATE and V1_LLM_PREFIX_CACHE out. An env file written before that must still load."""
+    from app.config import Settings
+    from app.v1.flags import FLAGS, flags
+    env = tmp_path / ".env"
+    env.write_text("\n".join(["V1_SPEC_TRANSLATE=true", "V1_SPEC_STABLE_MS=250", "V1_LLM_PREFIX_CACHE=true",
+                              "V1_PHRASE_DYNAMIC=false", ""]))
+    s = Settings(_env_file=env)
+    for name in ("v1_spec_translate", "v1_spec_stable_ms", "v1_llm_prefix_cache"):
+        assert not hasattr(s, name) and name not in FLAGS
+    assert "V1_SPEC_TRANSLATE" not in flags(s) and "V1_LLM_PREFIX_CACHE" not in flags(s)
+    assert not any(flags(s)[k] for k in flags(s) if k != "V1_STORE")      # the unknown names switch nothing on

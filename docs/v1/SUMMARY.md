@@ -19,7 +19,7 @@ health endpoints and the shared GPU servers' own, and answered every time.
 | New model servers | batching voice server, Maya 2, Indic Transcribe, QA, big translation model: code, containers, stub mode | stubs tested; **no real model loaded** (GPU memory, licences) |
 | Eval | Live comparison across backends, Studio standard against HQ, key words on the hard set, one script for all | works; `EVAL_REPORT.md` |
 | Operations | demo check, warm-up, backup, GPU mode switch, runbook | demo check and warm-up ran; backup and mode switch not run |
-| Tests | 61 new tests; 159 pass in all, 1 skipped (Postgres store: no database here). After v1.1 WS3: 275 pass, 1 skipped. After v1.1 WS4: 292 pass, 1 skipped | |
+| Tests | 61 new tests; 159 pass in all, 1 skipped (Postgres store: no database here). After v1.1 WS3: 275 pass, 1 skipped. After v1.1 WS4: 292 pass, 1 skipped. After v1.1 WS6 (two flags and their tests removed): 287 pass, 1 skipped | |
 
 Not as the build notes described, and why:
 
@@ -33,7 +33,7 @@ Not as the build notes described, and why:
 - **The ignore rules for the assistant's files are written as patterns**, so the ignore file itself does not spell
   the names; the commit hooks are installed for this checkout only, so v0's commits are untouched.
 - **Four flags beyond the first list:** `V1_ROUTER`, `V1_LIVE_LATE_SHORTEN`, `V1_LIVE_BACKCHECK`,
-  `V1_LLM_PREFIX_CACHE`.
+  `V1_LLM_PREFIX_CACHE` (the last one removed again in v1.1 WS6, with `V1_SPEC_TRANSLATE`).
 
 ## 2. Flags: what the measurements say
 
@@ -48,8 +48,8 @@ Numbers are from `EVAL_REPORT.md` (three runs per Live setup, one run per Studio
 | `V1_PHRASE_DYNAMIC` | session's first audio 1.7 s earlier when a voice is ready at the start (5.9 -> 4.1 s, stock voices); no gain with a voice learned from the stream; 5 points fewer phrases on time on dense speech (69.6% -> 64.5%) | **your call**: worth it for a streamer's opening line, costs timing afterwards |
 | `V1_LIVE_LATE_SHORTEN` | 1-3 lines a run said shorter, skips 4.7 -> 1.7 a run | **your call**: fewer lost lines; measured only inside a bundle whose timing was worse |
 | `LIVE_FIT_MAX_TEMPO=1.2` | phrases at the limit 20 -> 25 | off until someone hears 1.2x against 1.3x |
-| `V1_SPEC_TRANSLATE` | 0 early translations used in 5 runs | **off** |
-| `V1_LLM_PREFIX_CACHE` | cache share 61.4% both ways; no faster | **off** (the server's cache was already on) |
+| `V1_SPEC_TRANSLATE` | 0 early translations used in 5 runs | **removed** in v1.1 WS6 |
+| `V1_LLM_PREFIX_CACHE` | cache share 61.4% both ways; no faster | **removed** in v1.1 WS6 (the server's cache was already on) |
 | `V1_LIVE_BACKCHECK` | not measurable without the QA server | off until the QA server runs |
 | `V1_LIVE_STOCK_DEFAULT` | a product rule, not a speed change | **your call** |
 | `V1_TTS_SERVER`, `V1_TTS_MAYA` | servers not loaded | off |
@@ -67,6 +67,27 @@ Numbers are from `EVAL_REPORT.md` (three runs per Live setup, one run per Studio
 | `V1_EN_SINGLE_VOICE` (v1.1) | English + Punjabi, 3 runs each: stock lines between copied ones 4.7 a session (10.1%) and 9 changes of voice with it off, none with it on. Every line in the hosted copy: within 1 s 86.6% -> 73.7% where the copy existed, first audio 0.73 s later than a stock line. So `auto` takes the one stock voice. The hosted stock voice refused 59% of its lines that night (the copy none) | **on** with `auto` if one voice matters more than the speaker's voice in English; `V1_EN_VOICE=copy` when the stock voice is failing or the copied voice matters more than timing |
 | `V1_LIVE_RECORD` (v1.1 WS4) | not a speed or quality change. One session recorded and rendered: 35 lines, the picture's numbers equal the trace's (91.4% within 0.25 s, 97.1% within 1 s, first audio 2.3 s). With it off, or without the session's own ask, nothing is written (tested) | **off**, and on only for a session whose speaker agreed to a video being made; nothing deletes a recording by itself |
 | `V1_LISTEN_TEST` (v1.1 WS4) | no ratings yet: no pairs exist | **on** once WS5's pairs are in the data folder and listeners are asked |
+
+### Recommended `.env` for v1 (v1.1 WS6)
+
+Nothing new was measured for this; the reasons flag by flag, with their numbers, are in `RUNBOOK.md` section 3,
+and a ready block is in `backend/.env.example`. The code's defaults stay off.
+
+- **On, as asked:** `V1_TRACE`, `V1_ROUTER`, `V1_API_LOG`, `V1_STUDIO_HQ`, `V1_FIT_115`, `V1_LIVE_STOCK_DEFAULT`.
+- **On as well, because a report says the list is not safe without them:** `V1_HQ_REVIEW` and `V1_HQ_JUDGE`
+  (HQ without the review dubbed two of three test videos from a damaged transcript: 25 of 38 lines against 0).
+- **A report argues for them, they are not on the list, your call:** `V1_BREAKER` + `V1_LIVE_DEGRADE` (through a
+  50 s stall 4 of 22 phrases dubbed with them off, all of 23-24 with them on); `V1_LIVE_BUDGET` for Punjabi-like
+  languages (within 1 s 86.5% -> 92.3%), which is one switch for every language and costs Tamil content.
+- **Off:** `V1_LIVE_RATECTRL`, `V1_LIVE_NATIVE_SPEED`, `V1_LIVE_WARMSTART`, `V1_PHRASE_DYNAMIC`,
+  `V1_LIVE_LATE_SHORTEN`, `V1_LIVE_BACKCHECK`, `V1_TTS_SERVER`, `V1_TTS_MAYA`, `V1_HQ_ADAPTIVE`,
+  `V1_HQ_NORMALISE`, `V1_HQ_AUTO_GLOSSARY`, `V1_LIVE_RECORD`, `V1_LISTEN_TEST` (until pairs exist),
+  `V1_EN_SINGLE_VOICE` (on with `auto` only where English is a target), `V1_HQ_CALIBRATE` (on when someone labels).
+- **The list and the reports disagree in one more place:** with `V1_LIVE_STOCK_DEFAULT` on, a `/live` session
+  without a streamer profile never learns a voice, and every v1.1 Live number was measured with a learned voice.
+  The only v1 runs in stock voices had first audio p50 5.1 s and 58.3% within 1 s, against 2.34 s and 83.3% with
+  the learned voice on the same reel.
+- **Removed:** `V1_SPEC_TRANSLATE` and `V1_LLM_PREFIX_CACHE` (no gain measured; the commit before v1.1 WS6 has them).
 
 Against the targets: Studio words heard back 92.5% (target 96%): not reached (v1.1 WS3: 95.9% by the corrected
 rule in a rerun, still not reached, and the figure does not see a damaged transcript; `EVAL_REPORT.md` section 6). Live first audio 2.3-2.5 s through

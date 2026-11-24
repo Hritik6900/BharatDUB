@@ -17,9 +17,9 @@ os.environ["GPU_MIO_URL"] = ""
 os.environ["GPU_VOICE_MODEL"] = "f5"
 os.environ["AI_MODE"] = "cloud"
 # v1: every flag off and no v1 server, whatever this checkout's .env says. A test that wants one switches it on.
-for _name in ("V1_TRACE", "V1_ROUTER", "V1_PHRASE_DYNAMIC", "V1_SPEC_TRANSLATE", "V1_TTS_SERVER", "V1_TTS_MAYA",
+for _name in ("V1_TRACE", "V1_ROUTER", "V1_PHRASE_DYNAMIC", "V1_TTS_SERVER", "V1_TTS_MAYA",
               "V1_LIVE_STOCK_DEFAULT", "V1_LIVE_LATE_SHORTEN", "V1_LIVE_BACKCHECK", "V1_STUDIO_HQ", "V1_FIT_115", "V1_API_LOG",
-              "V1_LLM_PREFIX_CACHE", "V1_BREAKER", "V1_LIVE_DEGRADE", "V1_LIVE_BUDGET", "V1_LIVE_RATECTRL",
+              "V1_BREAKER", "V1_LIVE_DEGRADE", "V1_LIVE_BUDGET", "V1_LIVE_RATECTRL",
               "V1_LIVE_NATIVE_SPEED", "V1_LIVE_WARMSTART", "V1_EN_SINGLE_VOICE", "V1_HQ_JUDGE", "V1_HQ_CALIBRATE",
               "V1_HQ_ADAPTIVE", "V1_HQ_NORMALISE", "V1_HQ_AUTO_GLOSSARY", "V1_HQ_REVIEW", "V1_LIVE_RECORD",
               "V1_LISTEN_TEST"):

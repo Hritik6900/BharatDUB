@@ -72,8 +72,8 @@ slower and spread wider than the copied-voice runs above.
 | Flag | Measured effect | Verdict |
 |---|---|---|
 | `V1_PHRASE_DYNAMIC` | first audio of a session 1.7 s earlier when a voice is ready at the start; no gain when the voice is learned from the stream (it waits about 7 s for the voice); 5 points fewer phrases on time from the longer later phrases; the short-line merge was not exercised (this reel has no one- or two-word lines) | useful for the opening of a streamer session; costs timing on dense speech |
-| `V1_SPEC_TRANSLATE` | 4-6 early translations started a run, none used, in 5 runs | no gain with partials about 470 ms apart; leave off |
-| `V1_LLM_PREFIX_CACHE` | 61.4% of prompt tokens from the server's cache with it off and with it on (40 calls each); call p50 379 ms against 420 ms | no gain: the cache was already on and already held each prompt; leave off |
+| `V1_SPEC_TRANSLATE` | 4-6 early translations started a run, none used, in 5 runs | no gain with partials about 470 ms apart; removed in v1.1 WS6 |
+| `V1_LLM_PREFIX_CACHE` | 61.4% of prompt tokens from the server's cache with it off and with it on (40 calls each); call p50 379 ms against 420 ms | no gain: the cache was already on and already held each prompt; removed in v1.1 WS6 |
 | `V1_LIVE_LATE_SHORTEN` | 1-3 lines a run said shorter; skips 4.7 -> 1.7 a run (inside a bundle whose timing was worse) | does what it says; its own effect on timing not separated |
 | `LIVE_FIT_MAX_TEMPO=1.2` | phrases at the limit 20 -> 25 | as expected; whether 1.2x sounds better than 1.3x needs ears |
 | `V1_LIVE_BACKCHECK` | not measured: no scorer without the QA server | waits for `NEEDS_APPROVAL.md` item 6 |

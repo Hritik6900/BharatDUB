@@ -110,7 +110,7 @@ def live_phrase(sid: str, row: dict[str, Any], seq: int, p: dict[str, Any], prov
             "tts": "gpu_voice" if on_gpu_voice else "hosted", "clone": bool(g("clone")),
             "fallback": {"stt": bool(t.get("stt_fb")), "llm": bool(g("llm_fb")), "tts": bool(g("tts_fb"))},
             "gpu_s": round(gpu_s, 3), "gpu_voice_ms": g("gpu_ms"), "tempo": g("tempo"), "pace": g("pace"),
-            "budget_words": g("budget"), "brief": bool(g("brief")), "spec": g("spec"), "shortened": bool(g("shortened")),
+            "budget_words": g("budget"), "brief": bool(g("brief")), "shortened": bool(g("shortened")),
             "backcheck": g("backcheck"), "redone": bool(g("redone")), "tts_chars": g("tts_chars"),
             "dub_ms": g("dub_ms"), "dub_raw_ms": g("dub_raw_ms"), "slot_ms": g("slot_ms"), "dur_ratio": g("dur_ratio"),
             "backlog_ms": g("backlog"), "tgt_words": g("tgt_words"), "tgt_chars": g("tgt_chars"),

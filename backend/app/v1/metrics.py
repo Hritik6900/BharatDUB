@@ -85,7 +85,6 @@ def live_summary(recs: list[dict[str, Any]], s: Settings) -> dict[str, Any]:
             "within_1s_pct": _share(sum(v <= 1000 for v in late), len(late)),
             "timed": len(late),
             "copied_voice_pct": _share(sum(1 for r in spoken if r.get("clone")), len(spoken)),
-            "translated_ahead": sum(1 for r in rows if r.get("spec")),
             "shortened": sum(1 for r in rows if r.get("shortened")),
             "at_speed_limit": sum(1 for r in rows if (r.get("tempo") or 0) >= 1.19),
             "fallback_pct": {st: _share(sum(1 for r in rows if (r.get("fallback") or {}).get(st)), len(rows))
@@ -131,8 +130,6 @@ def live_summary(recs: list[dict[str, Any]], s: Settings) -> dict[str, Any]:
             "per_engine": {k: block(v) for k, v in sorted(by_engine.items())},
             "session_first_audio_ms": _pct(opening, 50),
             "short_lines_joined": total("merged"), "short_lines_alone": total("short_alone"),
-            "ahead_started": total("spec_started"), "ahead_used": total("spec_used"),
-            "ahead_dropped": total("spec_dropped"),
             "viewer_reports": len(played), "viewer_within_1s_pct": _share(sum(v <= 1000 for v in played), len(played)),
             "usage": usage, "cost": cost(usage, minutes, s)}
 

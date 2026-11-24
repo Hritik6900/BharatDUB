@@ -168,13 +168,11 @@ class Settings(BaseSettings):
     v1_trace: bool = False              # a trace record per Live phrase and Studio line (JSONL + Prometheus)
     v1_router: bool = False             # providers are handed out from config/routing.yaml instead of the fixed table
     v1_phrase_dynamic: bool = False     # first phrase 4-6 words, later ones 8-12, lines under 3 words join the next
-    v1_spec_translate: bool = False     # translation starts when a partial has stood still, redone if the final differs
     v1_tts_server: bool = False         # copied voice from the one batching server (V1_TTS_SERVER_URL) instead of 9001-9003
     v1_tts_maya: bool = False           # Maya 2 as a second candidate voice in Studio HQ
     v1_live_stock_default: bool = False  # a Live session without a streamer profile speaks in stock voices
     v1_live_late_shorten: bool = False  # a line that is too late is said in a shorter version instead of skipped
     v1_live_backcheck: bool = False     # a dubbed live line is heard back in the background and made again if wrong
-    v1_llm_prefix_cache: bool = False   # our translation model: fixed rules first (the server caches that prefix), temperature 0.1
     v1_studio_hq: bool = False          # the HQ Studio path can be asked for (quality=hq on a job)
     v1_fit_115: bool = False            # Studio speeds a line up by at most 1.15x (v0: 1.35x), then shortens
     v1_api_log: bool = False            # one record per outbound provider request (no bodies, no keys) under V1_LOG_DIR/api
@@ -245,7 +243,6 @@ class Settings(BaseSettings):
     v1_phrase_max_words: int = 12
     v1_merge_under_words: int = 3       # a line shorter than this waits for the next one
     v1_merge_wait_ms: int = 1500        # ... this long at most, then it goes out alone
-    v1_spec_stable_ms: int = 300        # a partial unchanged for this long is translated ahead of its final
     v1_late_skip_factor: float = 2.0    # with late-shorten: skipped only when later than this times the limit
     v1_backcheck_min: float = 0.5       # live back-check: a line heard back under this share of words is made again
     # Studio HQ.
