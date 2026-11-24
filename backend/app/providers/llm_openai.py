@@ -85,8 +85,10 @@ class OpenAILLM:
         return list(await asyncio.gather(*(self.translate_chunk(line, target, glossary, []) for line in lines)))
 
     async def translate_chunk(self, text: str, target: str, glossary: list[str], context: list[str],
-                              brief: bool = False, native: bool = False, max_words: int | None = None) -> str:
-        """`brief`: the dub is behind the speaker, so condense like an interpreter would (main point only)."""
+                              brief: bool = False, native: bool = False, max_words: int | None = None,
+                              max_chars: int | None = None, compact: bool = False) -> str:
+        """`brief`: the dub is behind the speaker, so condense like an interpreter would (main point only).
+        `compact` with `max_words` and `max_chars` (`V1_LIVE_BUDGET`): the phrase's slot as a length."""
         lang = LANG_NAMES.get(target, target)
         system = (
             f"You are a live interpreter for an Indian streamer. Translate the CURRENT line into natural spoken {lang}, "
@@ -112,7 +114,12 @@ class OpenAILLM:
                        "No Latin letters at all; write numbers as words.")
         # `max_words`: how many words of this language fit the time the speaker took (from the measured pace of
         # the dubbing voice). Without it a dub that is behind is cut to about 60% of the words.
-        if brief:
+        if compact and max_words:
+            system += (f" Time limit: it is spoken in the time the speaker took. Use at most {max_words} words"
+                       + (f" and about {max_chars} letters" if max_chars else "") + "; prefer short words. "
+                       + ("The dub is running behind: say only the main point. " if brief else "")
+                       + "Compact spoken style: drop fillers, repetitions and address words. Keep names and numbers.")
+        elif brief:
             system += (" The dub is running behind the speaker, so condense: say only the main point, in at most "
                        f"{max_words or max(3, round(len(text.split()) * 0.6))} words, and leave out everything else.")
         elif max_words:

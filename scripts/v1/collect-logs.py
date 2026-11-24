@@ -66,7 +66,14 @@ def phrase_rows(chunks: list[dict]) -> list[dict]:
                         "heard_ms": diff(t, f"t_heard:{lang}", "t_speech_end"),
                         "late_ms": t.get(f"late:{lang}"), "tempo": t.get(f"tempo:{lang}"),
                         "copied_voice": t.get(f"clone:{lang}"), "on_gpu": t.get(f"gpu:{lang}"),
-                        "skipped": t.get(f"skipped:{lang}")})
+                        "skipped": t.get(f"skipped:{lang}"),
+                        # v1.1 (stored from 24 Nov 2026 on; empty before): lengths, never the words themselves
+                        "dub_ms": t.get(f"dub_ms:{lang}"), "dub_raw_ms": t.get(f"dub_raw_ms:{lang}"),
+                        "slot_ms": t.get(f"slot_ms:{lang}"), "dur_ratio": t.get(f"dur_ratio:{lang}"),
+                        "backlog_ms": t.get(f"backlog:{lang}"), "tgt_words": t.get(f"tgt_words:{lang}"),
+                        "tgt_chars": t.get(f"tgt_chars:{lang}"), "budget_ms": t.get(f"budget_ms:{lang}"),
+                        "budget_scale": t.get(f"ctl:{lang}"), "reasked": t.get(f"reasked:{lang}"),
+                        "merged_into": t.get(f"merged:{lang}")})
     return out
 
 
@@ -95,6 +102,8 @@ def session_index(version: str, s: dict, chunks: list[dict], rows: list[dict]) -
                     "late_p95_ms": pct(late, 95), "copied_voice_pct": share([r["copied_voice"] for r in spoken]),
                     "on_gpu_pct": share([r["on_gpu"] for r in spoken]),
                     "at_speed_limit_pct": share([(r["tempo"] or 1.0) >= 1.295 for r in spoken]),
+                    "dur_ratio_p50": pct(val("dur_ratio"), 50), "dur_ratio_p90": pct(val("dur_ratio"), 90),
+                    "backlog_p95_ms": pct(val("backlog_ms"), 95),
                     "skipped_late": sum(1 for r in rows if r["lang"] == lang and r["skipped"] == "late")})
     return out
 

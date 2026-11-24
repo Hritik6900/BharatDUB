@@ -1,0 +1,48 @@
+{
+ "built": "2026-11-24T16:17:06+00:00",
+ "what": "Seed of Live's expansion model: medians of ms of dubbed speech at the voice's own pace. Built by eval/v1/expansion_seed.py; see its header for what each number comes from.",
+ "rates": {
+  "pa-IN|gpu": {
+   "ms_per_char": 57.8,
+   "ms_per_word": 229.3,
+   "ms_per_src_word": 215.3,
+   "n": 46,
+   "logs_ms_per_src_word": 266.1,
+   "logs_n": 763
+  },
+  "ta-IN|gpu": {
+   "ms_per_char": 56.1,
+   "ms_per_word": 359.9,
+   "ms_per_src_word": 209.4,
+   "n": 38,
+   "logs_ms_per_src_word": 230.8,
+   "logs_n": 622
+  }
+ },
+ "from_logs_only": {
+  "bn-IN|gpu": {
+   "ms_per_src_word": 195.4,
+   "n": 257
+  },
+  "bn-IN|stock": {
+   "ms_per_src_word": 299.4,
+   "n": 85
+  },
+  "en-IN|stock": {
+   "ms_per_src_word": 209.4,
+   "n": 38
+  },
+  "pa-IN|stock": {
+   "ms_per_src_word": 264.1,
+   "n": 37
+  },
+  "ta-IN|stock": {
+   "ms_per_src_word": 229.5,
+   "n": 305
+  },
+  "te-IN|gpu": {
+   "ms_per_src_word": 192.1,
+   "n": 55
+  }
+ }
+}

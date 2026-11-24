@@ -180,6 +180,9 @@ class Settings(BaseSettings):
     v1_api_log: bool = False            # one record per outbound provider request (no bodies, no keys) under V1_LOG_DIR/api
     v1_breaker: bool = False            # circuit breakers on our GPU endpoints + the link-stall detector (app/v1/breaker.py)
     v1_live_degrade: bool = False       # Live steps down (copied voice, stock voice, captions only, original sound) and back up
+    v1_live_budget: bool = False        # v1.1: the translator gets the phrase's slot as words and letters; an answer over it is shortened once
+    v1_live_ratectrl: bool = False      # v1.1: a PI controller on the dub's backlog scales that budget; dense mode over 70% speaking share
+    v1_live_native_speed: bool = False  # v1.1: our voice engine is asked to speak a long line faster itself (pace floor), the rest by tempo
     v1_log_dir: str = ""                # empty = logs/ at the top of the repository
     v1_store: str = "json"              # json (as v0) | postgres
     postgres_dsn: SecretStr = SecretStr("")
@@ -208,6 +211,26 @@ class Settings(BaseSettings):
     v1_degrade_probe_ms: int = 10000
     v1_degrade_voice_wait_s: float = 8.0    # a streamer's stored voice may hold a session's start up this long
     v1_gpu_stats_url: str = ""          # the GPU machine's own numbers for the status page; empty = V1_QA_URL + /gpu
+    # v1.1 dense speech (app/v1/dense.py). Budget: the dub may take `share` times the phrase's own span; an answer
+    # whose expected duration is more than `over` times that is asked for once more, shorter.
+    v1_budget_share: float = 1.0
+    v1_budget_over: float = 1.15
+    v1_budget_reask_timeout_s: float = 2.5
+    v1_budget_behind_scale: float = 0.85    # without the controller: the budget while the dub is behind ...
+    v1_budget_far_scale: float = 0.65       # ... and while it is more than 2 s behind
+    v1_ratectrl_kp: float = 0.15            # budget taken off per second of backlog
+    v1_ratectrl_ki: float = 0.03            # ... and per second of backlog held for a second
+    v1_ratectrl_setpoint_ms: int = 250      # a backlog this small is in step
+    v1_ratectrl_min_scale: float = 0.6      # the budget never goes under this share of the slot
+    v1_ratectrl_relax_s: float = 4.0        # in step again: the budget comes back with this time constant
+    v1_dense_share: float = 0.70            # speaking share of the last `v1_dense_window_ms` over which speech is dense
+    v1_dense_off_share: float = 0.60        # ... and under which it is no longer
+    v1_dense_window_ms: int = 30000
+    v1_dense_scale: float = 0.9             # dense mode: the budget is at most this share of the slot
+    v1_dense_max_tempo: float = 1.4         # dense mode: a line may be sped up this far (else live_fit_max_tempo)
+    v1_dense_merge_under_words: int = 3     # dense mode: a line shorter than this joins the next one
+    v1_native_max: float = 1.2              # native speed: the engine is asked for at most this much faster speech
+    v1_native_floor_ms: int = 320           # ... and never for speech under this many ms a word
     # Live phrase sizes with V1_PHRASE_DYNAMIC.
     v1_first_phrase_min_words: int = 4
     v1_first_phrase_max_words: int = 6

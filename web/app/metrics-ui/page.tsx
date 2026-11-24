@@ -28,6 +28,9 @@ interface LiveBlock {
   within_1s_pct: number | null;
   timed: number;
   copied_voice_pct: number | null;
+  dur_ratio_p50?: number | null;
+  dur_ratio_p90?: number | null;
+  backlog_p95_ms?: number | null;
   fallback_pct: { stt: number | null; llm: number | null; tts: number | null };
 }
 interface Summary {
@@ -93,7 +96,7 @@ function LiveTable({ title, rows, name }: { title: string; rows: Record<string, 
   if (!keys.length) return null;
   return (
     <div className="mt-6 overflow-x-auto">
-      <table className="w-full min-w-[640px] text-sm">
+      <table className="w-full min-w-[820px] text-sm">
         <caption className="eyebrow pb-2 text-left">{title}</caption>
         <thead>
           <tr className="text-left text-muted">
@@ -101,6 +104,8 @@ function LiveTable({ title, rows, name }: { title: string; rows: Record<string, 
             <th scope="col" className="py-1.5 pr-4 font-normal">Phrases</th>
             <th scope="col" className="py-1.5 pr-4 font-normal">First audio p50 / p95</th>
             <th scope="col" className="py-1.5 pr-4 font-normal">Within 0.25 s / 1 s</th>
+            <th scope="col" className="py-1.5 pr-4 font-normal">Dub length / slot p50 / p90</th>
+            <th scope="col" className="py-1.5 pr-4 font-normal">Backlog p95</th>
             <th scope="col" className="py-1.5 pr-4 font-normal">Skipped</th>
             <th scope="col" className="py-1.5 font-normal">Copied voice</th>
           </tr>
@@ -114,6 +119,8 @@ function LiveTable({ title, rows, name }: { title: string; rows: Record<string, 
                 <td className="tnum py-2 pr-4 font-mono">{b.phrases}</td>
                 <td className="tnum py-2 pr-4 font-mono">{secs(b.first_audio_p50_ms) ?? "-"} / {secs(b.first_audio_p95_ms) ?? "-"}</td>
                 <td className="tnum py-2 pr-4 font-mono">{pct(b.on_time_pct) ?? "-"} / {pct(b.within_1s_pct) ?? "-"}</td>
+                <td className="tnum py-2 pr-4 font-mono">{b.dur_ratio_p50 ?? "-"} / {b.dur_ratio_p90 ?? "-"}</td>
+                <td className="tnum py-2 pr-4 font-mono">{secs(b.backlog_p95_ms ?? null) ?? "-"}</td>
                 <td className="tnum py-2 pr-4 font-mono">{b.skipped_late}</td>
                 <td className="tnum py-2 font-mono">{pct(b.copied_voice_pct) ?? "-"}</td>
               </tr>

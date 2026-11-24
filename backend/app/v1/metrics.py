@@ -25,6 +25,28 @@ def _share(hits: int, n: int) -> float | None:
     return round(100 * hits / n, 1) if n else None
 
 
+def _ratio(values: list[float], p: float) -> float | None:
+    v = percentile(values, p)
+    return round(float(v), 2) if v is not None else None
+
+
+def _talk(phrases: list[dict[str, Any]]) -> dict[str, Any]:
+    """Speaking share and words a minute over the sessions in `phrases` (one record per phrase, any language)."""
+    seen: dict[tuple[str, int], dict[str, Any]] = {}
+    for r in phrases:
+        if r.get("t_speech_ms") is not None and r.get("t_speech_end") is not None:
+            seen[(r["session"], r["seq"])] = r
+    by: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for (sid, _), r in seen.items():
+        by[sid].append(r)
+    span = sum(max(r["t_speech_end"] for r in v) - min(r["t_speech_ms"] for r in v) for v in by.values())
+    talk = sum(max(0, r["t_speech_end"] - r["t_speech_ms"]) for r in seen.values())
+    words = sum(r.get("src_words") or 0 for r in seen.values())
+    if span <= 0:
+        return {"speaking_pct": None, "words_per_min": None}
+    return {"speaking_pct": round(100 * talk / span, 1), "words_per_min": round(words / (span / 60000))}
+
+
 def live_summary(recs: list[dict[str, Any]], s: Settings) -> dict[str, Any]:
     phrases = [r for r in recs if r["kind"] == "live_phrase"]
     played = [r["played_late_ms"] for r in recs if r["kind"] == "live_played" and r.get("played_late_ms") is not None]
@@ -36,7 +58,24 @@ def live_summary(recs: list[dict[str, Any]], s: Settings) -> dict[str, Any]:
         late = [r["late_ms"] for r in rows if r.get("late_ms") is not None]
         spoken = [r for r in rows if r.get("first_audio_ms") is not None]
         tr = [r["translate_ms"] for r in rows if r.get("translate_ms") is not None]
+        ratio = [r["dur_ratio"] for r in rows if r.get("dur_ratio") is not None]
+        backlog = [r["backlog_ms"] for r in rows if r.get("backlog_ms") is not None and r.get("skipped") != "unheard"]
+        planned = [r for r in rows if r.get("budget_ms")]
         return {
+            # v1.1: the dub's length against its slot, and how far the dub queue was behind the video.
+            "dur_ratio_p50": _ratio(ratio, 50), "dur_ratio_p90": _ratio(ratio, 90), "dur_ratio_n": len(ratio),
+            "dur_ratio_over_1_pct": _share(sum(v > 1.0 for v in ratio), len(ratio)),
+            "backlog_p50_ms": _pct(backlog, 50), "backlog_p95_ms": _pct(backlog, 95),
+            "at_1_3x": sum(1 for r in rows if 1.295 <= (r.get("tempo") or 0) < 1.395),
+            "at_1_4x": sum(1 for r in rows if (r.get("tempo") or 0) >= 1.395),
+            "sped_up": sum(1 for r in rows if (r.get("tempo") or 0) > 1.03),
+            # the translator's first answer against the duration it was given (1.0 = exactly the budget)
+            "first_answer_over_budget_p50": _ratio([r["est0_ms"] / r["budget_ms"] for r in planned if r.get("est0_ms")], 50),
+            "budgeted": len(planned), "reasked": sum(1 for r in rows if r.get("reasked")),
+            "reask_used": sum(1 for r in rows if r.get("reasked") == 2),
+            "dense_phrases": sum(1 for r in rows if r.get("dense")),
+            "native_speed": sum(1 for r in rows if r.get("native")),
+            "budget_scale_mean": round(sum(r["ctl_scale"] for r in planned if r.get("ctl_scale")) / len(planned), 2) if planned else None,
             "phrases": len(rows), "spoken": len(spoken),
             "skipped_late": sum(1 for r in rows if r.get("skipped") == "late"),
             "first_audio_p50_ms": _pct(first, 50), "first_audio_p95_ms": _pct(first, 95),
@@ -80,7 +119,7 @@ def live_summary(recs: list[dict[str, Any]], s: Settings) -> dict[str, Any]:
         vals = [r[key] for r in ends if r.get(key) is not None]
         return sum(vals) if vals else None
     usage = {
-        "stream_minutes": round(minutes, 2), "sessions": len(spans),
+        "stream_minutes": round(minutes, 2), "sessions": len(spans), **_talk(phrases),
         "gpu_seconds": round(sum(r.get("gpu_s") or 0 for r in phrases), 1),
         "hosted_tts_chars": sum(r.get("tts_chars") or 0 for r in spoken if r.get("tts") == "hosted"),
         "hosted_llm_calls": sum(1 for r in phrases if not str(r.get("llm") or "").startswith("LocalLLM")

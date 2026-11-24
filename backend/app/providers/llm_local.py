@@ -89,7 +89,10 @@ class LocalLLM(OpenAILLM):
         return clean_line(await self._chat(system, text, temperature=0.2, max_tokens=300))
 
     async def translate_chunk(self, text: str, target: str, glossary: list[str], context: list[str],
-                              brief: bool = False, native: bool = False, max_words: int | None = None) -> str:
+                              brief: bool = False, native: bool = False, max_words: int | None = None,
+                              max_chars: int | None = None, compact: bool = False) -> str:
+        """`compact` with `max_words` and `max_chars` (`V1_LIVE_BUDGET`): the phrase's slot as a length, measured
+        from how long this voice takes per word and per letter in this language."""
         lang, script = LANG_NAMES.get(target, target), SCRIPTS.get(target)
         n = len(text.split())
         limit = max_words or (max(3, round(n * 0.6)) if brief else n)
@@ -103,8 +106,15 @@ class LocalLLM(OpenAILLM):
             rules.append(f"Write in {script} letters, never romanised. Only these words stay in English letters: {keep}.")
         else:
             rules.append("Write natural spoken English in Latin letters. Leave no Hindi words.")
-        rules.append(f"Use at most {limit} words. " + ("The dub is behind: say only the main point." if brief
-                     else "Shorter is better: drop fillers such as bhai, yaar, matlab."))
+        if compact and max_words:
+            size = f"Use at most {limit} words" + (f" and about {max_chars} letters" if max_chars else "")
+            rules.append("Time limit: it is spoken in the time the speaker took. " + size + "; prefer short words. "
+                         + ("The dub is behind: say only the main point. " if brief else "")
+                         + "Compact spoken style: drop fillers (bhai, yaar, matlab), repetitions and address words. "
+                         "Keep names and numbers.")
+        else:
+            rules.append(f"Use at most {limit} words. " + ("The dub is behind: say only the main point." if brief
+                         else "Shorter is better: drop fillers such as bhai, yaar, matlab."))
         rules.append("CURRENT may be a piece of a sentence. Translate just that piece; do not finish the sentence, "
                      "do not repeat the previous lines, do not add anything.")
         rules.append("Reply with the translation only, on one line.")

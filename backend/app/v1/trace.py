@@ -8,6 +8,11 @@ Live record (kind `live_phrase`), times in ms on the session clock:
   t_speech_ms (the phrase began), t_speech_end, t_stt_final, t_translate_start, t_translated, t_first_audio,
   t_audio_done (last audio sent to viewers), t_heard (when a viewer starts hearing it, estimated by the server)
   and the differences that matter: first_audio_ms, heard_ms, late_ms (sync mode: start after its video moment).
+  v1.1: dub_ms (audio sent), dub_raw_ms (the same line at the voice's own pace), slot_ms (the span of the source
+  phrase, or of the phrases spoken in one call), dur_ratio = dub_ms / slot_ms, backlog_ms (how far the dub queue
+  was behind the video when the phrase's turn came), tgt_words, tgt_chars, and with `V1_LIVE_BUDGET` /
+  `V1_LIVE_RATECTRL`: budget_words, budget_chars, budget_ms, est0_ms (the first answer), est_ms (the line spoken), reasked (1 asked, 2 the shorter line was
+  used), ctl_scale, ctl_integral, dense, speaking_pct, native (speed asked of the engine).
 A viewer's own report arrives later as kind `live_played` with the same `trace_id`.
 """
 import json
@@ -29,6 +34,10 @@ LIVE_FIRST_AUDIO = Histogram("bd_v1_live_first_audio_seconds", "End of phrase to
                              ["lang", "engine"], buckets=SECONDS)
 LIVE_LATE = Histogram("bd_v1_live_late_seconds", "Sync mode: dub start after its video moment", ["lang"],
                       buckets=(0.25, 0.5, 1.0, 2.0, 4.0, 8.0))
+LIVE_DUR_RATIO = Histogram("bd_v1_live_dur_ratio", "Dubbed audio seconds over source slot seconds", ["lang"],
+                           buckets=(0.6, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 2.0))
+LIVE_BACKLOG = Histogram("bd_v1_live_backlog_seconds", "How far the dub queue is behind the video at a phrase's turn",
+                         ["lang"], buckets=(0.25, 0.5, 1.0, 2.0, 4.0, 8.0))
 FALLBACKS = Counter("bd_v1_fallback_total", "Calls answered by a fallback provider", ["stage", "mode"])
 GPU_SECONDS = Counter("bd_v1_gpu_seconds_total", "Seconds of work on our GPU servers", ["stage", "mode"])
 STUDIO_LINES = Counter("bd_v1_studio_lines_total", "Studio lines voiced", ["lang", "outcome"])
@@ -103,6 +112,11 @@ def live_phrase(sid: str, row: dict[str, Any], seq: int, p: dict[str, Any], prov
             "gpu_s": round(gpu_s, 3), "gpu_voice_ms": g("gpu_ms"), "tempo": g("tempo"), "pace": g("pace"),
             "budget_words": g("budget"), "brief": bool(g("brief")), "spec": g("spec"), "shortened": bool(g("shortened")),
             "backcheck": g("backcheck"), "redone": bool(g("redone")), "tts_chars": g("tts_chars"),
+            "dub_ms": g("dub_ms"), "dub_raw_ms": g("dub_raw_ms"), "slot_ms": g("slot_ms"), "dur_ratio": g("dur_ratio"),
+            "backlog_ms": g("backlog"), "tgt_words": g("tgt_words"), "tgt_chars": g("tgt_chars"),
+            "budget_chars": g("budget_chars"), "budget_ms": g("budget_ms"), "est_ms": g("est_ms"), "est0_ms": g("est0_ms"),
+            "reasked": g("reasked"), "ctl_scale": g("ctl"), "ctl_integral": g("ctl_i"), "native": g("native"),
+            "dense": bool(t.get("dense")), "speaking_pct": t.get("share"),
         }
         write(rec)
         outcome = "skipped" if skipped else "spoken" if first is not None else "silent"
@@ -111,6 +125,10 @@ def live_phrase(sid: str, row: dict[str, Any], seq: int, p: dict[str, Any], prov
             LIVE_FIRST_AUDIO.labels(lang, engine).observe(max(0, rec["first_audio_ms"]) / 1000)
         if rec["late_ms"] is not None:
             LIVE_LATE.labels(lang).observe(max(0, rec["late_ms"]) / 1000)
+        if rec["dur_ratio"] is not None:
+            LIVE_DUR_RATIO.labels(lang).observe(rec["dur_ratio"])
+        if rec["backlog_ms"] is not None and not skipped:
+            LIVE_BACKLOG.labels(lang).observe(rec["backlog_ms"] / 1000)
         for stage, hit in rec["fallback"].items():
             if hit:
                 FALLBACKS.labels(stage, "live").inc()

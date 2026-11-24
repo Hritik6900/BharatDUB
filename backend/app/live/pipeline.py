@@ -19,7 +19,7 @@ from app.providers import get_gpu_voice, get_llm, get_stt, get_tts
 from app.providers.base import ProviderError, VoiceSpec
 from app.shared import audio_utils as au
 from app.shared.metrics import percentile
-from app.v1 import apilog, breaker, trace
+from app.v1 import apilog, breaker, dense, trace
 from app.v1.degrade import RUNGS, Ladder
 from app.v1.phrase import DynamicPhraser, ShortLineMerger, SpecTracker, rest_of
 
@@ -34,6 +34,7 @@ GPU_REF_MIN_MS, GPU_REF_MS = 3500, 7000  # the voice sample for the GPU engine: 
 GPU_RETRY_MS = 8000        # the engine is tried again this long after it stopped answering
 GPU_VOICE_LEAD_MS = 2200  # a GPU line takes about this long to make and arrive
 SYNC_ARRIVE_MS = 100     # sync mode: audio that arrives after its moment starts this soon
+BUDGET_LEAD_MS = 1500    # v1.1 budget: from the start of a translation to its first audio, about (measured p50 1.3-1.6 s)
 MAX_QUEUED_AUDIO = 400  # ~13 s of 1024-byte frames; beyond that we drop (the streamer's network is ahead)
 
 
@@ -179,6 +180,15 @@ class LivePipeline:
         self.rungs: list[dict[str, Any]] = []   # every change of rung: {t_ms, rung, why}
         self._stored_busy = False
         self._stored_try_at = 0
+        # v1.1 dense speech (app/v1/dense.py). `_dense_log`: dur_ratio, backlog and the rest are noted per phrase.
+        self._dense_log = bool(self._trace or self.s.v1_live_budget or self.s.v1_live_ratectrl)
+        self._xp = dense.ExpansionModel.load() if (self.s.v1_live_budget or self.s.v1_live_native_speed) else None
+        self._ctl: dict[str, dense.RateController] = {}   # `V1_LIVE_RATECTRL`: one controller per language
+        self._share = dense.SpeakingShare(self.s.v1_dense_window_ms, self.s.v1_dense_share, self.s.v1_dense_off_share) \
+            if self._dense_log else None
+        self._dense = False   # dense mode is on (only ever with `V1_LIVE_RATECTRL`)
+        if self.s.v1_live_ratectrl and self._merger is None:   # dense mode joins short lines to the next
+            self._merger = ShortLineMerger(self.s.v1_dense_merge_under_words, self.s.v1_merge_wait_ms)
         self._voice_turn = asyncio.Semaphore(max(1, self.s.gnani_max_concurrency))
         self._gpu_turn = asyncio.Semaphore(max(1, int(getattr(self.gpu, "capacity", 1))))
         self._src_ms_per_word = 350.0             # how fast the speaker talks (from finished lines)
@@ -723,7 +733,8 @@ class LivePipeline:
 
     # ---------- fan-out ----------
     def _dispatch(self, chunk: Chunk, merged: bool = False) -> None:
-        if self._merger is not None and not merged:
+        if self._merger is not None and not merged and (self.s.v1_phrase_dynamic or self._dense
+                                                        or self._merger.held is not None):
             # v1: a line of one or two words waits for the next line and goes out as part of it.
             for c in self._merger.push(chunk, self.sess.now_ms()):
                 self._dispatch(c, True)
@@ -750,6 +761,8 @@ class LivePipeline:
                                     "t_speech_ms": chunk.t_speech_ms,
                                     "timings": {"t_speech_end": chunk.t_speech_end_ms,
                                                 "t_stt_final": chunk.t_stt_final_ms}}
+        if self._share is not None:
+            self._note_share(chunk)
         self.sess.bus.publish("src", {"type": "caption", "seq": chunk.seq, "lang": "src", "text": chunk.text,
                                       "t_speech_ms": chunk.t_speech_ms, **self._media_tag(chunk.t_speech_ms)})
         for lang, q in self.queues.items():
@@ -789,7 +802,13 @@ class LivePipeline:
             behind = self._lag.get(lang, 0) if self.sync_delay() else self._playhead.get(lang, 0) - self.sess.now_ms()
             kw: dict[str, Any] = {"brief": True} if self.s.live_brief and behind > self.s.live_brief_after_ms else {}
             pace = self._dub_ms_per_word.get(lang)
-            if self.s.live_length_budget and pace:
+            plan = self._budget_plan(lang, chunk, behind) if self.s.v1_live_budget else None
+            if plan is not None:
+                # v1.1: the phrase's own slot as words and letters; the answer is checked below.
+                kw = {"max_words": plan["max_words"], "max_chars": plan["max_chars"], "compact": True}
+                if plan["scale"] < 0.8:
+                    kw["brief"] = True
+            elif self.s.live_length_budget and pace:
                 # Words that fit the time the speaker took: a little over when in step (a small speed-up is fine),
                 # less when behind, much less when far behind (better a short line than a skipped one).
                 share = 1.15 if not kw else 0.9 if behind <= 2000 else 0.6
@@ -813,6 +832,8 @@ class LivePipeline:
             untranslated = False
             if self._trace and chunk.seq in self._pending and getattr(self.llm, "fell_back", 0) != fell:
                 self._pending[chunk.seq]["timings"][f"llm_fb:{lang}"] = 1
+            if plan is not None:
+                text = await self._within_budget(lang, chunk, text, plan)
         except (ProviderError, TimeoutError) as e:
             text, untranslated = chunk.text, True
             bus.publish(ALL, {"type": "error", "message": f"{lang} translation failed: {str(e)[:120]}"},
@@ -910,6 +931,19 @@ class LivePipeline:
         target = chunk.t_speech_ms + delay if delay else None
         tag = self._media_tag(chunk.t_speech_ms)
         spare = target - now - waiting if target is not None else 0   # time left before it is due
+        max_tempo = self.s.live_fit_max_tempo
+        if self._dense_log:
+            # How far the dub queue is behind the video when this phrase's turn comes: what is still to be played
+            # beyond the phrase's own moment (sync mode), or simply what is still to be played.
+            backlog = max(0, self._playhead.get(lang, 0) - target) if target is not None else waiting
+            for t in [timings, *[t for _, t in rest]]:
+                t[f"backlog:{lang}"] = backlog
+            if self.s.v1_live_ratectrl:
+                ctl = self._controller(lang)
+                ctl.update(backlog / 1000, now / 1000)
+                timings[f"ctl_i:{lang}"] = round(ctl.integral, 2)
+                if self._dense:
+                    max_tempo = max(max_tempo, self.s.v1_dense_max_tempo)
         # With one Gnani request at a time, every line spoken delays the next one. Audio nobody is tuned to,
         # or that would be heard too late to feel live, is not made; its caption has already gone out.
         unheard = self.s.live_tts_only_heard and not bus.listeners(lang)
@@ -971,7 +1005,7 @@ class LivePipeline:
             """How much faster a line of `dur_ms` has to be said to be in time (1 = as it is)."""
             still = max(0, self._playhead.get(lang, 0) - self.sess.now_ms())  # the backlog now, not when we began
             if target is None:
-                return min(self.s.live_fit_max_tempo, 1 + still / max(dur_ms, 500))
+                return min(max_tempo, 1 + still / max(dur_ms, 500))
             # It will start at `begin`. If the next phrase is known, end before that one is due; in any case
             # make up for whatever it is already late by.
             begin = max(self.sess.now_ms() + still, target)
@@ -980,7 +1014,7 @@ class LivePipeline:
             if nxt is not None:
                 room = nxt + delay + self.s.live_sync_slack_ms - begin
                 tempo = max(tempo, dur_ms / max(room, 1))
-            return min(self.s.live_fit_max_tempo, tempo)
+            return min(max_tempo, tempo)
 
         spoke_at = 1.0  # the speed the GPU voice was asked to speak at
 
@@ -1014,6 +1048,17 @@ class LivePipeline:
                     if fit and per_byte and self.s.gpu_voice_native_speedup:
                         speed = max(speed, want_tempo(per_byte * size / speed) * speed)
                         speed = min(speed, self.s.live_fit_max_tempo)
+                    elif fit and self.s.v1_live_native_speed and self._xp is not None:
+                        # v1.1: the line's expected duration (ms a letter of this voice) against its room. The
+                        # engine is asked for part of the speed-up, never for speech under the pace floor;
+                        # what is still missing is done by tempo afterwards, as before.
+                        n_words = len(text.split())
+                        est = self._xp.estimate_ms(lang, "gpu", text)
+                        if est and n_words > self.s.gpu_voice_short_words:
+                            factor = min(self.s.v1_native_max, want_tempo(est), est / n_words / self.s.v1_native_floor_ms)
+                            if factor > 1.03:
+                                speed = base * factor
+                                timings[f"native:{lang}"] = round(factor, 2)
                     pcm, rate = await self.gpu.synth(self._gpu_sid or self.sess.id, text, lang, speed=speed)
                     if self.s.v1_live_backcheck:
                         pcm, rate = await self._checked(lang, text, pcm, rate, speed, target, timings)
@@ -1084,7 +1129,7 @@ class LivePipeline:
             # The viewer is still playing earlier phrases, so holding this one back costs nothing; it is
             # shortened (tempo only, pitch kept) by as much as it takes to catch up, within a limit.
             # What the GPU voice already sped up by itself counts towards that limit.
-            tempo = min(self.s.live_fit_max_tempo / spoke_at, want_tempo(len(held) / 2 / sr * 1000))
+            tempo = min(max_tempo / spoke_at, want_tempo(len(held) / 2 / sr * 1000))
             if tempo > 1.03:
                 try:
                     held = await asyncio.to_thread(au.tempo_pcm, held, sr, tempo)
@@ -1094,6 +1139,9 @@ class LivePipeline:
             if tempo * spoke_at > 1.03:
                 timings[f"tempo:{lang}"] = round(tempo * spoke_at, 2)
         publish(held)
+        if self._dense_log or self._xp is not None:
+            kind = "gpu" if gpu_spoke else voice["kind"]
+            self._note_dub(lang, kind, chunk, [c for c, _ in rest], text, raw_ms, sent / 2 / sr * 1000, timings)
         if sent:
             # Same rule as the web player: back to back with what is queued, else a jitter buffer after arrival.
             start = max(self._playhead.get(lang, 0), timings[f"t_first_audio:{lang}"] + PLAYER_JITTER_MS)
@@ -1111,6 +1159,146 @@ class LivePipeline:
         end_of_audio()
         timings[f"t_audio_done:{lang}"] = self.sess.now_ms()
         self.sess.bus.broadcast({"type": "stats", **self.stats()})
+
+    # ---------- v1.1 dense speech (app/v1/dense.py) ----------
+    def _note_share(self, chunk: Chunk) -> None:
+        """The speaking share of the last 30 s, noted with every phrase; over 70% the controller's dense mode."""
+        assert self._share is not None
+        self._share.add(chunk.t_speech_ms, chunk.t_speech_end_ms)
+        now = max(chunk.t_speech_end_ms, self._last_end)
+        share = self._share.share(now)
+        was, self._dense = self._dense, bool(self.s.v1_live_ratectrl and self._share.dense(now))
+        timings = self._pending[chunk.seq]["timings"]
+        if share is not None:
+            timings["share"] = round(100 * share)
+        if self._dense:
+            timings["dense"] = 1
+        if was != self._dense and self._trace:
+            trace.event("live_dense", session=self.sess.id, seq=chunk.seq, on=self._dense,
+                        share=round(100 * share) if share is not None else None)
+
+    def _controller(self, lang: str) -> dense.RateController:
+        if lang not in self._ctl:
+            self._ctl[lang] = dense.RateController(self.s.v1_ratectrl_kp, self.s.v1_ratectrl_ki,
+                                                   self.s.v1_ratectrl_setpoint_ms / 1000, self.s.v1_ratectrl_relax_s,
+                                                   self.s.v1_ratectrl_min_scale)
+        return self._ctl[lang]
+
+    def _voice_kind(self, lang: str) -> str:
+        """The kind of voice this language's next line is expected in (the expansion model keeps them apart)."""
+        if self._gpu_speaks(lang) or self._gpu_planned(lang):
+            return "gpu"
+        return "clone" if self.voice is not None and lang in self.clone_langs else "stock"
+
+    def _budget_plan(self, lang: str, chunk: Chunk, behind: int) -> dict[str, Any] | None:
+        """`V1_LIVE_BUDGET`: this phrase's slot as a length for the translator, or None when nothing is known
+        yet of this voice in this language (then v0's word limit applies).
+
+        The slot is the phrase's own span. The scale comes from the controller (`V1_LIVE_RATECTRL`, at most
+        `v1_dense_scale` in dense mode); without it, from how far behind the dub is, in two steps."""
+        if self._xp is None:
+            return None
+        n_src = len(chunk.text.split())
+        slot = chunk.t_speech_end_ms - chunk.t_speech_ms
+        if not PACE_MS[0] * n_src <= slot <= PACE_MS[1] * n_src:   # a span that is not believed: the speaker's pace
+            slot = int(n_src * self._src_ms_per_word)
+        if self.s.v1_live_ratectrl:
+            scale = self._controller(lang).scale
+            if self._dense:
+                scale = min(scale, self.s.v1_dense_scale)
+        else:
+            scale = 1.0 if behind <= self.s.live_brief_after_ms else self.s.v1_budget_behind_scale if behind <= 2000 \
+                else self.s.v1_budget_far_scale
+        kind = self._voice_kind(lang)
+        delay = self.sync_delay()
+        if delay:
+            # A line that arrives late (a long utterance the recogniser did not let go of) cannot start on its
+            # moment any more. It gets the time that is left until the next phrase is due, not its whole slot,
+            # so the phrase after it does not pay for it. Never under the controller's floor.
+            begin = max(self.sess.now_ms() + BUDGET_LEAD_MS, chunk.t_speech_ms + delay)
+            room = chunk.t_speech_end_ms + delay - begin
+            if room < slot * scale:
+                scale = max(self.s.v1_ratectrl_min_scale, room / max(1, slot))
+        plan = dense.plan(self._xp, lang, kind, slot, scale, self.s.v1_budget_share)
+        if plan is None:
+            return None
+        plan["kind"] = kind
+        if kind == "gpu" and self.s.gpu_voice_guard and plan["max_words"] <= self.s.gpu_voice_short_words:
+            # The engine is asked to say a line this short more slowly (it swallows short lines otherwise).
+            plan["max_chars"] = max(6, int(plan["max_chars"] * self.s.gpu_voice_short_speed))
+        if chunk.seq in self._pending:
+            t = self._pending[chunk.seq]["timings"]
+            t[f"budget:{lang}"], t[f"budget_chars:{lang}"] = plan["max_words"], plan["max_chars"]
+            t[f"budget_ms:{lang}"], t[f"ctl:{lang}"] = plan["target_ms"], plan["scale"]
+        return plan
+
+    async def _within_budget(self, lang: str, chunk: Chunk, text: str, plan: dict[str, Any]) -> str:
+        """`V1_LIVE_BUDGET`: the translation's expected duration against its slot. More than `v1_budget_over`
+        times the slot: one quick request for a shorter line, used when it is shorter and well formed."""
+        assert self._xp is not None
+        t = self._pending[chunk.seq]["timings"] if chunk.seq in self._pending else {}
+        est = self._expected_ms(lang, plan["kind"], text)
+        t[f"est_ms:{lang}"] = t[f"est0_ms:{lang}"] = int(est)   # est0: the first answer, est: the line spoken
+        words = len(text.split())
+        if est <= plan["target_ms"] * self.s.v1_budget_over or words < 4:
+            return text
+        want = dense.shorter_words(words, est, plan["target_ms"])
+        t[f"reasked:{lang}"] = 1
+        try:
+            out = await asyncio.wait_for(self.llm.shorten(text, lang, plan["target_ms"] / 1000, max_words=want),
+                                         self.s.v1_budget_reask_timeout_s)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 - the first answer is spoken
+            log.info("live budget: no shorter line (%s)", str(e)[:120])
+            return text
+        out = (out or "").strip()
+        from app.providers.llm_local import has_latin
+        from app.providers.llm_openai import SCRIPTS, wrong_script
+        bad = not out or wrong_script(out, lang) or (plan["kind"] == "gpu" and lang in SCRIPTS and has_latin(out))
+        if bad or dense.letters(out) >= dense.letters(text):
+            return text
+        t[f"reasked:{lang}"] = 2   # the shorter line is the one spoken
+        t[f"est_ms:{lang}"] = int(self._expected_ms(lang, plan["kind"], out))
+        return out
+
+    def _expected_ms(self, lang: str, kind: str, text: str) -> float:
+        """How long the voice will take for this line: letters times this voice's ms a letter, and more for a
+        line so short that our engine is asked to say it slowly."""
+        assert self._xp is not None
+        est = self._xp.estimate_ms(lang, kind, text) or 0.0
+        if kind == "gpu" and self.s.gpu_voice_guard and 0 < len(text.split()) <= self.s.gpu_voice_short_words:
+            est /= max(0.4, self.s.gpu_voice_short_speed)
+        return est
+
+    def _note_dub(self, lang: str, kind: str, chunk: Chunk, also: list[Chunk], text: str, raw_ms: float,
+                  dub_ms: float, timings: dict[str, Any]) -> None:
+        """After a line was made: its length against its slot (dur_ratio), and one more line for the expansion
+        model. `raw_ms` is the speech at the voice's own pace, `dub_ms` what was sent (after any speed-up)."""
+        if dub_ms <= 0:
+            return
+        last = also[-1] if also else chunk
+        slot = max(1, last.t_speech_end_ms - chunk.t_speech_ms)
+        src_words = sum(len(c.text.split()) for c in [chunk, *also])
+        words, chars = len(text.split()), dense.letters(text)
+        if self._xp is not None:
+            self._xp.note(lang, kind, src_words, words, chars, raw_ms)
+        if self._dense_log:
+            timings[f"dub_ms:{lang}"], timings[f"dub_raw_ms:{lang}"] = int(dub_ms), int(raw_ms)
+            timings[f"slot_ms:{lang}"] = slot
+            timings[f"dur_ratio:{lang}"] = dense.dur_ratio(dub_ms, slot)
+            timings[f"tgt_words:{lang}"], timings[f"tgt_chars:{lang}"] = words, chars
+
+    def dense_stats(self) -> dict[str, Any]:
+        """For the session's metrics: dense mode, each language's controller, the expansion model as it stands."""
+        out: dict[str, Any] = {}
+        if self.s.v1_live_ratectrl:
+            out["dense"] = self._dense
+            out["ratectrl"] = {lg: {"scale": round(c.scale, 2), "integral": round(c.integral, 2),
+                                    "backlog_s": round(c.backlog_s, 2)} for lg, c in self._ctl.items()}
+        if self._xp is not None:
+            out["expansion"] = self._xp.state()
+        return out
 
     # ---------- v1 (each used only with its flag on) ----------
     def _gpu_blocked(self) -> bool:

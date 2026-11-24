@@ -108,11 +108,14 @@ class MockLLM:
         return [_translate(x, target) for x in lines]
 
     async def translate_chunk(self, text: str, target: str, glossary: list[str], context: list[str],
-                              brief: bool = False, native: bool = False, max_words: int | None = None) -> str:
+                              brief: bool = False, native: bool = False, max_words: int | None = None,
+                              max_chars: int | None = None, compact: bool = False) -> str:
         await asyncio.sleep(0.35)
         return _translate(text, target)
 
-    async def shorten(self, text: str, target: str, max_seconds: float) -> str:
+    async def shorten(self, text: str, target: str, max_seconds: float, max_words: int | None = None) -> str:
+        if max_words:
+            return " ".join(text.split()[:max_words])
         return text[: max(8, int(max_seconds / SEC_PER_CHAR))]
 
 

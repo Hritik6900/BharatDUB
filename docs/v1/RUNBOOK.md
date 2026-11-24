@@ -80,6 +80,9 @@ change. What each one does, and what was measured, is in `PROGRESS.md` and `EVAL
 | `V1_API_LOG` | one record per outbound provider request in `logs/api/<date>/<session or job>.jsonl` (no bodies, no keys) | off: nothing written |
 | `V1_BREAKER` | circuit breakers on our GPU endpoints and the link-stall detector: a timeout, or 2 failures in 10 s, and the endpoint is not called for 30 s (the next provider answers at once); while a session is live every GPU endpoint is asked for its health every 5 s | off: every call waits for its own timeout, as v0 |
 | `V1_LIVE_DEGRADE` | Live's ladder: copied voice, stock voice, captions only ("audio returning shortly" on `/watch`), original sound; back up by itself | off: as v0 |
+| `V1_LIVE_BUDGET` | v1.1 dense speech: the live translator gets the phrase's own slot as words and letters (from the measured ms a word and a letter of this voice in this language), and an answer whose expected duration is over it by more than 15% is asked for once more, shorter | off: v0's word limit (`live_length_budget`) |
+| `V1_LIVE_RATECTRL` | v1.1: a PI controller on the dub's backlog scales that budget (1.0 down to 0.6, back within seconds); when the speaker talks more than 70% of the last 30 s ("dense"): budget at most 0.9 of the slot, lines under 3 words join the next, speed-up up to 1.4x. Needs `V1_LIVE_BUDGET` to have an effect on the translation | off |
+| `V1_LIVE_NATIVE_SPEED` | v1.1: our voice engine is asked to speak a line that must be shorter up to 1.2x faster itself, never under 320 ms a word; the rest by tempo as before | off: tempo only |
 | `V1_STORE` | `postgres` (with `POSTGRES_DSN`) | `json` |
 
 Not a flag but a setting: `LIVE_FIT_MAX_TEMPO=1.2` caps the Live speed-up at 1.2x (v0: 1.3).
@@ -89,6 +92,19 @@ The two reliability flags belong together (measured together, `PROGRESS.md` v1.1
 GPU before the next provider is asked), `V1_BREAKER_OPEN_S=30`, `V1_BREAKER_FAILS=2`, `V1_BREAKER_WINDOW_S=10`,
 `V1_LINK_PROBE_EVERY_S=5`. `GET /api/v1/circuits` and the status page show every circuit; the stream watcher prints
 `CIRCUIT OPEN / CLOSED / LINK STALL / LINK BACK` and `RUNG` lines.
+
+The dense-speech flags (v1.1 WS1; measured in `LIVE_DENSE_REPORT.md`) have their numbers as settings:
+`V1_BUDGET_SHARE=1.0` (the dub may take this share of the slot), `V1_BUDGET_OVER=1.15`, `V1_BUDGET_REASK_TIMEOUT_S=2.5`,
+`V1_RATECTRL_KP=0.15`, `V1_RATECTRL_KI=0.03`, `V1_RATECTRL_SETPOINT_MS=250`, `V1_RATECTRL_MIN_SCALE=0.6`,
+`V1_RATECTRL_RELAX_S=4`, `V1_DENSE_SHARE=0.70`, `V1_DENSE_OFF_SHARE=0.60`, `V1_DENSE_SCALE=0.9`,
+`V1_DENSE_MAX_TEMPO=1.4`, `V1_DENSE_MERGE_UNDER_WORDS=3`, `V1_NATIVE_MAX=1.2`, `V1_NATIVE_FLOOR_MS=320`.
+With the trace or one of these flags on, every Live phrase stores `dur_ratio` (dubbed seconds over the seconds of
+its source slot) and `backlog` (how far the dub queue was behind the video); `/metrics-ui`, the session's
+`/metrics` and the stream watcher's summaries show them. The model behind the budget starts from
+`backend/config/live_expansion.json` (rebuild: `python -m eval.v1.expansion_seed`) and learns from every line.
+Replay a recording through Live without YouTube, several settings in turn:
+`python -m eval.live_replay <file> --out <dir> --target off=http://127.0.0.1:8111 --target on=http://127.0.0.1:8112 --runs 5`
+(on Windows start the comparison backends with `scripts\v1\ab-server.ps1`).
 
 To compare a flag on and off on the same machine, start a second backend on another port with only that flag:
 `scripts/v1/ab-server.sh 8112 dynamic V1_PHRASE_DYNAMIC=true`, then

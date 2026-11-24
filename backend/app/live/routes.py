@@ -179,7 +179,8 @@ async def session_metrics(sid: str) -> dict[str, Any]:
     return {"chunks": s.chunk_count, "p50_ms": percentile(all_ms, 50), "p95_ms": percentile(all_ms, 95),
             "n": len(all_ms), "heard_p50_ms": percentile(heard, 50), "heard_p95_ms": percentile(heard, 95),
             "per_lang": per_lang, **(s.pipeline.sync_stats() if s.pipeline else {}),
-            **(s.pipeline.degrade_stats() if s.pipeline else {})}
+            **(s.pipeline.degrade_stats() if s.pipeline else {}),
+            **(s.pipeline.dense_stats() if s.pipeline else {})}
 
 
 # ---------- WebSockets ----------

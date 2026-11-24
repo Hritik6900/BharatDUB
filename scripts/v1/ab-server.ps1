@@ -6,7 +6,8 @@ if ($Port -in 3000, 8010, 8110 -or ($Port -ge 9001 -and $Port -le 9045)) { throw
 $root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 foreach ($f in "V1_ROUTER", "V1_PHRASE_DYNAMIC", "V1_SPEC_TRANSLATE", "V1_TTS_SERVER", "V1_TTS_MAYA", "V1_LIVE_STOCK_DEFAULT",
                "V1_LIVE_LATE_SHORTEN", "V1_LIVE_BACKCHECK", "V1_LLM_PREFIX_CACHE", "V1_STUDIO_HQ", "V1_FIT_115",
-               "V1_BREAKER", "V1_LIVE_DEGRADE", "V1_API_LOG") {
+               "V1_BREAKER", "V1_LIVE_DEGRADE", "V1_API_LOG",
+               "V1_LIVE_BUDGET", "V1_LIVE_RATECTRL", "V1_LIVE_NATIVE_SPEED") {
   Set-Item "env:$f" "false"
 }
 $env:V1_TRACE = "true"

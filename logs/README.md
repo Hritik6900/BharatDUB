@@ -57,6 +57,17 @@ are not in `api/`; their timing per phrase is in `sessions/` and `trace/`.
 | `tempo` | speed-up applied to fit (1.3 is the limit) |
 | `copied_voice`, `on_gpu` | 1 when the line was in the copied voice, and when our GPU engine made it |
 | `skipped` | `unheard` (no viewer on that language), `late` (too late to be worth saying) |
+| `dub_ms`, `dub_raw_ms` | v1.1: the dubbed audio that was sent, and the same line at the voice's own pace (before any speed-up) |
+| `slot_ms`, `dur_ratio` | v1.1: the span of the source phrase (of all of them when several were spoken in one call), and `dub_ms / slot_ms` |
+| `backlog_ms` | v1.1: how far the dub queue was behind the video when this phrase's turn came |
+| `tgt_words`, `tgt_chars` | v1.1: length of the translated line in words and in letters (no text) |
+| `budget_ms`, `budget_scale`, `reasked` | v1.1 with `V1_LIVE_BUDGET`: the duration the translator was given, the controller's scale, 1 = a shorter line was asked for, 2 = and used |
+| `merged_into` | the phrase was spoken in one call with the phrase of this `seq` |
+
+`audio_ms` is NOT the length of the dub: a line from our voice engine is sent in one piece (about 0 ms) and a
+streamed stock voice arrives faster than it plays. Before v1.1 the dub's length was not stored at all; for older
+sessions it can only be worked out for a phrase whose successor queued straight behind it (the next phrase's
+`heard` time minus this one's), which is what `backend/eval/v1/expansion_seed.py` does. From v1.1 on `dub_ms` is exact.
 
 With `V1_BREAKER` and `V1_LIVE_DEGRADE` on (v1.1), `streams/events.log` also has `CIRCUIT OPEN <endpoint>: <why>`,
 `CIRCUIT CLOSED <endpoint> after <n> s`, `CIRCUIT LINK STALL`, `CIRCUIT LINK BACK` and

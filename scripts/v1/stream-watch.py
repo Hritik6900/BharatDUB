@@ -14,6 +14,10 @@ Lines about the link to the GPU machine (from a backend with V1_BREAKER on, aske
   CIRCUIT CLOSED <endpoint> after <n> s   it answers again and is in use
   CIRCUIT LINK STALL / LINK BACK          every GPU endpoint failed in the same look / one answers again
   RUNG [backend session] a -> b (why)     a live session stepped down or up (V1_LIVE_DEGRADE)
+
+A session's summary also has, per language, the dub's length against its slot (dur_ratio p50 / p90), the backlog
+(how far the dub queue was behind the video, p50 / p95) and what the budget controller did, when the backend
+stores them (v1.1: with the trace or V1_LIVE_BUDGET / V1_LIVE_RATECTRL on).
 """
 from __future__ import annotations
 
@@ -89,6 +93,17 @@ def session_summary(db_path: str, sid: str) -> list[str]:
         out.append(f"      copied voice {share([t.get(f'clone:{lang}', 0) for t in spoken])}, on our GPU "
                    f"{share([t.get(f'gpu:{lang}', 0) for t in spoken])}, at the 1.3x limit {share([x >= 1.295 for x in tempo])}, "
                    f"skipped as too late {skips.get('late', 0)}")
+        ratio = [t[f"dur_ratio:{lang}"] for t in spoken if t.get(f"dur_ratio:{lang}") is not None]
+        if ratio:     # v1.1 (a backend with the trace or the dense-speech flags on): dub length against its slot
+            backlog = [t[f"backlog:{lang}"] for t in timings if t.get(f"backlog:{lang}") is not None
+                       and t.get(f"skipped:{lang}") != "unheard"]
+            scale = [t[f"ctl:{lang}"] for t in timings if t.get(f"ctl:{lang}") is not None]
+            out.append(f"      dub length / slot p50 {pct(ratio, 50):.2f} p90 {pct(ratio, 90):.2f}, longer than its slot "
+                       f"{share([x > 1.0 for x in ratio])}; backlog p50 {pct(backlog, 50)} p95 {pct(backlog, 95)} ms; "
+                       f"at 1.4x {share([x >= 1.395 for x in tempo])}"
+                       + (f"; budget scale mean {sum(scale) / len(scale):.2f}, shortened again "
+                          f"{sum(1 for t in timings if t.get(f'reasked:{lang}') == 2)}, dense phrases "
+                          f"{sum(1 for t in timings if t.get('dense'))}" if scale else ""))
     return out
 
 
