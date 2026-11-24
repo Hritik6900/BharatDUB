@@ -771,3 +771,15 @@ curl.exe -s http://127.0.0.1:9020/v1/models      # answers again after a minute 
 New in v1.1 WS5, inside the items above: the deploy kit (items 4, 8-11), the backend-only start on the machine
 (item 2), the voice A/B kit (item 8), the translation A/B with its rule (item 9), the licence guard on the speaker
 model (item 4).
+
+## 27. Documentation: two things only you can settle (YOU) (new, 25 Nov 2026, from the handbook)
+
+Written while building `docs/handbook/`; nothing in the code changes.
+
+1. **`V1_HQ_ADAPTIVE`, on or off.** `V1_1_SUMMARY.md` section 3 says on; `RUNBOOK.md` section 3, `SUMMARY.md`
+   and `backend/.env.example` say off. The handbook says off until you choose
+   (`docs/handbook/OPEN_QUESTIONS.md` question 20). Rollback: none needed, it is a line in the docs and the env file.
+2. **Items marked "(unconfirmed)" in the handbook.** Each is a date, a reason or a detail no source or commit
+   confirms (for example why v1 runs on the laptop and not the VM, why an end-to-end speech model was never tried,
+   which flags were on in the four v1 sessions of 24 Nov). `grep -rn "unconfirmed" docs/handbook` lists them;
+   a line from you turns each into a fact.
