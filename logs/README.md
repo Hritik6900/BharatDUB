@@ -76,6 +76,10 @@ of the same). A `studio_line` record in those traces has `scored_by` (who judged
 `versions` (takes made) and `flagged`; `hq_review_edit` is one edit by the review: the rule that failed, words
 and letters before and after, taken or not, the model. No line of text is in either.
 
+`sessions/ws4-pitch/` and `trace/ws4-pitch/` are the one recorded session of the v1.1 WS4 pitch kit (25 Nov 2026):
+its measurements as for any session, and one `live_record` trace event (session, number of languages) that says
+its dub was kept. The dub itself, its captions and the video made from it are in the data folder, never here.
+
 The v1.1 fields are in a record only where they were measured (a backend with the trace or the dense-speech
 flags on, from 24 Nov 2026). `sessions/ws1-*/` and `trace/ws1-*/` are the comparison backends of the v1.1 WS1
 measurement (`docs/v1/LIVE_DENSE_REPORT.md`): off, budget, ctl (budget + controller), native, tight.

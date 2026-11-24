@@ -9,6 +9,7 @@ from typing import Any
 
 from app.db import get_store
 from app.live.bus import Bus
+from app.v1 import record
 
 YT_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 YT_URL = re.compile(r"(?:v=|youtu\.be/|/live/|/embed/|/shorts/)([A-Za-z0-9_-]{11})")
@@ -53,7 +54,8 @@ class LiveSession:
 
     def public(self) -> dict[str, Any]:
         r = self.row
-        return {"id": self.id, "youtube_video_id": r.get("youtube_video_id"), "target_langs": self.langs,
+        rec = {"recording": True} if record.wanted(r) else {}   # v1.1: only on a session that asked to be kept
+        return {**rec, "id": self.id, "youtube_video_id": r.get("youtube_video_id"), "target_langs": self.langs,
                 "src_lang": r.get("src_lang") or "indic-auto", "offset_ms": r.get("offset_ms") or 0,
                 "status": r.get("status") or "idle", "created_at": r.get("created_at"),
                 "voice_profile_id": r.get("voice_profile_id"), "viewers": self.bus.viewer_count(),

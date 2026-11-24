@@ -79,8 +79,16 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
   const [voice, setVoice] = useState(STREAM);
   const [voiceConsent, setVoiceConsent] = useState(false);
   const [engine, setEngine] = useState<Engine>("cloud");
+  // v1.1: keeping a session's dub on the server. Offered only when the server has V1_LIVE_RECORD on; never ticked by itself.
+  const [canRecord, setCanRecord] = useState(false);
+  const [record, setRecord] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api<Record<string, unknown>>("/api/v1/flags")
+      .then((f) => setCanRecord(f.V1_LIVE_RECORD === true))
+      .catch(() => setCanRecord(false));
+  }, []);
   const toggle = (c: string) => setLangs((l) => (l.includes(c) ? l.filter((x) => x !== c) : l.length >= 4 ? l : [...l, c]));
   const create = async () => {
     setBusy(true);
@@ -95,6 +103,7 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
           voice_from_stream: voice === STREAM,
           voice_consent: voice === STREAM && voiceConsent,
           ...(engine === "gpu" ? { engine } : {}),
+          ...(canRecord && record ? { record: true } : {}),
         }),
       });
       onCreated({ sid: r.session_id, token: r.ingest_token });
@@ -154,6 +163,19 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
             </div>
           )}
           <EnginePicker value={engine} onChange={setEngine} />
+          {canRecord && (
+            <div className="rounded-[14px] border border-line p-4">
+              <label className="flex cursor-pointer items-start gap-3">
+                <input type="checkbox" checked={record} onChange={(e) => setRecord(e.target.checked)} className="mt-1 size-4" />
+                <span className="text-[0.95rem]">Keep a recording of this session&apos;s dub on this server</span>
+              </label>
+              <p className="mt-2 pl-7 text-sm text-muted">
+                Bharat Dub does not store live audio. Tick this only to make a side-by-side video of this session: the dubbed sound of
+                every language, its captions and their timing are then saved in the server&apos;s data folder until someone deletes them.
+                The stream&apos;s own sound is not saved. Leave it off and nothing is kept.
+              </p>
+            </div>
+          )}
           {err && <Notice tone="error" role="alert">{err}</Notice>}
           <div className="flex flex-wrap items-center gap-5">
             <Button size="lg" disabled={!langs.length || busy || (voice === STREAM && !voiceConsent)} onClick={create}>
@@ -319,6 +341,12 @@ function Console({ sid, token, onNew }: { sid: string; token: string; onNew: () 
               <li className="inline-flex items-center gap-2 rounded-chip border border-line bg-surface px-3 py-1.5">
                 <Cpu aria-hidden className="size-4" />
                 GPU engine
+              </li>
+            )}
+            {session?.recording && (
+              <li className="inline-flex items-center gap-2 rounded-chip border border-line bg-surface px-3 py-1.5">
+                <Square aria-hidden className="size-3 fill-current text-danger" />
+                The dub is being kept on this server
               </li>
             )}
             <li className="inline-flex items-center gap-2 px-2 text-muted">

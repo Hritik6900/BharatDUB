@@ -1003,3 +1003,126 @@ above are from the fixed jobs' takes).
   (from `backend\`; `--names` because this run's second set of backends had folders of their own).
 - **Roll back:** the six flags to `false` (the defaults) and restart the backend. Labels and review logs stay in
   the data folder and do nothing while the flags are off.
+
+## v1.1 WS4: pitch kit (25 Nov 2026)
+
+Two flags, both off by default: `V1_LIVE_RECORD` (a Live session's dub kept on disk, when that session also asks
+for it) and `V1_LISTEN_TEST` (a blind A/B listening page). With them off nothing new is asked, stored or shown
+(tests below). Nothing of v0 was touched.
+
+### Built
+
+- **A recorded session** (`backend/app/v1/record.py`, hooks in `app/live/pipeline.py`, `routes.py`, `session.py`).
+  SPEC section 10 says Live audio is never stored, so this needs two yeses: the flag on the backend and
+  `record: true` on `POST /api/live/sessions` for that session. The console (`/live`) shows a tick "Keep a
+  recording of this session's dub on this server" only while the flag is on, never ticked by itself, with what is
+  kept and that it stays until someone deletes it; a session that is being kept shows a chip saying so. With the
+  flag off the ask is ignored and the answer of the route is the same as without it.
+  Kept under `<DATA_DIR>/recordings/<session>/` (`V1_RECORD_DIR` to put it elsewhere): `dub_<lang>.wav`, one
+  continuous mono track per language on the session's clock with every phrase where a viewer's player starts it
+  (the same playhead the pipeline already keeps for its lateness numbers); `phrases.jsonl`, per phrase and
+  language: seq, when it was said, the video's time at that moment, where its dub starts, its length, how late,
+  the hold, first audio, copied or stock voice, tempo, the caption text, or that it was skipped and why;
+  `session.json`. The stream's own sound is not kept. The caption text is in that folder only: not in the trace
+  (one `live_record` event: session and number of languages), not in the store, not in `logs/`.
+- **The side-by-side renderer** (`scripts/v1/render-pitch.ps1`, which calls `backend/app/v1/pitch.py`; ffmpeg does
+  the picture). Left the source video with its sound, right the same video with the dub; burned in: the dub's
+  captions (one at a time, in the right half), the language with "AI-dubbed live by Bharat Dub", three lines of
+  numbers, and beside each caption how late that line started. Each phrase's sound is cut from the session track
+  and laid at the video time it was spoken at plus its lateness: what a viewer saw and heard. Stereo:
+  `split` (original left ear, dub right ear), `dub`, `mix` (dub over the original at 18%, as `/watch` plays it).
+  **Every number on the picture is computed from that recording's `phrases.jsonl`**: median first audio and over
+  how many phrases, share within 0.25 s and within 1 s of the video moment, phrases dubbed of phrases, how many
+  in the copied voice. A recording without the video's clock (a microphone session) gets no on-time line.
+  `-LeadS`, `-Loops`, `-GapMs` rebuild how the replay harness played a file in (first frame held, last frame held
+  in a gap); `-OffsetMs` places a microphone session. `eval/live_replay.py` got `--record`.
+- **The blind listening test** (`backend/app/v1/listen.py`, page `web/app/listen-test/page.tsx`, summary on
+  `/metrics-ui`, `scripts/v1/make-listen-pairs.py`). Pairs come from `<DATA_DIR>/listen/pairs/manifest.json`
+  (format in `RUNBOOK.md`): pair id, clip A, clip B, the system that made each, optional language and line. The
+  page is sent, per pair, an id, the language and the line; the two sounds are fetched as "first" and "second" of
+  that pair, never by file name or system, and which system is first is decided by a hash of the listener's id and
+  the pair's id (different between listeners, fixed for one). The order of the pairs is also the listener's own.
+  A listener rates each clip 1 to 5 and says first, second or no difference; the server turns that back into
+  systems and appends it to `<DATA_DIR>/listen/results.jsonl`; a later answer of the same listener for the same
+  pair replaces the earlier one. The listener's id is a random string made by the browser, no name. Summary per
+  system: mean rating, number of ratings, share of the stated preferences, how often it was played first; with no
+  answers it says "no ratings yet". Routes: `GET /api/v1/listen/pairs`, `/audio/<pair>/<1|2>`, `/summary`,
+  `POST /api/v1/listen/answers`; all 404 with the flag off. `make-listen-pairs.py` builds the folder from two
+  folders of same-named clips and copies them under numbered names, so nothing in the folder names a system.
+- Also: `scripts/v1/ab-server.sh` had a broken line since WS3 (a literal backslash-n in the list of flags, which
+  made the shell set a variable called `n` and nothing else wrong); fixed. Both `ab-server` scripts switch the two
+  new flags off like the others.
+
+### Measured
+
+One recorded session, to prove the chain, not to measure Live (one run proves nothing about timing; two equal
+runs differ by about 10 points). 25 Nov 2026, 03:15 local, no other stream live on 8010 or 8110, comparison
+backend on 8120 started through PowerShell with `V1_LIVE_RECORD=true`, `V1_LIVE_BUDGET=true` (the flag
+`SUMMARY.md` recommends for Punjabi), trace on, everything else off. The dense reel (`data-v1/eval/reel25.mp4`,
+24.9 s) played 3 times with 0.4 s between and 6 s of silence first (84.8 s fed), Punjabi only, GPU engine, voice
+learned from the reel.
+
+| | This session |
+|---|---|
+| Phrases, and lines spoken | 36 phrases in 35 voice calls (two were spoken in one call), none skipped |
+| Recording | `dub_pa-IN.wav` 88.1 s, 4.2 MB; `phrases.jsonl` 35 rows |
+| First audio, median | 2.3 s (the picture: 2.275 s over the 35 lines; the trace over the 36 phrases: 2.331 s) |
+| Within 0.25 s / 1 s of the video moment | 91.4% / 97.1% (the picture and the trace give the same two figures) |
+| In the copied voice | 33 of 35 lines (the first two were stock, before the voice was learned) |
+| Latest line | 4.1 s after its moment |
+| Rendered video | `data-v1\pitch\reel25_pa-IN_split.mp4`: 82.1 s, 37,022,909 bytes (35.3 MB), 812 x 720 (two panes of 406 x 720), 30 frames a second, H.264 + stereo AAC |
+
+- The rendered file was checked, not only made: two frames were looked at (labels, the three lines of numbers, a
+  Punjabi caption in Gurmukhi with its letters joined properly, "this line +0.2 s"); the left channel is silent
+  during the 6 s lead and carries the original after it, the right channel is silent until the first dubbed
+  line at 7.75 s and carries the dub after it.
+- How long the render took was not timed.
+- **Not measured:** a recording from the console in a browser with a real YouTube video (the tick and the chip
+  were type-checked, not clicked: the website on 3100 serves an older build); a microphone session through the
+  renderer on real material (`-OffsetMs`, unit-tested on made-up rows); more than one language in one recording
+  on real material (unit-tested with one); a long session (the track is written as it goes, 2.9 MB a minute and
+  language at 24 kHz; not run for longer than 88 s); the listening test with real clips and real listeners (no
+  pairs exist yet: WS5 makes them); `dub` and `mix` stereo on the real recording (unit-tested as filter text
+  only; `split` is the one rendered and checked).
+
+- **Tests:** 292 pass, 1 skipped (was 275 + 1). New: `tests/test_v1_pitch.py` (17: both flags listed and off; the
+  recorder lays a phrase at its moment, pads silence, appends what would overlap and says where it lies, notes a
+  skip, closes the file, writes nothing after the end; **in the pipeline: asked with the flag off, or the flag on
+  without the ask, no folder, no wav and no row anywhere under the data folder, and a viewer is sent the same
+  messages in all three cases**; with both, the rows equal the pipeline's own timings and the track holds every
+  byte that went out; a phrase nobody hears is a skip row without text; the route ignores the ask with the flag
+  off and answers the same fields; the picture's numbers from rows, and none made up for a session without a
+  video clock; placement; the track cut and laid; the captions file, one caption at a time; the three stereo
+  graphs; **a real render with ffmpeg of a small made-up video played twice with a lead and a gap: size,
+  duration, and each ear's sound where it should be**; listening routes 404 and nothing written with the flag
+  off; no pairs and no answers; blind (no system and no file name in what the page gets), shuffled per listener
+  and fixed for one, answers counted per system, the last answer counts, bad answers refused; a manifest entry
+  that cannot be played blind is left out, a path out of the folder among them; the pairs folder built from two
+  folders). Website: `npx tsc --noEmit` clean.
+- **v0 after this workstream:** all nine checks ok (`scripts/v1/v0-check.sh`). Port 8120 no longer answers
+  (stopped through its task). 8111-8115 were not touched and still run (item 24 of `NEEDS_APPROVAL.md`).
+- **Used:** one Live session of 85 s (hosted speech-to-text hears first in a GPU-engine session; two stock lines
+  and the voice sample's check on the hosted voice; the rest on our GPU).
+- **Test by hand:** v1's `backend\.env`: `V1_LIVE_RECORD=true`, `V1_LISTEN_TEST=true`; restart the backend (and
+  the website needs a build with these pages). `/live`: the tick is under the engine choice. After the session:
+  `data-v1\recordings\<session>\`, then `scripts\v1\render-pitch.ps1` (`RUNBOOK.md` section 3). `/listen-test`
+  says there are no pairs until `data-v1\listen\pairs\manifest.json` exists.
+- **Roll back:** both flags to `false` (the defaults) and restart. Recordings and answers stay in the data
+  folder until deleted by hand; with the flags off nothing reads or serves them.
+
+### Decided, and what to watch
+
+- The example was recorded with `V1_LIVE_BUDGET` on and in Punjabi only: the setting and the language the WS1
+  measurement recommends, one language to keep the hosted use to one short session.
+- "On time" on the picture is the definition used everywhere else in v1 (within 0.25 s), with "within 1 s"
+  beside it, both labelled; not one unlabelled percentage.
+- A recording is never deleted by itself, and deleting a voice profile does not delete recordings made in that
+  voice. It is the speaker's (copied) voice and their words. Until there is a rule, keep the flag off except for
+  a session whose speaker has agreed to the video being made (`NEEDS_APPROVAL.md` item 25).
+- Viewers on `/watch` are not told that a session's dub is being kept. Nothing of theirs is in it (no chat, no
+  viewer data), only the dub they are sent.
+- The listening page has no sign-in, like the rest of the site: anyone who can reach it can answer, and one
+  person can answer as several by clearing the browser's storage. Fine for a test among people you asked;
+  not a public poll.
+- The pitch video is 35 MB for 82 s (quality setting crf 21). The repository's hooks refuse files over 10 MB and
+  video files are ignored anyway; it stays in the data folder.

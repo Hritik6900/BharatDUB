@@ -123,6 +123,8 @@ export interface LiveSession {
   /** Streamer Mode: the session belongs to this streamer and uses their recorded voice (`clone`) or none. */
   streamer_id?: string | null;
   voice_mode?: "clone" | "stock" | null;
+  /** v1.1: the session asked for its dub to be kept on the server (only possible with V1_LIVE_RECORD on). */
+  recording?: boolean;
   stats?: { p50_ms: number | null; p95_ms: number | null; n: number } | null;
 }
 

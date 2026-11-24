@@ -15,10 +15,11 @@ health endpoints and the shared GPU servers' own, and answered every time.
 | Live changes | dynamic phrase sizes, short-line merge, translation ahead, late-line shortening, back-check, session glossary, stock default, fixed-rules-first prompt | built, each behind a flag; measured (section 2) |
 | Studio HQ | two hearings merged, cleaned transcript, translation with a word limit per line, review, numbers as words, takes scored and the best kept, flagged lines, sidechain ducking, loudness, jobs phase by phase; an editor with every take and a one-click swap | works end to end on real jobs with the models that are loaded |
 | Studio HQ, v1.1 WS3 | the judge per language with a corrected counting rule, old jobs scored again without making a voice line, a calibration page (`/studio/calibrate`), adaptive takes, a rule-based normaliser for four languages, glossary candidates from the transcript, a rubric review by the hosted model with every edit logged, a guard on the transcript | built, each behind a flag; measured on three videos (section 2) |
+| Pitch kit, v1.1 WS4 | a Live session's dub kept on disk when the session asks for it (`V1_LIVE_RECORD`), a side-by-side video from it (`scripts/v1/render-pitch.ps1`: original beside dubbed, captions, that recording's own numbers), a blind A/B listening page `/listen-test` with its summary on `/metrics-ui` (`V1_LISTEN_TEST`) | built; one example rendered from the test reel (82 s); the listening page has no pairs yet |
 | New model servers | batching voice server, Maya 2, Indic Transcribe, QA, big translation model: code, containers, stub mode | stubs tested; **no real model loaded** (GPU memory, licences) |
 | Eval | Live comparison across backends, Studio standard against HQ, key words on the hard set, one script for all | works; `EVAL_REPORT.md` |
 | Operations | demo check, warm-up, backup, GPU mode switch, runbook | demo check and warm-up ran; backup and mode switch not run |
-| Tests | 61 new tests; 159 pass in all, 1 skipped (Postgres store: no database here). After v1.1 WS3: 275 pass, 1 skipped | |
+| Tests | 61 new tests; 159 pass in all, 1 skipped (Postgres store: no database here). After v1.1 WS3: 275 pass, 1 skipped. After v1.1 WS4: 292 pass, 1 skipped | |
 
 Not as the build notes described, and why:
 
@@ -64,6 +65,8 @@ Numbers are from `EVAL_REPORT.md` (three runs per Live setup, one run per Studio
 | `V1_HQ_NORMALISE` (v1.1 WS3) | nothing to do on the test videos (no digits); unit tests for Hindi, Bengali, Tamil, English | on for those four languages once a video with numbers has been heard |
 | `V1_HQ_CALIBRATE` (v1.1 WS3) | the page works on real takes; **no labels yet**, so no agreement figure and no recommended flag line | **on**, and thirty labels per language from someone who speaks it |
 | `V1_EN_SINGLE_VOICE` (v1.1) | English + Punjabi, 3 runs each: stock lines between copied ones 4.7 a session (10.1%) and 9 changes of voice with it off, none with it on. Every line in the hosted copy: within 1 s 86.6% -> 73.7% where the copy existed, first audio 0.73 s later than a stock line. So `auto` takes the one stock voice. The hosted stock voice refused 59% of its lines that night (the copy none) | **on** with `auto` if one voice matters more than the speaker's voice in English; `V1_EN_VOICE=copy` when the stock voice is failing or the copied voice matters more than timing |
+| `V1_LIVE_RECORD` (v1.1 WS4) | not a speed or quality change. One session recorded and rendered: 35 lines, the picture's numbers equal the trace's (91.4% within 0.25 s, 97.1% within 1 s, first audio 2.3 s). With it off, or without the session's own ask, nothing is written (tested) | **off**, and on only for a session whose speaker agreed to a video being made; nothing deletes a recording by itself |
+| `V1_LISTEN_TEST` (v1.1 WS4) | no ratings yet: no pairs exist | **on** once WS5's pairs are in the data folder and listeners are asked |
 
 Against the targets: Studio words heard back 92.5% (target 96%): not reached (v1.1 WS3: 95.9% by the corrected
 rule in a rerun, still not reached, and the figure does not see a damaged transcript; `EVAL_REPORT.md` section 6). Live first audio 2.3-2.5 s through
@@ -102,6 +105,8 @@ measured 1.8 s first audio there; `NEEDS_APPROVAL.md` item 3), not these flags.
 | 22 | A second heard-back judge for Tamil, Bengali and the other languages (v1.1 WS3): the QA server's Whisper | item 6 |
 | 23 | Labels on `/studio/calibrate` (v1.1 WS3) | thirty per language from a speaker of it |
 | 24 | Five comparison backends left running on 8111-8115 (v1.1 WS3) | three PowerShell lines; they could not be stopped from inside this work |
+| 25 | A pitch video of a real stream, and how long recordings are kept (v1.1 WS4) | the speaker's agreement, the flag on 8110, a decision on deletion |
+| 26 | Listeners for the blind listening test (v1.1 WS4) | WS5's pairs; people who speak the language |
 
 ## 4. Decisions needed
 

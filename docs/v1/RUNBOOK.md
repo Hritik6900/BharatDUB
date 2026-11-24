@@ -91,6 +91,8 @@ change. What each one does, and what was measured, is in `PROGRESS.md` and `EVAL
 | `V1_HQ_NORMALISE` | numbers, decimals, dates, clock times, the rupee and dollar sign, %, units and short forms are written out by rule in Hindi, Bengali, Tamil and English before the voice sees the line; abbreviations in capitals letter by letter for our own voice | off: the model-written step alone, as v1 |
 | `V1_HQ_AUTO_GLOSSARY` | names, brands and repeated English terms found in a job's transcript are used as that job's glossary (never saved to the shared one); `GET /api/v1/jobs/<id>/glossary-candidates` | off |
 | `V1_HQ_REVIEW` | the hosted model reviews every translated line against the written rubric (meaning, numbers and names, spoken register, fits the slot) and may edit; a cleaned transcript line that changed script or lost its English terms is put back | off: v1's plain review |
+| `V1_LIVE_RECORD` | v1.1 pitch kit: a Live session **that was made with `record: true`** (the tick "Keep a recording of this session's dub" on `/live`, shown only while this flag is on) saves its dubbed sound, one track per language, and its phrase times and captions under `<DATA_DIR>/recordings/<session>/` | off: the tick is not shown, the ask is ignored, nothing is written. Delete the folders to remove what was kept |
+| `V1_LISTEN_TEST` | v1.1 pitch kit: `/listen-test` and its routes: blind A/B pairs from `<DATA_DIR>/listen/pairs`, answers in `<DATA_DIR>/listen/results.jsonl`, summary on `/metrics-ui` | off: the routes answer 404, the page says it is off, the summary is not shown |
 | `V1_STORE` | `postgres` (with `POSTGRES_DSN`) | `json` |
 
 Not a flag but a setting: `LIVE_FIT_MAX_TEMPO=1.2` caps the Live speed-up at 1.2x (v0: 1.3).
@@ -132,6 +134,64 @@ its source slot) and `backlog` (how far the dub queue was behind the video); `/m
 Replay a recording through Live without YouTube, several settings in turn:
 `python -m eval.live_replay <file> --out <dir> --target off=http://127.0.0.1:8111 --target on=http://127.0.0.1:8112 --runs 5`
 (on Windows start the comparison backends with `scripts\v1\ab-server.ps1`).
+
+The pitch kit (v1.1 WS4; `PROGRESS.md`). **A recorded session.** Live audio is never stored; the one exception
+needs two yeses: `V1_LIVE_RECORD=true` on the backend and `record: true` on that session (the console tick; the
+replay harness: `--record`). Then `<DATA_DIR>/recordings/<session>/` (or `V1_RECORD_DIR`) holds `session.json`,
+`dub_<lang>.wav` (one continuous mono track per language on the session's clock, each phrase where a viewer's
+player starts it) and `phrases.jsonl` (per phrase and language: `seq`, `t_speech_ms`, `media_s` = the video's time
+it was spoken at, `start_ms` / `track_ms`, `dur_ms`, `late_ms`, `hold_ms`, `first_audio_ms`, `voice` copied or
+stock, `tempo`, the caption `text`; or `skipped` and why). The stream's own sound is not kept. The caption text is
+in that folder only: not in the trace, not in `logs/`. Nothing deletes a recording by itself.
+**The side-by-side video** (original left, the same video with the dub right, captions, language, that
+recording's own first-audio and on-time numbers):
+
+```powershell
+powershell -File scripts\v1\render-pitch.ps1 -Recording data-v1\recordings\<session> -Video C:\path\video.mp4 `
+    -Lang pa-IN -Stereo split -Out data-v1\pitch\demo.mp4
+```
+
+`-Stereo split` = original sound left, dub right; `dub` = the dub alone; `mix` = the dub over the original at
+18%. The source video must be the file the session was fed from, from its start. A recording made by the replay
+harness also needs its `--lead-s`, `--loops` and `--gap-ms` as `-LeadS 6 -Loops 3 -GapMs 400`; a microphone
+session (no video clock) needs `-OffsetMs` = the session time at which the video began. The numbers on the
+picture are computed from `phrases.jsonl` of that recording and nothing else; a number it does not hold is left
+out. Keep the output in the data folder: it is the speaker's voice and picture. To make one without YouTube:
+
+```powershell
+powershell -File scripts\v1\ab-server.ps1 -Port 8120 -Name pitch -Flags "V1_LIVE_RECORD=true"    # its own window
+cd backend; .venv\Scripts\python.exe -m eval.live_replay ..\data-v1\eval\reel25.mp4 --out ..\data-v1\eval\pitch `
+    --target rec=http://127.0.0.1:8120 --runs 1 --loops 3 --langs pa-IN --record
+# the recording is then in data-v1\ab\pitch\recordings\<session>
+```
+
+**The blind listening test.** `V1_LISTEN_TEST=true`, then `/listen-test`. Pairs live in
+`<DATA_DIR>/listen/pairs/` (or `V1_LISTEN_DIR`) with a `manifest.json`:
+
+```json
+{"name": "what this set is (optional, stored with every answer)",
+ "pairs": [{"id": "p0001", "a": "a/0001.wav", "b": "b/0001.wav",
+            "system_a": "indicf5", "system_b": "other",
+            "lang": "ta-IN", "text": "the words both clips should say"}]}
+```
+
+`id`: unique, letters, digits, `_`, `-`. `a` / `b`: clip paths inside the pairs folder (wav, mp3, ogg, flac).
+`system_a` / `system_b`: who made each clip; never sent to the page. `lang` and `text` are optional. A pair with
+a missing clip, a path out of the folder, a repeated id or the same system twice is left out. Build the folder
+from two folders of same-named clips (the clips are copied under numbered names):
+
+```powershell
+backend\.venv\Scripts\python.exe scripts\v1\make-listen-pairs.py C:\clips\indicf5 C:\clips\other `
+    --system-a indicf5 --system-b other --lang ta-IN --texts C:\clips\lines.json --name "IndicF5 against other, Tamil"
+```
+
+(`--texts`: `{"<file name without its ending>": "the line"}`; `--add` adds to an existing folder; a file name that
+starts with a language code, `ta-IN_003.wav`, sets the pair's language.) A listener gets the pairs in an order
+of their own, hears "first" and "second" (which system is first is fixed per listener and pair by a hash), rates
+each 1 to 5 and says which they prefer or "no difference". Their id is a random string made by the browser; a
+later answer for the same pair replaces the earlier one. `/metrics-ui` shows per system the mean rating, the
+number of ratings and the share of stated preferences, or "No ratings yet". `GET /api/v1/listen/summary` is the
+same as JSON. To start a new test, move `results.jsonl` away and replace the pairs folder.
 
 To compare a flag on and off on the same machine, start a second backend on another port with only that flag:
 `scripts/v1/ab-server.sh 8112 dynamic V1_PHRASE_DYNAMIC=true`, then

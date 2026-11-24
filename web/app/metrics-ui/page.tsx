@@ -4,7 +4,7 @@ import { ChartNoAxesColumn, RefreshCw } from "lucide-react";
 import { Shell } from "@/components/layout/Shell";
 import { Notice } from "@/components/ui/Notice";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import { lang } from "@/lib/langs";
 
 interface Cost {
@@ -60,6 +60,63 @@ interface Summary {
     usage: { dubbed_minutes: number; jobs: number; gpu_seconds: number };
     cost: Cost;
   };
+}
+
+// The blind listening test (/listen-test). Null while the page is switched off (V1_LISTEN_TEST).
+interface ListenSummary {
+  answers: number;
+  listeners: number;
+  pairs: number;
+  pairs_rated: number;
+  set: string;
+  same: number;
+  stated: number;
+  note: string;
+  systems: Record<string, { n: number; mean_rating: number; preferred: number; preference_pct: number | null; played_first: number }>;
+}
+
+function ListenBlock({ s }: { s: ListenSummary }) {
+  const names = Object.keys(s.systems);
+  return (
+    <section className="card mt-3 p-6" aria-label="Listening test">
+      {s.answers === 0 ? (
+        <p className="text-muted">No ratings yet. {s.pairs} pairs are waiting on the listening test page.</p>
+      ) : (
+        <>
+          <p className="text-sm text-muted">
+            {s.answers} answers from {s.listeners} listeners on {s.pairs_rated} of {s.pairs} pairs{s.set ? ` (${s.set})` : ""}. The listeners were not told which system made which clip.
+            Preference share is of the {s.stated} answers that named one; {s.same} heard no difference.
+          </p>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[520px] text-sm">
+              <thead>
+                <tr className="text-left text-muted">
+                  <th scope="col" className="py-1.5 pr-4 font-normal">System</th>
+                  <th scope="col" className="py-1.5 pr-4 font-normal">Mean rating (1 to 5)</th>
+                  <th scope="col" className="py-1.5 pr-4 font-normal">Ratings</th>
+                  <th scope="col" className="py-1.5 pr-4 font-normal">Preferred</th>
+                  <th scope="col" className="py-1.5 font-normal">Played first</th>
+                </tr>
+              </thead>
+              <tbody>
+                {names.map((k) => (
+                  <tr key={k} className="border-t border-line">
+                    <th scope="row" className="py-2 pr-4 text-left font-medium">{k}</th>
+                    <td className="tnum py-2 pr-4 font-mono">{s.systems[k].mean_rating.toFixed(2)}</td>
+                    <td className="tnum py-2 pr-4 font-mono">{s.systems[k].n}</td>
+                    <td className="tnum py-2 pr-4 font-mono">
+                      {s.systems[k].preference_pct != null ? `${s.systems[k].preference_pct}%` : "-"} ({s.systems[k].preferred})
+                    </td>
+                    <td className="tnum py-2 font-mono">{s.systems[k].played_first}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </section>
+  );
 }
 
 const secs = (ms: number | null) => (ms == null ? null : `${(ms / 1000).toFixed(1)} s`);
@@ -136,8 +193,11 @@ export default function MetricsPage() {
   const [d, setD] = useState<Summary | null>(null);
   const [err, setErr] = useState("");
   const [hours, setHours] = useState(24);
+  const [listen, setListen] = useState<ListenSummary | null>(null);
   const load = useCallback(() => {
     api<Summary>(`/api/v1/metrics/summary?hours=${hours}`).then((x) => { setD(x); setErr(""); }).catch((e) => setErr((e as Error).message));
+    // 404 = the listening test is switched off: the block is simply not shown
+    api<ListenSummary>("/api/v1/listen/summary").then(setListen).catch((e) => { if (!(e instanceof ApiError) || e.status === 404) setListen(null); });
   }, [hours]);
   useEffect(() => {
     load();
@@ -202,6 +262,12 @@ export default function MetricsPage() {
               </p>
               <CostLine c={d.studio.cost} minutes={d.studio.usage.dubbed_minutes} unit="dubbed minute" />
             </section>
+            {listen && (
+              <>
+                <h2 className="eyebrow mt-10">Listening test</h2>
+                <ListenBlock s={listen} />
+              </>
+            )}
           </div>
         )}
       </div>

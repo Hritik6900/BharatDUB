@@ -37,6 +37,7 @@ class CreateSession(BaseModel):
     offset_ms: int = 0
     engine: str = "cloud"              # `gpu` = speech-to-text and translation on our own GPU machine (when set up)
     glossary: list[str] = Field(default_factory=list, max_length=100)   # words kept as they are, this session only
+    record: bool = False               # v1.1: keep this session's dubbed audio on disk; only with `V1_LIVE_RECORD` on, else ignored
 
 
 class PatchSession(BaseModel):
@@ -102,6 +103,8 @@ async def create_session(body: CreateSession) -> dict[str, Any]:
     terms = list(dict.fromkeys(t.strip()[:60] for t in body.glossary if t.strip()))
     if terms:
         await sessions.update(sess, glossary=terms)
+    if body.record and get_settings().v1_live_record:   # both, or nothing is ever written (app/v1/record.py)
+        await sessions.update(sess, record=True)
     prefetch_stored_voice(sess)   # v1.1 `V1_LIVE_WARMSTART`: a streamer's stored voice goes to the engines now; nothing with the flag off
     return {"session_id": sess.id, "ingest_token": token, **sess.public()}
 

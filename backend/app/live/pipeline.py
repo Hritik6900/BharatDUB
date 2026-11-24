@@ -19,7 +19,7 @@ from app.providers import get_gpu_voice, get_llm, get_stt, get_tts
 from app.providers.base import ProviderError, VoiceSpec
 from app.shared import audio_utils as au
 from app.shared.metrics import percentile
-from app.v1 import apilog, breaker, dense, trace, warm
+from app.v1 import apilog, breaker, dense, record, trace, warm
 from app.v1.degrade import RUNGS, Ladder
 from app.v1.phrase import DynamicPhraser, ShortLineMerger, SpecTracker, rest_of
 
@@ -275,6 +275,11 @@ class LivePipeline:
         self._starts: dict[int, int] = {}  # seq -> when that phrase began (to know how long the one before may run)
         self._last_end = 0                 # when the phrase before this one ended (no phrase begins before that)
         self.sync_grown: list[tuple[int, int]] = []  # (session ms, new delay) each time the delay grew
+        # v1.1 `V1_LIVE_RECORD` and the session's own ask (record=true): the dub is kept on disk for the pitch
+        # renderer (app/v1/record.py). None = nothing is kept, as SPEC section 10 says.
+        self._rec = record.Recorder(sess.id, sess.langs, self.s.live_sample_rate, engine=eng or "cloud",
+                                    src_lang=str(sess.row.get("src_lang") or "")) \
+            if record.wanted(sess.row, self.s) else None
 
     # ---------- lifecycle ----------
     async def start(self) -> None:
@@ -308,6 +313,10 @@ class LivePipeline:
             if self._trace:
                 trace.event("live_en_voice", session=self.sess.id, mode=self._en_mode, setting=self.s.v1_en_voice,
                             copy_at_start=self.voice is not None)
+        if self._rec is not None:
+            self._rec.start()
+            if self._trace:
+                trace.event("live_record", session=self.sess.id, langs=len(self.sess.langs))
         self.tasks = [asyncio.create_task(self._stt_loop()), asyncio.create_task(self._poll_loop())]
         if self._warm and self.sess.langs:
             self.tasks.append(asyncio.create_task(self._warmstart()))
@@ -337,6 +346,8 @@ class LivePipeline:
         done, pending = await asyncio.wait(self.tasks, timeout=15)
         for t in pending:
             t.cancel()
+        if self._rec is not None:
+            self._rec.close()
         if self._trace:
             trace.event("live_session_end", session=self.sess.id, phrases=self.sess.chunk_count,
                         engine=self.sess.row.get("engine") or "cloud", hold_ms=self._sync_delay,
@@ -1125,6 +1136,8 @@ class LivePipeline:
         if untranslated:
             if self._ladder is not None:
                 timings[f"rung:{lang}"] = 3
+            if self._rec is not None:
+                self._rec.skip(lang, chunk.seq, "untranslated", t_speech_ms=chunk.t_speech_ms)
             end_of_audio()
             return
         if self._trace:
@@ -1168,12 +1181,18 @@ class LivePipeline:
         if unheard or too_late:
             for t in [timings, *[t for _, t in rest]]:
                 t[f"skipped:{lang}"] = "unheard" if unheard else "late"
+            if self._rec is not None:
+                self._rec.skip(lang, chunk.seq, "unheard" if unheard else "late", t_speech_ms=chunk.t_speech_ms,
+                               also=[c.seq for c, _ in rest] or None, **tag)
             end_of_audio()
             return
         if self._ladder is not None and not self._voice_may_try(lang):
             # Captions only: no voice answers. One line now and then still tries; that is the way back.
             for t in [timings, *[t for _, t in rest]]:
                 t[f"skipped:{lang}"], t[f"rung:{lang}"] = "degraded", 2
+            if self._rec is not None:
+                self._rec.skip(lang, chunk.seq, "degraded", t_speech_ms=chunk.t_speech_ms,
+                               also=[c.seq for c, _ in rest] or None, **tag)
             end_of_audio()
             return
         if target is not None:
@@ -1187,6 +1206,7 @@ class LivePipeline:
         # In sync mode the phrase is due in the future, so holding it back to fit it costs nothing.
         fit = self.s.live_fit and (target is not None or waiting > self.s.live_fit_after_ms)
         sent = 0   # bytes published
+        kept: list[bytes] = []   # `V1_LIVE_RECORD`: what went out, for the recording
         lead = True
         held = b""  # audio kept back: the tail (to cut the silence after the last word), or all of it when fitting
         carry = b""
@@ -1205,6 +1225,8 @@ class LivePipeline:
                     t[f"merged:{lang}"] = chunk.seq
                     self.sess.record_latency(lang, t_first - c.t_speech_end_ms)
             sent += len(pcm)
+            if self._rec is not None:
+                kept.append(pcm)
             for k in range(0, len(pcm), LIVE_FRAME_BYTES):
                 bus.publish(lang, {"type": "audio", "seq": chunk.seq, "lang": lang, "sample_rate": sr,
                                    "pcm_b64": base64.b64encode(pcm[k:k + LIVE_FRAME_BYTES]).decode(), "last": False,
@@ -1388,6 +1410,17 @@ class LivePipeline:
                 t[f"t_heard:{lang}"] = start
                 t[f"clone:{lang}"] = timings[f"clone:{lang}"]
                 self.sess.record_heard(lang, start - c.t_speech_end_ms)
+        if self._rec is not None:
+            about = {"t_speech_ms": chunk.t_speech_ms, "also": [c.seq for c, _ in rest] or None, **tag}
+            if sent:
+                self._rec.add(lang, chunk.seq, b"".join(kept), start_ms=start, text=text,
+                              late_ms=timings.get(f"late:{lang}") if target is not None else None,
+                              hold_ms=delay or None,
+                              first_audio_ms=timings[f"t_first_audio:{lang}"] - chunk.t_speech_end_ms,
+                              voice="copied" if timings.get(f"clone:{lang}") else "stock",
+                              tempo=timings.get(f"tempo:{lang}"), **about)
+            else:
+                self._rec.skip(lang, chunk.seq, "no_voice", **about)
         end_of_audio()
         timings[f"t_audio_done:{lang}"] = self.sess.now_ms()
         self.sess.bus.broadcast({"type": "stats", **self.stats()})

@@ -270,6 +270,11 @@ class Settings(BaseSettings):
     v1_hq_review: bool = False          # the hosted model reviews every translated line against the written rubric and may edit; every edit is logged
     v1_hq_duck_db: float = -9.0         # sidechain ducking: how far the background goes down under speech
     v1_hq_loudness_lufs: float = -16.0  # 0 = no loudness normalisation
+    # v1.1 pitch kit (app/v1/record.py, pitch.py, listen.py)
+    v1_live_record: bool = False        # a Live session that asked for it (record=true when it is made) saves its dubbed audio and phrase times under <DATA_DIR>/recordings; with this off, or without the ask, nothing is written
+    v1_record_dir: str = ""             # empty = <DATA_DIR>/recordings
+    v1_listen_test: bool = False        # /listen-test and its routes: blind A/B pairs from <DATA_DIR>/listen/pairs, ratings in <DATA_DIR>/listen
+    v1_listen_dir: str = ""             # empty = <DATA_DIR>/listen
     # Cost per minute on the numbers page: nothing is shown for a rate that is 0 (not set).
     v1_gpu_rate_per_hour: float = 0.0   # the A100's price per hour, in the currency below
     v1_cost_currency: str = "USD"

@@ -20,6 +20,7 @@ const COLS = [
       { href: "/dashboard", label: "Dashboard" },
       { href: "/metrics-ui", label: "Numbers" },
       { href: "/studio/calibrate", label: "Check the checker" },
+      { href: "/listen-test", label: "Listening test" },
       { href: "/health", label: "Status" },
     ],
   },

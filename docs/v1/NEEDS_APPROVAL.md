@@ -452,3 +452,42 @@ escore --write-hearings`
 - **Rollback:** nothing to undo. From now on comparison backends are started with `scripts\v1\ab-server.ps1` from
   PowerShell, where stopping the task stops the server (checked on 8116-8118 in the same work).
 
+## 25. A pitch video of a real stream, and how long recordings are kept, v1.1 WS4
+
+- **What:** the side-by-side video in `data-v1\pitch\` is the test reel played three times by the replay harness.
+  A video for a pitch should be a real stream or a real video of the speaker's own, recorded from the console.
+- **Why deferred:** it needs the speaker's agreement to keep their dubbed voice, the flag switched on on the
+  backend people use (8110, restarted), and a decision this work could not take: recordings are never deleted by
+  themselves, and deleting a voice profile does not delete recordings spoken in it.
+- **Commands (PowerShell, v1 checkout):**
+  ```powershell
+  # backend\.env: V1_LIVE_RECORD=true (and V1_LIVE_BUDGET=true if wanted), then restart the v1 backend
+  # /live: tick "Keep a recording of this session's dub on this server", feed the video from this page, stop
+  powershell -File scripts\v1\render-pitch.ps1 -Recording data-v1\recordings\<session> -Video C:\path\the-video.mp4 `
+      -Lang pa-IN -Stereo split -Out data-v1\pitch\<name>.mp4
+  # afterwards, if the recording should not stay:
+  Remove-Item -Recurse data-v1\recordings\<session>
+  ```
+- **GPU memory:** none beyond the session itself.
+- **Verify:** the script prints the numbers it wrote on the picture; play the file with headphones (left ear the
+  original, right ear the dub).
+- **Rollback:** `V1_LIVE_RECORD=false`, restart; delete `data-v1\recordings\` and `data-v1\pitch\`.
+- **Decide:** how long a recording may stay (the uploads rule is 24 hours), and whether deleting a voice should
+  delete the recordings made with it.
+
+## 26. Listeners for the blind listening test, v1.1 WS4
+
+- **What:** `/listen-test` is built and empty. It needs pairs (WS5: IndicF5 against another engine, same lines)
+  and people who speak the language to rate them.
+- **Why deferred:** no pairs exist yet, and who listens is yours to ask.
+- **Commands:**
+  ```powershell
+  backend\.venv\Scripts\python.exe scripts\v1\make-listen-pairs.py <folder of system A> <folder of system B> `
+      --system-a indicf5 --system-b <name> --lang ta-IN --name "<what this set is>"
+  # backend\.env: V1_LISTEN_TEST=true, restart the backend; send listeners http://<host>:3100/listen-test
+  ```
+- **GPU memory:** none.
+- **Verify:** `/metrics-ui` shows the listening block: "No ratings yet", then per system the mean rating, the
+  number of ratings and the preference share. About 20 pairs a language and five listeners is a start; fewer
+  says little.
+- **Rollback:** `V1_LISTEN_TEST=false`; move `data-v1\listen\results.jsonl` away to start again.

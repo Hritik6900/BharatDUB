@@ -108,7 +108,7 @@ async def wait_free(urls: list[str], wait_min: float) -> list[str]:
 
 
 async def replay(api: str, feed: bytes, langs: list[str], out: Path, *, engine: str, voice: str, streamer: str,
-                 sync: bool, keep_audio: bool, tail_s: float) -> dict[str, Any]:
+                 sync: bool, keep_audio: bool, tail_s: float, record: bool = False) -> dict[str, Any]:
     """One session: create, feed in real time, wait for the last phrase, read the numbers, stop."""
     out.mkdir(parents=True, exist_ok=True)
     ws_base = api.replace("http", "ws", 1)
@@ -121,11 +121,15 @@ async def replay(api: str, feed: bytes, langs: list[str], out: Path, *, engine: 
         body["voice_profile_id"] = voice
     if engine == "gpu":
         body["engine"] = "gpu"
+    if record:   # kept by the backend only when its V1_LIVE_RECORD is on (app/v1/record.py); for scripts/v1/render-pitch.ps1
+        body["record"] = True
     async with httpx.AsyncClient(base_url=api, timeout=60) as http:
         r = await http.post("/api/live/sessions", json=body)
         r.raise_for_status()
         sid, token = r.json()["session_id"], r.json()["ingest_token"]
         (out / "session.txt").write_text(sid, encoding="utf-8")
+        if record and not r.json().get("recording"):
+            print("the backend is not keeping this session: V1_LIVE_RECORD is off there", flush=True)
         captions: dict[tuple[str, int], str] = {}
         done: set[tuple[str, int]] = set()
         audio: dict[tuple[str, int], bytearray] = {}
@@ -271,6 +275,9 @@ async def main() -> None:
                          "phrases of every run in a different way")
     ap.add_argument("--no-sync", action="store_true", help="do not report the video's time (no sync mode)")
     ap.add_argument("--keep-audio", action="store_true", help="save one WAV per dubbed phrase (for hearing lines back)")
+    ap.add_argument("--record", action="store_true",
+                    help="ask the backend to keep the session's dub (its V1_LIVE_RECORD must be on): one track per "
+                         "language and the phrase times under its <DATA_DIR>/recordings/<session>, for the pitch renderer")
     ap.add_argument("--tail-s", type=float, default=60.0, help="how long to wait for the last phrases after the file ends")
     ap.add_argument("--busy", action="append", default=None,
                     help="a backend that must have no live session (default: 8010 and 8110); repeat")
@@ -296,7 +303,8 @@ async def main() -> None:
                 continue
             try:
                 res = await replay(api, feed, langs, out / "runs" / f"{name}_r{k}", engine=a.engine, voice=a.voice,
-                                   streamer=a.streamer, sync=not a.no_sync, keep_audio=a.keep_audio, tail_s=a.tail_s)
+                                   streamer=a.streamer, sync=not a.no_sync, keep_audio=a.keep_audio, tail_s=a.tail_s,
+                                   record=a.record)
                 row = {"target": name, "run": k, "ok": True, "session": res["session"], "errors": len(res["errors"]),
                        **flatten(res, langs)}
             except Exception as e:  # noqa: BLE001 - one failed run must not lose the others
