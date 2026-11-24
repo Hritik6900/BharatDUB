@@ -1198,3 +1198,106 @@ and `backend/.env` was not edited: the flags take effect when the user copies th
   `NEEDS_APPROVAL.md`, `MODELS.md` and `gpu_engine_v1/` were left alone (another workstream is editing them);
   neither document named a removed flag at `bc48922`.
 - **Roll back:** `git revert` of this commit brings both flags and their code back, off by default.
+
+## v1.1 WS5: GPU upgrades prepared for the user to deploy (25 Nov 2026)
+
+Built on the laptop, on branch `v1-ws5`, beside another workstream that was using the GPU: so no Live session, no
+Studio job, no comparison backend and nothing on the GPU machine. This workstream is scripts, unit tests and
+documents; every step that needs the machine is in `NEEDS_APPROVAL.md` with its commands. No new flag: nothing in
+the backend's behaviour changed.
+
+- **Deploy kit** (`gpu_engine_v1/deploy/`, new): `kit.py` (Python 3.8+, no packages) with the wrappers
+  `start.sh`, `smoke.sh`, `stop.sh`, `status.sh`, and one requirements file per server. A server is three
+  commands: copy the folder, `start.sh <server>`, `smoke.sh <server>`. Servers: `qa` 9045, `tts` 9041, `maya`
+  9042, `transcribe` 9043, `big-llm` 9044 (`--size 12b|31b`). No Docker and no sudo: one Python environment per
+  server under `.venvs/` (or `--python` for an existing interpreter); the big model is started with the `vllm`
+  program v0's server was installed with, which is only run.
+  - `start` reads `nvidia-smi` first and refuses unless free minus need is at least 4 GB, again after the
+    environment is built; refuses when the port already answers; says whether CUDA MPS runs and never touches
+    it; knows only ports 9041-9045.
+  - `smoke` prints PASS or FAIL per check with its time, then the GPU memory the server holds (its processes in
+    `nvidia-smi`, and free before the start against free now) and one `RESULT` line; exit code 0 or 1.
+  - `stop` ends only the process in the kit's own pid file, after checking its command line still carries the
+    kit's port; a stale pid file is removed and nothing is stopped.
+  - Needs in the table (GB): qa 0, tts 4, maya 9.2, transcribe 10, big-llm 14 (12B) and 27 (31B). **None was
+    measured**: estimates and the model cards' figures; `--need-gb` takes a measured one.
+- **QA server** (`gpu_engine_v1/qa_server.py`, changed): runs on CPU with no GPU memory (the kit starts it with
+  no CUDA device visible); `QA_HEAR=0` leaves the speech-to-text out, `QA_THREADS` limits CPU threads (default 4).
+  Speaker model: licence checked on its page (Apache-2.0, `MODELS.md`); the server now loads a speaker model only
+  when it is listed as checked and open to commercial use, refuses ECAPA2 and unlisted models, says so in
+  `/health`, and still scores words. New `POST /similarity` (two clips, the speaker model alone). `/health` has
+  the licence, whether the model is loaded, and the average time of a comparison. The stub answers as before.
+- **Voice A/B kit** (`gpu_engine_v1/ab/maya_ab.py`, `voice_lines.tsv`, new): 20 fixed lines (6 English, 4 Hindi,
+  4 Tamil, 3 Bengali, 3 Punjabi) through IndicF5 on 9001 and Maya 2 on 9042 in one voice. The voice comes only
+  from a profile in the store with consent on record; there is no other way to give it a sample. Writes
+  `indicf5/<id>.wav`, `maya/<id>.wav`, `pairs/<id>_a.wav`, `<id>_b.wav`, `pairs/pairs.json` (which system is A is
+  drawn per pair, seeded) and `timing.json`. Refuses while a stream is live. The run needs Maya on the machine.
+- **Translation A/B** (`backend/eval/v1/llm_ab.py`, `translate_lines.txt`, new): 40 fixed lines (the 24 class
+  lines of the hard set and 16 stream lines) into Tamil, Bengali and Punjabi with the product's own prompt; `run`
+  per model (the two need not be loaded together), `sheet` (blind CSV and markdown, the key kept apart, the
+  countable checks), `verdict` by a rule fixed in the file before any result: preferred in at least 60% of at
+  least 40 decided pairs, in no language under 50% of at least 10, no more wrong-script or Latin lines and no
+  empty one, median length at most 1.10 of the small model's, median at most 2.0 s a line in batches; fitness
+  for Live (0.6 s median, 1.0 s p95) is reported beside it. 31B only if 12B wins.
+- **Backend on the machine** (`scripts/v1/vm-backend.sh`, new; `scripts/v1/run-local.sh`, `V1_SKIP_WEB=1` added):
+  fits the copied `.env` to the machine (data folder, ffmpeg) and starts the backend alone; the website stays on
+  the laptop behind one forwarded port. Syntax-checked, never run.
+- **`NEEDS_APPROVAL.md`** is now one ordered checklist of 24 items in six parts (the backend on the machine first;
+  then the machine without GPU memory, with GPU memory, hosting, laptop only, yours), each with what, why, the
+  written-out `ssh` and `scp` lines, the card's numbers, the MPS rule, verify and roll back, and a table from the
+  old numbers to the new. Other documents still cite the old numbers; the table translates.
+- **`MODELS.md`**: what was read on the pages on 25 Nov 2026 for the 12B and 31B checkpoints and the speaker model,
+  and what could not be verified.
+
+**Numbers (measured in this work):**
+
+| What | On what | Runs | Result |
+|---|---|---|---|
+| One speaker comparison on CPU, two clips of 7 s | laptop CPU, 4 threads, the eval reel | 1 run, 20 comparisons | mean 765 ms, range 727-797 |
+| The same, two clips of 3 s | as above | 1 run, 20 | mean 378 ms, range 343-440 |
+| The same, another voice, 7 s each | as above | 1 run, 20 | mean 752 ms, range 700-831 |
+| Similarity, same speaker / another voice | one pair each | 1 | 0.883 (7 s), 0.765 (3 s) / 0.142 |
+| Speaker model load, first time with download | laptop | 1 | 38.8 s |
+
+**Not measured, and why:** any server with its real model on the GPU, the GPU memory any of them takes, Maya 2
+against IndicF5, the 12B model against the small one, the QA server's Whisper, the backend on the machine: all
+need the machine, which this work was not to touch. The kit on Linux: it was written and tested on Windows; the
+process-group and `/proc` parts run only on Linux and were read, not run.
+
+**Found:**
+- **31B does not fit by the estimates.** A window with the small translation model stopped leaves about 24 GB;
+  27 GB plus 4 GB of headroom is 31.
+- **The 12B checkpoint may not start on v0's vLLM.** Its page's discussion reports two start failures; one was
+  fixed in the checkpoint, the other has no confirmed fix and no version is named as working (`MODELS.md`).
+- **`gpu-mode.sh hq --run` without Docker would stop 9020 and then fail to start anything** (it starts the big
+  model as a container, and `set -e` ends the script there, before its own way back). The checklist opens the
+  window by hand instead and says not to use the script without Docker. The script was not changed.
+- SpeechBrain's config reader fails with ruamel.yaml 0.19; `requirements.qa.txt` now pins below it.
+- IndicF5 will be sent English lines as they are in the voice A/B (it has no English): those pairs are marked,
+  and a refused line is listed as missing rather than hidden.
+
+**Mistakes made in this work:** one command called `python` instead of the venv's interpreter, which on this PC
+opens the Store stub and hangs; the task was stopped (it was this work's own). A first scratch environment for the
+CPU run tried to install a second torch and failed on a long path; a second one took the big packages from the v1
+venv through a path file and installed only the small missing ones, in the scratch folder. Nothing was installed
+into the shared venv.
+
+- **Tests:** 299 pass, 1 skipped (was 275 + 1). New: `tests/test_v1_ws5.py` (24: the memory rule on stand-in
+  `nvidia-smi` output; the kit's ports are 9041-9045 and none that runs today, and its source holds no command
+  that reaches past its own process; start refuses on a full card before any setup and writes nothing, for every
+  server and for 31B; a dry run prints the commands and leaves no file; no `nvidia-smi` refuses a GPU server and
+  lets the CPU one through; a port that answers is never replaced; argument parsing; the QA server gets no CUDA
+  device; start, smoke and stop of a stub server on a free port with a bystander process left running; a stale
+  pid file stops nothing; the command-line check; the smoke client passing and failing against fake servers,
+  silent audio, a reply without Tamil letters, nothing listening, no `nvidia-smi`; the memory report; the 20 voice
+  lines; the voice A/B refusing a profile without consent, writing same-named files and blind pairs, the same
+  sides for the same seed, refusing while a stream is live; the translation set and rule; both models run
+  through fake servers and a blind sheet that the key really describes; the verdict for a win, a narrow result,
+  one weak language, too few votes, more unreadable lines, an empty line, too slow, too long; only a speaker model
+  open to commercial use is loaded; comparing voices with a fake model; the stub as before).
+- **v0 after this workstream:** see the hand-back of this work for `scripts/v1/v0-check.sh`. Nothing of v0 was
+  edited, started or stopped; no Live session and no Studio job was made.
+- **Test by hand (laptop, nothing loaded):** `backend\.venv\Scripts\python.exe gpu_engine_v1\deploy\kit.py status`
+  and `... kit.py start tts --dry-run` (refuses on the laptop's own small card, with the numbers).
+- **Roll back:** nothing runs. The QA server's old behaviour for an unlisted speaker model:
+  `QA_SPK_ALLOW_NONCOMMERCIAL=1`.

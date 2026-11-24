@@ -1,0 +1,19 @@
+# Sixteen stream-style lines for the translation A/B, as our GPU speech-to-text writes them (Hinglish in Latin
+# letters). Written for this test; no names, no personal data. The other 24 lines of the set are the class lines
+# of hard_set.json (Hindi in Devanagari with English terms).
+namaste doston, aaj ki stream mein aap sabka swagat hai
+agar aapko yeh video pasand aaya to channel ko subscribe zaroor kar dena
+yeh level thoda mushkil hai lekin hum isko ek hi try mein clear kar lenge
+chat mein batao aapko kaunsa game sabse zyada pasand hai
+ek minute ruko, pehle main settings theek kar leta hoon
+kal shaam saat baje phir milte hain, tab tak apna dhyan rakhna
+is sawal ka sahi jawab option teen tha, jisne sahi kiya usko badhai
+dedh ghante se hum yahi boss fight kar rahe hain aur abhi tak jeete nahin
+mera internet thoda slow chal raha hai, agar stream ruk jaye to refresh kar lena
+aaj ke match mein humari team ne bahut achchha khela
+is recipe mein do chammach tel aur ek chutki namak daalna hai
+agle hafte se hum roz subah nau baje live aayenge
+yeh phone pachees hazaar rupaye ka hai aur iska camera kaafi achchha hai
+jo log abhi abhi aaye hain unke liye main ek baar phir se samjha deta hoon
+comment mein apna score likho, dekhte hain kiske sabse zyada number aaye
+bas aaj ke liye itna hi, dekhne ke liye aap sabka bahut bahut shukriya

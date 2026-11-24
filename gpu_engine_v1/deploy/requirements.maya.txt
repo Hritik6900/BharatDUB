@@ -1,0 +1,5 @@
+# :9042 Maya 2 (its own engine is installed from its repository first; see kit.py)
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+soundfile==0.13.0

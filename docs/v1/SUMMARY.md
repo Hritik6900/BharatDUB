@@ -176,3 +176,21 @@ cd /srv/bharatdb-v1/app && scripts/v1/run-local.sh && scripts/v1/demo-check.sh &
 Open `http://localhost:3100/health`, `/metrics-ui`, `/studio` (the HQ choice shows when `V1_STUDIO_HQ=true`).
 Flags are in `backend/.env` of the v1 checkout; restart the backend after a change. Roll back: switch the flag
 off, or stop v1; v0 on 3000 and 8010 is as it was.
+
+## 6. v1.1 WS5: GPU upgrades are ready for you to deploy (25 Nov 2026)
+
+Nothing was run on the GPU machine. What exists now:
+
+- **`NEEDS_APPROVAL.md` is one checklist of 24 items, top to bottom**, renumbered (the numbers in sections 3 and 4
+  above are the old ones; the table at its end translates). Item 2, the backend on the machine, is first.
+- **A deploy kit** (`gpu_engine_v1/deploy/`): each new model server is copy, `start.sh <server>`,
+  `smoke.sh <server>`. It reads `nvidia-smi` and refuses unless 4 GB stays free, never touches CUDA MPS or v0's
+  servers, and stops only what it started. No Docker, no sudo.
+- **The QA server runs on CPU** with a speaker model whose licence allows commercial use (Apache-2.0, checked);
+  a comparison of two 7 s clips took 765 ms on the laptop's CPU (one run, 20 comparisons, range 727-797 ms).
+- **Two A/B kits**, both waiting for the machine: Maya 2 against IndicF5 on 20 lines with 6 English ones (for the
+  blind listening page), and the 12B translation model against the small one on 120 lines with a rule for "wins"
+  that is written down before any result.
+- **Two things to know before the big model:** by the estimates 31B does not fit on this card beside the voice
+  engines; and the 12B checkpoint's own page reports start failures on vLLM with no version named as working, so
+  its first start is a test in itself.

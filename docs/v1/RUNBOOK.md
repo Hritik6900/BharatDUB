@@ -320,3 +320,38 @@ Restore on a fresh machine with an NVIDIA GPU:
 
 This restore has not been rehearsed. A VM disk snapshot (taken in the cloud console) is the faster way back and
 is the user's to take.
+
+## 8. Deploy kit for the new model servers (v1.1 WS5)
+
+On the GPU machine, in the copied folder (`~/gpu_engine_v1`; the full `ssh` lines are in `NEEDS_APPROVAL.md`):
+
+```bash
+bash deploy/status.sh                 # what answers, what the kit started, free GPU memory (read-only)
+bash deploy/start.sh qa               # qa | tts | maya | transcribe | big-llm [--size 12b|31b]
+bash deploy/start.sh tts --dry-run    # check the card and print every command, start nothing
+bash deploy/smoke.sh qa               # PASS/FAIL per check, time, GPU memory held; exit code 0 or 1
+bash deploy/stop.sh qa                # only the process in the kit's own pid file
+```
+
+| Server | Port | Needs (GB, not measured) | Free must be at least |
+|---|---|---|---|
+| `qa` | 9045 | 0 (CPU, no CUDA device) | 4 |
+| `tts` | 9041 | 4 | 8 |
+| `maya` | 9042 | 9.2 | 13.2 |
+| `transcribe` | 9043 | 10 | 14 |
+| `big-llm` 12B / 31B | 9044 | 14 / 27 | 18 / 31 |
+
+- `start` refuses when free minus need is under 4 GB, when the port already answers, or (for a GPU server) when
+  `nvidia-smi` gives no answer. `--need-gb N` replaces the table's figure once it is measured.
+- Files: `run/<server>.pid`, `.json`, `.log`; environments in `.venvs/`; models in `~/bharatdb-v1-models`
+  (`V1_MODEL_CACHE`). `--python PATH` uses an existing interpreter; `--stub` starts a server without its model.
+- Settings read from the environment at start: `QA_DEVICE`, `QA_HEAR`, `QA_THREADS`, `QA_SPK_MODEL`,
+  `QA_SPK_ALLOW_NONCOMMERCIAL`, `QA_DIARIZE`, `HF_TOKEN`, `NFE`, `BATCH_MAX`, `MAYA_SEATS`, `MAYA_COMMIT`,
+  `BIG_LLM_MODEL`, `BIG_LLM_REVISION`, `BIG_LLM_CTX`, `VLLM_BIN`, `VLLM_VERSION`, the `*_REVISION` pins.
+- CUDA MPS and v0's servers (9001-9003, 9010, 9020, 9030, 9040) are never touched by the kit.
+
+The backend alone on the machine: `bash scripts/v1/vm-backend.sh --check`, then without `--check`
+(`NEEDS_APPROVAL.md` item 2); stop with `scripts/v1/stop-local.sh`.
+
+A/B kits: `gpu_engine_v1/ab/maya_ab.py --help` (voices) and `python -m eval.v1.llm_ab --help` from `backend/`
+(translation; steps `run`, `sheet`, `verdict`).
