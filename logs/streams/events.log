@@ -1,0 +1,19 @@
+2026-11-24 15:04:29 WATCH started: v0=http://127.0.0.1:8010, v1=http://127.0.0.1:8110
+2026-11-24 15:05:53 ENGINE DOWN hosted speech and voice
+2026-11-24 15:05:53 ENGINE DOWN hosted translation
+2026-11-24 15:05:53 ENGINE DOWN separation (Demucs)
+2026-11-24 15:05:53 ENGINE DOWN speech-to-text (Whisper)
+2026-11-24 15:05:53 ENGINE DOWN translation (Gemma)
+2026-11-24 15:05:53 ENGINE DOWN voice 1 (IndicF5)
+2026-11-24 15:05:53 ENGINE DOWN voice 2 (IndicF5)
+2026-11-24 15:05:53 ENGINE DOWN voice 3 (IndicF5)
+2026-11-24 15:07:46 ENGINE BACK hosted speech and voice
+2026-11-24 15:07:46 ENGINE BACK hosted translation
+2026-11-24 15:07:46 ENGINE BACK separation (Demucs)
+2026-11-24 15:07:46 ENGINE BACK speech-to-text (Whisper)
+2026-11-24 15:07:46 ENGINE BACK translation (Gemma)
+2026-11-24 15:07:46 ENGINE BACK voice 1 (IndicF5)
+2026-11-24 15:07:46 ENGINE BACK voice 2 (IndicF5)
+2026-11-24 15:07:46 ENGINE BACK voice 3 (IndicF5)
+2026-11-24 15:07:52 WATCH started: v0=http://127.0.0.1:8010, v1=http://127.0.0.1:8110
+2026-11-24 15:08:20 WATCH started: v0=http://127.0.0.1:8010, v1=http://127.0.0.1:8110

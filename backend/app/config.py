@@ -177,6 +177,8 @@ class Settings(BaseSettings):
     v1_llm_prefix_cache: bool = False   # our translation model: fixed rules first (the server caches that prefix), temperature 0.1
     v1_studio_hq: bool = False          # the HQ Studio path can be asked for (quality=hq on a job)
     v1_fit_115: bool = False            # Studio speeds a line up by at most 1.15x (v0: 1.35x), then shortens
+    v1_api_log: bool = False            # one record per outbound provider request (no bodies, no keys) under V1_LOG_DIR/api
+    v1_log_dir: str = ""                # empty = logs/ at the top of the repository
     v1_store: str = "json"              # json (as v0) | postgres
     postgres_dsn: SecretStr = SecretStr("")
     redis_url: str = ""                 # job queue and live state; empty = in this process

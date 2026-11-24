@@ -5,11 +5,13 @@ so every Gnani REST call goes through `gnani_gate()`.
 """
 import asyncio
 import logging
+import time
 from collections.abc import Awaitable, Callable
 
 import httpx
 
 from app.providers.base import ProviderError
+from app.v1 import apilog
 
 log = logging.getLogger("providers")
 
@@ -51,14 +53,17 @@ async def request_with_retry(
     """Run `send` with one retry on transient errors; 429 gets extra backed-off attempts."""
     attempt, rate_limited = 0, 0
     while True:
+        t0 = time.perf_counter()
         try:
             resp = await send()
         except (httpx.TimeoutException, httpx.TransportError) as e:
+            apilog.record(what, None, t0, attempt + rate_limited, type(e).__name__)
             if attempt >= retries:
                 raise ProviderError(f"{what}: {type(e).__name__}", retryable=True) from e
             attempt += 1
             await asyncio.sleep(backoff_s * attempt)
             continue
+        apilog.record(what, resp, t0, attempt + rate_limited)
         if resp.status_code < 400:
             return resp
         msg = f"{what}: HTTP {resp.status_code} {describe_error(resp)}"

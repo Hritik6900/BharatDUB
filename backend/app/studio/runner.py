@@ -19,6 +19,7 @@ from app.shared import cache
 from app.shared.metrics import StageTimer
 from app.shared.storage import publish_output
 from app.studio.events import events
+from app.v1 import apilog
 from app.studio.stages import extract, fit, mix, render, segment, separate, transcribe, translate, voice
 from app.v1 import trace
 from app.v1.hq import runner as hq
@@ -117,6 +118,7 @@ class StudioRunner:
 
     # ---------- full run ----------
     async def run(self, job_id: str) -> None:
+        apilog.set_test("job", job_id)
         ctx = Ctx(job_id, self.job_dir(job_id))
         self._use_engine(ctx.dir)
         job = await self.store.get("jobs", job_id)

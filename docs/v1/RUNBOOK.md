@@ -71,6 +71,7 @@ change. What each one does, and what was measured, is in `PROGRESS.md` and `EVAL
 | `V1_TTS_MAYA` | Maya 2 as a candidate voice in Studio HQ | off |
 | `V1_STUDIO_HQ` | the HQ choice on `/studio` and `quality=hq` on a job | off: every job is standard |
 | `V1_FIT_115` | Studio speeds a line up by at most 1.15x, then shortens | off: 1.35x |
+| `V1_API_LOG` | one record per outbound provider request in `logs/api/<date>/<session or job>.jsonl` (no bodies, no keys) | off: nothing written |
 | `V1_STORE` | `postgres` (with `POSTGRES_DSN`) | `json` |
 
 Not a flag but a setting: `LIVE_FIT_MAX_TEMPO=1.2` caps the Live speed-up at 1.2x (v0: 1.3).

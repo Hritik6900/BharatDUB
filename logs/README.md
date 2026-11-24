@@ -1,0 +1,59 @@
+# logs
+
+The records of every test run on this machine: what was called, how long each step took, how each run ended.
+Measurements only. Nothing that was said is kept here: no source text, no translation, no audio, no voice
+sample, no key, no voice or token id.
+
+| Folder | What | Written by | Versions |
+|---|---|---|---|
+| `api/<date>/<test>.jsonl` | one line per outbound request to a provider: which call, host and path, status, ms, attempt, bytes out and in | the v1 backend while it runs, with `V1_API_LOG=true` | v1 |
+| `sessions/<version>/<date>_<session>.jsonl` | one line per Live phrase and language: ms for hearing, translation, voice, first audio, how late, speed-up, copied or stock voice, our GPU or hosted, skipped and why | `scripts/v1/collect-logs.py` | v0, v1 |
+| `sessions/index.csv` | one row per Live session and language: the numbers of that run | `scripts/v1/collect-logs.py` | v0, v1 |
+| `jobs/index.csv` | one row per Studio job: seconds per stage | `scripts/v1/collect-logs.py` | v0, v1 |
+| `trace/trace-<date>.jsonl` | v1's trace: per Live phrase and Studio line, which provider did each step and whether a fallback answered | the v1 backend (`V1_TRACE=true`), copied here by the collect script | v1 |
+| `streams/` | the stream watcher's files: `events.log`, a row every 20 s per stream, a summary when a stream ends | `scripts/v1/stream-watch.ps1`, copied here by the collect script | v0, v1 |
+
+`<test>` in `api/` is `live_<session>` or `job_<job>` (first 8 characters of the id), or `other` for a call made
+outside a session or job. The same 8 characters name the session in `sessions/` and `streams/`, so the three can
+be read side by side.
+
+## Keeping it up to date
+
+```powershell
+# from the v1 checkout; reads both stores, writes only into logs/
+backend\.venv\Scripts\python.exe scripts\v1\collect-logs.py `
+    "v0=$env:USERPROFILE\Desktop\BharatDUB\backend\data\local_db.json" "v1=data-v1\local_db.json"
+git add logs; git commit -m "logs: tests up to <date>"; git push origin v1
+```
+
+`api/` fills by itself while v1 runs. v0 has no per-request log: its code is not changed, so for v0 the finest
+record is the per-phrase one in `sessions/`.
+
+## Reading a record
+
+`api/` (one request; this one is the warm-up's translation call on 24 Nov 2026):
+
+```json
+{"ts": "2026-11-24T09:52:47.764+00:00", "test": "other", "api": "llm.chat", "method": "POST", "host": "127.0.0.1:9020", "path": "/v1/chat/completions",
+ "status": 200, "ms": 519, "attempt": 0, "bytes_out": 652, "bytes_in": 701, "ok": true, "error": null}
+```
+
+`attempt` over 0 is a retry (a 429 back-off counts). `status` null with an `error` means no answer came.
+The realtime speech-to-text socket and streamed stock voice are one long connection, not a call per line, and
+are not in `api/`; their timing per phrase is in `sessions/` and `trace/`.
+
+`sessions/` (one phrase in one language), all times in ms:
+
+| Field | Meaning |
+|---|---|
+| `speech_ms` | how long the phrase took to say |
+| `stt_ms` | end of the phrase to its text |
+| `translate_ms` | text to translation |
+| `voice_ms` | translation to the first dubbed audio |
+| `audio_ms` | first to last audio sent |
+| `first_audio_ms` | end of the phrase to the first dubbed audio |
+| `heard_ms` | end of the phrase to when a viewer starts hearing it (the server's estimate) |
+| `late_ms` | sync mode: how long after its video moment the dub starts |
+| `tempo` | speed-up applied to fit (1.3 is the limit) |
+| `copied_voice`, `on_gpu` | 1 when the line was in the copied voice, and when our GPU engine made it |
+| `skipped` | `unheard` (no viewer on that language), `late` (too late to be worth saying) |

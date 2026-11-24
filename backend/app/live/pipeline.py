@@ -19,7 +19,7 @@ from app.providers import get_gpu_voice, get_llm, get_stt, get_tts
 from app.providers.base import ProviderError, VoiceSpec
 from app.shared import audio_utils as au
 from app.shared.metrics import percentile
-from app.v1 import trace
+from app.v1 import apilog, trace
 from app.v1.phrase import DynamicPhraser, ShortLineMerger, SpecTracker, rest_of
 
 log = logging.getLogger("live")
@@ -213,6 +213,7 @@ class LivePipeline:
         if self.running:
             return
         self.running = True
+        apilog.set_test("live", self.sess.id)   # the API call log files this session's calls together
         terms = [t["term"] for t in await get_store().select("glossary_terms")]
         self.glossary = list(dict.fromkeys(DEFAULT_GLOSSARY + terms + list(self.sess.row.get("glossary") or [])))
         self.voice = await self._clone_voice()
