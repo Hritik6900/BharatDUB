@@ -154,10 +154,24 @@ async def replay(api: str, feed: bytes, langs: list[str], out: Path, *, engine: 
                         elif m.get("pcm_b64") and keep_audio:
                             rates[m["lang"]] = m["sample_rate"]
                             audio.setdefault((m["lang"], m["seq"]), bytearray()).extend(base64.b64decode(m["pcm_b64"]))
-                    elif kind == "error" and ch == langs[0]:
+                    elif kind == "error" and ch == langs[0] and str(m.get("message"))[:200] not in errors:
                         errors.append(str(m.get("message"))[:200])
 
-        tasks = [asyncio.create_task(watch(ch)) for ch in [*langs, "src"]]
+        async def console() -> None:
+            """The console's feed (`*`): the pipeline's error messages go only there (a voice or a translation
+            that failed for one line). It is not a viewer: no audio is made for it."""
+            async with websockets.connect(f"{ws_base}/ws/watch/{sid}?lang=%2A", max_size=None) as ws:
+                while not stop.is_set():
+                    try:
+                        m = json.loads(await asyncio.wait_for(ws.recv(), 0.5))
+                    except TimeoutError:
+                        continue
+                    except websockets.ConnectionClosed:
+                        return
+                    if m.get("type") == "error":
+                        errors.append(str(m.get("message"))[:200])
+
+        tasks = [asyncio.create_task(watch(ch)) for ch in [*langs, "src"]] + [asyncio.create_task(console())]
         await asyncio.sleep(0.5)
         async with websockets.connect(f"{ws_base}/ws/ingest/{sid}?token={token}", max_size=None) as ws:
             t0 = time.monotonic()

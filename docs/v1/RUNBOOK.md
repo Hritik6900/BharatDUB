@@ -83,6 +83,8 @@ change. What each one does, and what was measured, is in `PROGRESS.md` and `EVAL
 | `V1_LIVE_BUDGET` | v1.1 dense speech: the live translator gets the phrase's own slot as words and letters (from the measured ms a word and a letter of this voice in this language), and an answer whose expected duration is over it by more than 15% is asked for once more, shorter | off: v0's word limit (`live_length_budget`) |
 | `V1_LIVE_RATECTRL` | v1.1: a PI controller on the dub's backlog scales that budget (1.0 down to 0.6, back within seconds); when the speaker talks more than 70% of the last 30 s ("dense"): budget at most 0.9 of the slot, lines under 3 words join the next, speed-up up to 1.4x. Needs `V1_LIVE_BUDGET` to have an effect on the translation | off |
 | `V1_LIVE_NATIVE_SPEED` | v1.1: our voice engine is asked to speak a line that must be shorter up to 1.2x faster itself, never under 320 ms a word; the rest by tempo as before | off: tempo only |
+| `V1_LIVE_WARMSTART` | v1.1 session start: one tiny translation per target language, our voice engines asked for their state (and one short line per language on every engine process when a streamer's stored voice is on them), one tiny hosted line per language the hosted voice will open in; a streamer's stored voice is sent to the engines when the session is created; a stock voice is chosen once per language by the speaker's pitch (male or female, where the language has both) and kept; the change to the copied voice is softened (fade out, fade in, level) | off: v0's warm-up (one translation, first language) and the usual stock voices |
+| `V1_EN_SINGLE_VOICE` | v1.1: English in a GPU-engine session is spoken in one voice for the whole session (`V1_EN_VOICE`), never chosen line by line | off: the hosted copy when 2 s are spare, else a stock voice |
 | `V1_STORE` | `postgres` (with `POSTGRES_DSN`) | `json` |
 
 Not a flag but a setting: `LIVE_FIT_MAX_TEMPO=1.2` caps the Live speed-up at 1.2x (v0: 1.3).
@@ -92,6 +94,13 @@ The two reliability flags belong together (measured together, `PROGRESS.md` v1.1
 GPU before the next provider is asked), `V1_BREAKER_OPEN_S=30`, `V1_BREAKER_FAILS=2`, `V1_BREAKER_WINDOW_S=10`,
 `V1_LINK_PROBE_EVERY_S=5`. `GET /api/v1/circuits` and the status page show every circuit; the stream watcher prints
 `CIRCUIT OPEN / CLOSED / LINK STALL / LINK BACK` and `RUNG` lines.
+
+The session-start and English-voice flags (v1.1 WS2; measured in `PROGRESS.md`): `V1_EN_VOICE=auto` (`auto` is
+the measured choice, today the one stock voice; `copy` = the hosted copy for every English line once the session
+has it; `stock`), `V1_EN_COPY_LEAD_MS=3500`, `V1_WARM_FADE_MS=150`, `V1_WARM_LEVEL_LINES=2`. A session's
+`GET /api/live/sessions/<id>/metrics` shows `warm` (what each warm-up call took, the speaker's pitch, the stock
+voice chosen per language and why) and `en_voice`. On a night when the hosted stock voice refuses lines (HTTP 502,
+"technical difficulties"), `V1_EN_VOICE=copy` keeps English audible: the hosted copy answered every line then.
 
 The dense-speech flags (v1.1 WS1; measured in `LIVE_DENSE_REPORT.md`) have their numbers as settings:
 `V1_BUDGET_SHARE=1.0` (the dub may take this share of the slot), `V1_BUDGET_OVER=1.15`, `V1_BUDGET_REASK_TIMEOUT_S=2.5`,

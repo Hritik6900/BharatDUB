@@ -63,6 +63,12 @@ are not in `api/`; their timing per phrase is in `sessions/` and `trace/`.
 | `tgt_words`, `tgt_chars` | v1.1: length of the translated line in words and in letters (no text) |
 | `budget_ms`, `budget_scale`, `reasked` | v1.1 with `V1_LIVE_BUDGET`: the duration the translator was given, the controller's scale, 1 = a shorter line was asked for, 2 = and used |
 
+`sessions/ws2-*/` and `trace/ws2-*/` are the comparison backends of the v1.1 WS2 measurement (`docs/v1/PROGRESS.md`):
+`ws2-off` and `ws2-warm`, `ws2-warm2` (session start: off, the first build, the final build), `ws2-en-off`,
+`ws2-en-copy`, `ws2-en-stock` (English voice: flag off, every line in the hosted copy, every line in one stock
+voice; `ws2-off` also holds the one flag-off session of a first English attempt that was stopped). In those, a line with `copied_voice` 0 or 1 and no `first_audio_ms` and no `skipped` is one the hosted
+voice refused (25 Nov 2026: HTTP 502 on many stock lines).
+
 The v1.1 fields are in a record only where they were measured (a backend with the trace or the dense-speech
 flags on, from 24 Nov 2026). `sessions/ws1-*/` and `trace/ws1-*/` are the comparison backends of the v1.1 WS1
 measurement (`docs/v1/LIVE_DENSE_REPORT.md`): off, budget, ctl (budget + controller), native, tight.

@@ -31,6 +31,7 @@ class LiveSession:
     heard: dict[str, deque[int]] = field(default_factory=dict)
     chunk_count: int = 0
     pipeline: Any = None
+    prefetch: Any = None   # v1.1 warm start: a streamer's stored voice on its way to the engines
 
     @property
     def id(self) -> str:

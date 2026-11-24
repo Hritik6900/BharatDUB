@@ -55,6 +55,8 @@ Numbers are from `EVAL_REPORT.md` (three runs per Live setup, one run per Studio
 | `V1_LIVE_BUDGET` (v1.1) | dense reel, Punjabi + Tamil, 5 runs: within 0.25 s 63.5% -> 80.6%, within 1 s 86.5% -> 92.3%, dub length / slot p90 1.42 -> 1.17, lines at 1.3x 46 -> 24 of 185; 15% fewer letters said; `LIVE_DENSE_REPORT.md` | **on** for Punjabi and languages like it; **your call** for Tamil (7 of 20 lines read had lost something that mattered) |
 | `V1_LIVE_RATECTRL` (v1.1) | with the budget: within 0.25 s 83.1%, within 1 s 91.8%, p90 1.11; inside the spread against the budget alone; 15 lines a run at 1.4x | off until someone has heard 1.4x |
 | `V1_LIVE_NATIVE_SPEED` (v1.1) | acts on 6.6 lines a run, all Tamil; no number moved | **off** |
+| `V1_LIVE_WARMSTART` (v1.1) | first 10 phrases of a session, Punjabi + Tamil, 5 runs each way: first audio p95 4.27 s -> 3.80 s (lower in 4 of 5 pairs) with the final build, 3.86 s -> 4.79 s with the first build; "off" alone moved 0.41 s between the two batches; the median did not move; 4-6 of 20 lines in a stock voice either way. Nothing was cold on this setup. The matched stock voice was only measured on a female speaker (the voices v0 uses anyway) | **your call**: no proven gain in speed; its other parts (male stock voice for a male speaker, the softened change of voice) need ears |
+| `V1_EN_SINGLE_VOICE` (v1.1) | English + Punjabi, 3 runs each: stock lines between copied ones 4.7 a session (10.1%) and 9 changes of voice with it off, none with it on. Every line in the hosted copy: within 1 s 86.6% -> 73.7% where the copy existed, first audio 0.73 s later than a stock line. So `auto` takes the one stock voice. The hosted stock voice refused 59% of its lines that night (the copy none) | **on** with `auto` if one voice matters more than the speaker's voice in English; `V1_EN_VOICE=copy` when the stock voice is failing or the copied voice matters more than timing |
 
 Against the targets: Studio words heard back 92.5% (target 96%): not reached. Live first audio 2.3-2.5 s through
 the link (target 1.8 s) and on time 56-70% (target 90%): not reached, and no Live flag moves either. Hard-audio
@@ -87,6 +89,8 @@ measured 1.8 s first audio there; `NEEDS_APPROVAL.md` item 3), not these flags.
 | 17 | Stop the laptop sleeping on AC power (v1.1): all three stalls of 24 Nov were standby | three `powercfg` lines |
 | 18 | The A100's real numbers on the status page (v1.1) | the QA server on the VM (item 6) and one more forwarded port |
 | 19 | Two or three dense recordings of about 10 minutes, your own content, for the Live replay (v1.1 WS1) | the files in `data-v1\eval\dense\`; hosted speech-to-text for the minutes replayed |
+| 20 | Which English voice (`V1_EN_VOICE`), and whether the session should move to the copy by itself when the stock voice fails (v1.1 WS2) | your ears and a decision |
+| 21 | The session start measured with a recorded voice (Streamer Mode), a male speaker, and the English voices on a night the hosted voice is healthy (v1.1 WS2) | a voice recorded in v1 with consent; hosted calls for about 20 short sessions |
 
 ## 4. Decisions needed
 

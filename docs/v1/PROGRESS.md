@@ -519,3 +519,217 @@ consent, sync mode, hold fixed at 6 s, four comparison backends in turn, **5 run
   new columns. With the flags off the same run has `dur_ratio` and `backlog` (the trace is on) and no budget.
 - **Roll back:** the three flags to `false` (the default) and restart the backend. The new numbers in the trace
   and the pages are measurements only and stay.
+## v1.1 WS2: session start and the English voice (`V1_LIVE_WARMSTART`, `V1_EN_SINGLE_VOICE`), 25 Nov 2026
+
+Two flags, both off by default; with them off the Live pipeline is as it was (tests
+`test_flags_off_the_start_and_the_voices_are_v0s`, `test_flags_off_english_in_a_gpu_session_is_still_chosen_line_by_line`,
+`test_without_the_english_flag_a_refused_line_is_left_out_as_in_v0`).
+
+### What v0 already did at a session's start, and what is new
+
+v0 (`live_warmup`, on): one tiny translation for the **first** target language; one tiny hosted line for that
+language, but **not** when our voice engine is going to speak it (so nothing on the voice side in a GPU session).
+A streamer's stored voice was already sent to our engines when the session **started** (the first sound arriving),
+and the start waited for it. In sync mode a line already waited for a copied voice that was on its way.
+
+New with `V1_LIVE_WARMSTART` (`backend/app/v1/warm.py`, `backend/app/live/pipeline.py`):
+
+- **Warm-up for every language and engine** (`_warmstart`, in place of `_warmup`): one tiny translation per target
+  language; every process of our voice engine is asked for its state (opens its connection); when a streamer's
+  stored voice is on the engines, one two-word line per language and at least one per process; one tiny hosted
+  line per language the hosted voice opens in, the languages our engine takes over later included. A tiny line on
+  our engine needs the session's voice: with a voice learned from the stream there is none at the start, and a
+  line right after the voice arrives would stand in the way of the first real lines, so none is made then (the
+  upload of the sample has just used every engine's connection). What each call took is in the session's
+  `/metrics` (`warm.calls_ms`) and in the trace (`live_warmstart`).
+- **A streamer's stored voice is sent when the session is created** (`prefetch_stored_voice`, called by
+  `POST /api/live/sessions`), not when the sound starts; the start finds it there (`warm.calls_ms.stored_voice_ahead`)
+  and, if the prefetch failed, sends it as before. The consent check is unchanged (no consent on record: nothing
+  is sent).
+- **A stock voice matched to the speaker** (`PitchTracker`, `pick_stock`): the session's own sound is listened to
+  for pitch (autocorrelation on 64 ms windows, loud and periodic ones only; the median over at least 12 windows,
+  about 0.8 s of voiced speech; 0.5 ms of CPU a window, and it stops after 160). Under 165 Hz: the language's
+  male stock voice, else the female one. The voice is chosen at a language's first stock line and kept for the
+  session, whatever is heard later. **Tamil and Telugu have female stock voices only**: a male speaker gets the
+  female one there, and the session's `/metrics` says so (`warm.stock_voice.<lang>.note`). A matched voice that
+  makes nothing gives way to the language's usual one. It applies to every stock line of the session, so also to
+  a session that never gets a copied voice.
+- **Opening lines do not wait for a voice that is not on its way.** v0 held a line back until 2.2 s before it was
+  due whenever a copied voice was planned. Now it waits only while a sample is being sent to the engines.
+- **A softened change of voice** (`_soften`): lines are separate utterances, so nothing overlaps and this is not
+  a crossfade in the strict sense. Every stock line spoken while the copied voice is awaited ends in a 150 ms
+  equal-power fade (any of them may be the last), the first copied line begins with one, and the first two
+  copied lines are brought two thirds and one third of the way (in dB, at most 6 dB) to the level the stock voice
+  spoke at. Marks per phrase: `open:<lang>`, `handover:<lang>`. **Not judged by ear.**
+
+New with `V1_EN_SINGLE_VOICE` (GPU-engine sessions with English among the targets; nothing elsewhere):
+
+- English is spoken in **one voice for the whole session**, decided at the start and never per line
+  (`V1_EN_VOICE`): `stock` = the one stock voice for every line, also when the session has a copy; `copy` = the
+  hosted copy for every line once the session has it, whatever time is spare, wherever English stands in the
+  language list; `auto` (default) = the measured choice, which is `stock` (below). The session's `/metrics` says
+  which (`en_voice`). With `V1_LIVE_WARMSTART` the stock voice is the one matched to the speaker (Pranav or Kaveri).
+- `copy` on a voice that is still being learned from the stream cannot be one voice for the whole session: the
+  lines before the copy exists are said in the stock voice (a line waits for a copy that is being made until
+  3.5 s before it is due, `V1_EN_COPY_LEAD_MS`), then the voice changes once and stays.
+- **A refused line is asked once more in the same voice.** The streamed hosted call has no retry of its own (the
+  plain one has); a line the service refuses is silently left out. With the flag an English line refused before
+  any sound is asked again after 0.2 s (`tts_retry:<lang>` per phrase, `en_lines_asked_again` /
+  `en_lines_then_spoken` in `/metrics`).
+- **With the ladder (`V1_LIVE_DEGRADE`):** the one voice is the session's choice while the service answers; the
+  ladder still steps down when it does not. In `copy`, a line the copy refuses twice is said by the stock voice
+  (the ladder's rule, rung "stock"); after two such lines in a row the copy counts as down and English is asked
+  of the stock voice directly, with one try of the copy every 10 s; the first that answers brings the copy back.
+  In `stock` there is nothing to step down to but captions. Without the ladder a line refused twice has no audio.
+  The ladder's change is announced to viewers; it is a step for an outage, not a choice per line.
+- **Harness:** `eval/live_replay.py` now also keeps the pipeline's error messages (they go to the console's feed
+  only); `eval/live_first.py` (new) reads a replay folder and the comparison backends' stores: the first N
+  phrases of each session, and which voice said every line of a language.
+
+### Measured: the first 10 phrases of a session (`V1_LIVE_WARMSTART`)
+
+The dense 24.9 s reel played twice after 6 s of silence (about 26 phrases a session; the first 10 are counted, each
+in two languages = 20 lines a run), GPU engine, Punjabi + Tamil, voice learned from the stream with consent, sync
+mode, hold fixed at 6 s, two comparison backends in turn (off, on, off, on ...), **5 runs each way per build**,
+night of 24-25 Nov 2026. First audio = end of the phrase's speech to its first dubbed audio. Mean
+(lowest-highest) over the runs; numbers from `eval/live_first.py` on `data-v1/eval/ws2/warm` and `warm2`.
+
+| First 10 phrases | off | first build | off (second batch) | final build |
+|---|---|---|---|---|
+| First audio p95 (ms) | 3859 (3556-4179) | 4793 (3851-5546) | 4268 (3673-5051) | 3798 (3396-4338) |
+| First audio p50 (ms) | 2887 (2721-3080) | 2892 (2563-3105) | 2904 (2721-3108) | 2856 (2621-3368) |
+| Slowest line (ms) | 4507 (3929-5230) | 5170 (4187-5788) | 4627 (4181-5515) | 4285 (3552-5119) |
+| Lines in a stock voice, of 20 | 5.6 (4-7) | 5.6 (5-7) | 4.6 (4-5) | 4.0 (1-7) |
+| Lines in the copied voice, of 20 | 13.8 (13-14) | 14.4 (13-15) | 14.2 (14-15) | 13.6 (11-15) |
+| Lines with no audio, of 20 | 0.6 (0-2) | 0 (0-0) | 1.2 (0-2) | 2.4 (0-5) |
+| Lines starting within 1 s of their moment, of 20 (a line said together with the one before has no moment of its own) | 16.8 (16-18) | 14.2 (9-18) | 16.2 (14-18) | 14.6 (11-17) |
+
+- **First build** (warm-up calls, matched voice, softened change; lines still waited for the copied voice as in
+  v0): first audio p95 **worse**, 3.86 s -> 4.79 s, in 4 of 5 pairs. No cause was found in the code path (the
+  pitch estimate costs 0.5 ms a window; the warm-up calls are over 5 s before the first word). By step, phrases
+  1-3: stock lines took 1.93 s (off) against 2.22 s from translation to first audio, and 4 lines got the copied
+  voice after waiting 3.6 s for it (off: none); phrases 4-10 were equal (0.96 s against 0.97 s for a copied line).
+- **Final build** (the same, and a line no longer waits for a voice that is not on its way): p95 4.27 s -> 3.80 s,
+  lower in 4 of 5 pairs, ranges overlap. **Not a proven gain:** "off" alone moved by 0.41 s between the two
+  batches (3.86 s and 4.27 s), which is the size of the difference. The median did not move in either build.
+- **Why there is so little to win:** on this setup nothing was cold. The hosted voice's warm-up line took 297-1428 ms
+  (19 of 20 calls answered, mean 0.59 s) and the first real stock line of an "off" session, which had no warm-up,
+  took 0.77-1.13 s for Punjabi; a tiny translation took 432-1104 ms and the first real one was no faster after it;
+  asking the three engine processes for their state took 1.06-1.65 s. What the opening's first audio consists of is
+  speech-to-text (0.85-0.93 s), translation (0.69-0.74 s), and for the stock lines the wait for the hosted
+  account's one request at a time, which two languages share (1.7-2.2 s from translation to first audio).
+- **Stock or copied in the first 10 phrases:** 4-6 of 20 lines in a stock voice and 14 in the copied voice, with
+  or without the flag; the first line in the copied voice arrived 8.5-11.5 s after the first word, at phrase 4 or
+  5, in all twenty runs. The softened change acted on 4 lines a run (two per language) in 9 of 10 runs.
+- **The speaker** of the reel was measured at 222 Hz in all ten runs (213-215 Hz when the first stock line was
+  chosen, about 4 s into the speech): female, so Punjabi got Mehuli and Tamil Asmita, the voices v0 uses anyway. **A male
+  speaker was not measured in a session.** The eight male stock voices were each asked for one two-word line on
+  the hosted service: all eight answered (0.37-0.60 s), so the names exist.
+- **Lines with no audio** are stock lines of the opening that the hosted voice was asked for and did not make;
+  they carry no skip mark. In these runs the reason was not recorded (the harness did not yet keep the pipeline's
+  error messages); an hour later the hosted voice was refusing lines with "technical difficulties" (below), which is
+  the likely reason. They are in both columns and not a product of the flag as far as these runs show (the first
+  build had none, the final build the most).
+- **Not measured:** Streamer Mode with a stored voice (the prefetch and the engine lines: tests with a fake engine
+  only; no streamer profile exists in a comparison backend's store, and the user's recorded voice was not used
+  for a test nobody asked for); a session without the 6 s of silence the harness starts with (a real console
+  sends sound at once; the warm-up then overlaps the first words); a male speaker; music or game sound under the
+  voice (the pitch estimate was only ever given this one clean voice); how the softened change sounds; one viewer
+  language; the hosted engine.
+
+### Measured: which voice says the English lines (`V1_EN_SINGLE_VOICE`)
+
+The same reel played 8 times (211 s a session, about 95 phrases), GPU engine, **English + Punjabi** (English
+first, as on the user's stream), voice learned from the stream with consent, sync mode, hold fixed at 6 s. Three
+comparison backends in turn: flag off, flag on with `V1_EN_VOICE=copy`, flag on with `V1_EN_VOICE=stock`;
+**3 runs each**, 25 Nov 2026, about 00:40 to 01:15 IST. Mean (lowest-highest); from `eval/live_first.py` on
+`data-v1/eval/ws2/en2`.
+
+**The hosted stock voice was failing that night.** It answered many lines with HTTP 502 "We are facing technical
+difficulties" within 0.2 s: 5 of 18 single lines asked outside any session between 00:36 and 01:14, and in the
+sessions 59% of the English stock lines at the first try. The hosted copy of the voice answered every line. On
+the user's stream of 24 Nov (read from v0's store: 100 English lines, 91 copied, 9 stock, 16 changes of voice)
+no line was refused by either. So the lost lines below belong to that night; the mix and the timing do not.
+
+| English lines | off | on, `copy` | on, `stock` (= `auto`) |
+|---|---|---|---|
+| Spoken, of about 95 | 69.7 (65-76) | 74.3 (73-76) | 54.7 (53-57) |
+| In the copied voice / in a stock voice (% of spoken) | 59.7 / 40.3 | 67.3 / 32.7 | 0 / 100 |
+| Stock lines before the copy existed | 23.7 (19-31) | 24.3 (18-29) | all |
+| **Stock lines between copied ones** | **4.7 (3-6), 10.1% (6.5-12.8) of the lines from the first copied one on** | **0** | **0** |
+| **Changes of voice in a session** | **9 (7-11)** | **1** (opening to copy) | **0** |
+| Asked for and not made (the hosted voice refused) | 25.3 (21-30) | 20 (18-21), all before the copy existed | 39.3 (39-40) |
+| Asked a second time (the flag's one retry) | none | 31.3 (27-35) | 55.3 (52-58) |
+| Skipped as too late | 0 | 0 | 0 |
+| Within 1 s of its moment (%) | 90.9 (88.0-92.6) | 82.4 (79.5-88.0) | 90.6 (84.6-94.3) |
+| First audio p50 / p95 (ms) | 2923 / 4184 | 2948 / 4298 | 2388 / 4100 |
+
+From 120 s into the session on (the copy existed in every run; about 40 English lines a run):
+
+| | off | on, `copy` | on, `stock` |
+|---|---|---|---|
+| In the copied voice / stock (% of spoken) | 90.3 / 9.7 | 100 / 0 | 0 / 100 |
+| Refused, of about 40 | 3 (1-6) | **0 of 119 lines in three runs** | 17.3 (15-22) after both tries |
+| Within 1 s of its moment (%) | 86.6 (76.9-92.1) | 73.7 (71.1-77.5) | 87.2 (77.3-96.2) |
+| First audio p50 / p95 (ms) | 3191 / 4410 | 3085 / 4731 | 2353 / 3552 |
+
+Punjabi in the same sessions (our engine's copied voice) was within 1 s for 92.8%, 91.4% and 89.9% of its lines:
+the English voice does not reach it.
+
+- **The mix, before and after.** Off: once the copy existed, one English line in ten was still in a stock voice,
+  9 changes of voice a session (the user's own stream: 9 of 100 and 16 changes). On: none, whichever voice.
+- **Every line in the copy costs timing.** A copied line's first audio comes 0.73 s later than a stock line's
+  (3.09 s against 2.35 s at the median, ranges apart), and v0 used the stock voice exactly for the lines that had
+  no time to spare. Without that, English lines within 1 s fell from 86.6% to 73.7% in the part where the copy
+  existed (lower in 2 of 3 pairs, equal in one); over the whole session the backlog p95 rose from 862 ms to
+  1359 ms and the lines at the 1.3x limit from 13.7 to 18.3 a run. No line was skipped as too late in any setting.
+- **"Reliable", in the numbers measured.** Answers: the hosted copy made 119 of 119 lines here and 91 of 91 on
+  24 Nov. Timing: 0.73 s later to first audio than the stock voice, 13 points fewer lines within 1 s than v0's
+  mix. Presence: a copy learned from the stream said its first line 84-104 s after the first word in these six
+  sessions (the collector takes 12 s of speech, and on this reel, which hardly pauses, that took a minute and a
+  half; the likely cause, not proven, is that it only counts sound between a speech start and the next final
+  transcript). So the copy answers reliably, but it is later, and for a session's first minute and a half it is
+  not there.
+- **What the flag chooses.** `auto` = **the one stock voice**: the brief for this work says that when
+  always-copied makes timing clearly worse the fixed stock voice is taken, and it does make it worse. `copy` stays
+  a setting for whoever prefers the speaker's voice: one change of voice, after the opening. The stock column's
+  own timing (87.2%) is flattered: that night it spoke only 56% of its lines, so its queue was shorter; **the
+  stock voice's timing on a healthy night was not measured.**
+- **On a night like this one `auto` is the wrong choice:** the stock voice left 42% of the English lines without
+  audio even with the retry (the second try was refused 71% of the time), the copy none. `V1_EN_VOICE=copy` is
+  the setting for such a night. The flag does not switch by itself; that is a decision (`NEEDS_APPROVAL.md` 20).
+- **The retry** brought back 16 of 55 refused lines a run in `stock` (29%). When the service is healthy it does
+  nothing.
+- **Found on the way, not fixed (flags off, v0's behaviour):** (1) the streamed hosted voice has no retry, so every
+  refused line is silently without audio (25 of 95 English lines a run that night with the flag off; the opening
+  stock lines of a Punjabi + Tamil session too, 0.6-1.2 of 20). (2) The hosted copy learned from the stream arrived
+  84-104 s into dense speech (`SPEC.md` has 33-37 s on other material).
+- **Not measured:** a healthy night; a session that has the hosted copy from its first line (a recorded voice); a
+  real stream with pauses (on 24 Nov's stream 97.9% of the English lines were within 1 s with 91% of them copied);
+  the two flags together; the ladder with either setting on real services (tests with fake providers); English
+  as the only viewer language; how either voice sounds.
+- **Hosted calls this cost:** 32 Live sessions with hosted speech-to-text and the hosted voice for the stock and
+  English lines (20 of 1 minute for the session start, 9 of 3.5 minutes for English, and 3 of up to 2.7 minutes
+  in a first English attempt that was stopped when the refusals showed), 18 single stock lines to see whether the
+  service answered, 8 two-word lines for the male voice names.
+
+- **Tests:** 241 pass, 1 skipped (was 207 + 1). New: `tests/test_v1_warm.py` (34: pitch of a low and a high voice,
+  none for noise or a pause; the tracker's first second and its stop; the nearest stock voice and the note for
+  Tamil and Telugu; fade, level and the step towards a level; `copy` / `stock` / `auto`; both flags off by
+  default; flags off = v0's warm-up, v0's voices, nothing new stored, no prefetch, English chosen line by line, a
+  refused line left out; warm start asks every language and engine; engine lines with a stored voice; a failing
+  warm-up call stops nothing; the matched voice is kept and the note is in the metrics; a matched voice that
+  makes nothing gives way; the softened change; an opening line waits only while a sample is on its way; the
+  stored voice sent at creation, not again at the start, never without consent; English always the copy, always
+  the stock voice, `auto`; `copy` on a voice still to be learned; the ladder steps English down and back; a
+  refused English line asked once more; the flag does nothing outside a GPU-engine session or without English;
+  every language has a stock voice for either speaker).
+- **v0 after this workstream:** all nine checks ok (`scripts/v1/v0-check.sh`). Nothing of v0 was edited, started or stopped; its
+  store file was read (the 24 Nov stream's English lines, the log collector). No comparison backend is left running.
+- **Test by hand:** `scripts\v1\ab-server.ps1 -Port 8112 -Name try -Flags "V1_LIVE_WARMSTART=true,V1_EN_SINGLE_VOICE=true,V1_EN_VOICE=copy"`,
+  then from `backend\`:
+  `python -m eval.live_replay ..\data-v1\eval\reel25.mp4 --out ..\data-v1\eval\ws2\try --target on=http://127.0.0.1:8112 --runs 1 --loops 8 --langs en-IN,pa-IN`
+  and `python -m eval.live_first ..\data-v1\eval\ws2\try --data on=..\data-v1\ab\try --lang en-IN --after-s 120`.
+  `GET /api/live/sessions/<id>/metrics` shows `warm` (the calls, the speaker's pitch, the stock voice per
+  language and why) and `en_voice`.
+- **Roll back:** `V1_LIVE_WARMSTART=false`, `V1_EN_SINGLE_VOICE=false` (the defaults) and restart the backend.

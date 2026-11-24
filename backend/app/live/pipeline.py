@@ -19,7 +19,7 @@ from app.providers import get_gpu_voice, get_llm, get_stt, get_tts
 from app.providers.base import ProviderError, VoiceSpec
 from app.shared import audio_utils as au
 from app.shared.metrics import percentile
-from app.v1 import apilog, breaker, dense, trace
+from app.v1 import apilog, breaker, dense, trace, warm
 from app.v1.degrade import RUNGS, Ladder
 from app.v1.phrase import DynamicPhraser, ShortLineMerger, SpecTracker, rest_of
 
@@ -56,6 +56,9 @@ GPU_CHECK_LINES = {
     "pa-IN": "ਅੱਜ ਮੌਸਮ ਬਹੁਤ ਵਧੀਆ ਹੈ ਅਤੇ ਅਸੀਂ ਸਾਰੇ ਬਹੁਤ ਖੁਸ਼ ਹਾਂ",
 }
 GPU_MAX_CHECKS = 3         # voice samples tried in one session
+EN = "en-IN"
+# `V1_LIVE_WARMSTART`: the first two words of each check line, for one short line on our voice engine.
+WARM_LINES = {lg: " ".join(line.split()[:2]) for lg, line in GPU_CHECK_LINES.items()}
 GPU_GOOD_SCORE = 0.85      # a sample this good is kept; below it a later pause may give a better one
 GPU_RECHECK_MS = 12000     # ... but not sooner than this after the last try
 
@@ -134,6 +137,42 @@ def speech_cut(frames: list[bytes], want_ms: int = GPU_REF_MS, min_ms: int = GPU
     return b"".join(reversed(out)) if voiced >= min_ms else None
 
 
+async def send_stored_voice(row: dict[str, Any], gpu: Any, stt: Any) -> tuple[str, Any] | None:
+    """Streamer Mode: the voice the streamer recorded (with consent) goes to the GPU engines. (voice id on the
+    engines, its stored score), or None when this session has no such voice. Raises when no engine took it."""
+    if not (row.get("streamer_id") and row.get("voice_mode") == "clone" and gpu.enabled):
+        return None
+    p = await get_store().get("voice_profiles", row.get("voice_profile_id") or "")
+    if not (p and p.get("consent_at") and p.get("ref_path") and p.get("ref_text") and not p.get("deleted_at")):
+        return None
+    from app.shared.voices import voices_dir
+    from app.streamer.voice_ref import sample_text
+    vid = f"voice-{p['id']}"
+    path = voices_dir() / p["ref_path"]
+    text = await sample_text(p, path, row.get("src_lang") or "hi-IN", stt=stt)
+    await gpu.set_ref(vid, str(path), text, consent_at=p["consent_at"])
+    return vid, p.get("ref_score")
+
+
+def prefetch_stored_voice(sess: LiveSession) -> None:
+    """`V1_LIVE_WARMSTART`: when a streamer's session is created, their recorded voice is sent to the engines at
+    once, not when the sound starts to arrive; the session's start then finds it there. Nothing without the flag,
+    and nothing for a session that has no stored voice (the consent check is `send_stored_voice`'s and the engine
+    client's own)."""
+    row = sess.row
+    if not (get_settings().v1_live_warmstart and row.get("streamer_id") and row.get("voice_mode") == "clone"):
+        return
+    eng = row.get("engine") or None
+    gpu, stt = (get_gpu_voice(eng), get_stt(eng)) if eng else (get_gpu_voice(), get_stt())
+    t0 = sess.now_ms()
+
+    async def go() -> tuple[str, Any, int] | None:
+        got = await send_stored_voice(row, gpu, stt)
+        return (*got, sess.now_ms() - t0) if got else None
+    sess.prefetch = asyncio.create_task(go())
+    sess.prefetch.add_done_callback(lambda t: t.cancelled() or t.exception())   # read at the start, or not at all
+
+
 class LivePipeline:
     def __init__(self, sess: LiveSession, stt: Any = None, llm: Any = None, tts: Any = None,
                  gpu: Any = None) -> None:
@@ -189,6 +228,17 @@ class LivePipeline:
         self._dense = False   # dense mode is on (only ever with `V1_LIVE_RATECTRL`)
         if self.s.v1_live_ratectrl and self._merger is None:   # dense mode joins short lines to the next
             self._merger = ShortLineMerger(self.s.v1_dense_merge_under_words, self.s.v1_merge_wait_ms)
+        # v1.1 session start (`V1_LIVE_WARMSTART`) and the one English voice (`V1_EN_SINGLE_VOICE`); app/v1/warm.py.
+        self._warm = bool(self.s.v1_live_warmstart)
+        self._pitch = warm.PitchTracker() if self._warm else None   # the speaker's pitch, for the stock voice
+        self._stock_pick: dict[str, dict[str, Any]] = {}   # per language: the stock voice chosen once and kept
+        self._stock_level: dict[str, float] = {}           # per language: how loud the opening stock lines were
+        self._handover: dict[str, int] = {}                # per language: copied lines softened after them
+        self._opening: dict[str, int] = {}                 # per language: stock lines spoken while the copy was awaited
+        self._copy_coming = False                          # the hosted copy is being learned from the stream
+        self._en_mode: str | None = None                   # "copy" | "stock" for English; None = flag off or not that session
+        self.warm_ms: dict[str, Any] = {}                  # what each warm-up call took
+        self.en_retries = [0, 0]                           # English lines asked a second time, and how many then came
         self._voice_turn = asyncio.Semaphore(max(1, self.s.gnani_max_concurrency))
         self._gpu_turn = asyncio.Semaphore(max(1, int(getattr(self.gpu, "capacity", 1))))
         self._src_ms_per_word = 350.0             # how fast the speaker talks (from finished lines)
@@ -251,8 +301,17 @@ class LivePipeline:
         gpu_all = self.gpu.enabled and all(self.gpu.speaks(lg) for lg in self.sess.langs)
         if self.voice is None and consent.get("consent_at") and not gpu_all:
             self._enrol = []
+            self._copy_coming = True
+        if self.s.v1_en_single_voice and self.engine == "gpu" and EN in self.sess.langs:
+            # One English voice for the whole session, decided here and never changed (app/v1/warm.py).
+            self._en_mode = warm.en_mode(self.s.v1_en_voice)
+            if self._trace:
+                trace.event("live_en_voice", session=self.sess.id, mode=self._en_mode, setting=self.s.v1_en_voice,
+                            copy_at_start=self.voice is not None)
         self.tasks = [asyncio.create_task(self._stt_loop()), asyncio.create_task(self._poll_loop())]
-        if self.s.live_warmup and self.sess.langs:
+        if self._warm and self.sess.langs:
+            self.tasks.append(asyncio.create_task(self._warmstart()))
+        elif self.s.live_warmup and self.sess.langs:
             self.tasks.append(asyncio.create_task(self._warmup()))
         self.tasks += [asyncio.create_task(self._worker(lg)) for lg in self.sess.langs]
 
@@ -308,27 +367,99 @@ class LivePipeline:
             except Exception:  # noqa: BLE001 - only a warm-up
                 pass
 
+    async def _warmstart(self) -> None:
+        """`V1_LIVE_WARMSTART`, in place of `_warmup`: every target language and every engine that will speak is
+        asked once before the first phrase.
+          - one tiny translation per language (v0: the first language only);
+          - our voice engines: each process is asked for its state (opens its connection); with a stored voice
+            on them, one tiny line per language and at least one per process (v0: nothing);
+          - the hosted voice: one tiny line per language it will speak at the start, also the languages our engine
+            takes over later, whose opening is in a stock voice (v0: only when no copied voice is coming, and
+            only the first language). English in the hosted copy is asked in that copy when the session has it."""
+        t0 = self.sess.now_ms()
+        langs = self.sess.langs
+
+        async def timed(name: str, job: Any, limit: float = TRANSLATE_TIMEOUT_S) -> None:
+            t = self.sess.now_ms()
+            try:
+                await asyncio.wait_for(job, limit)
+                self.warm_ms[name] = self.sess.now_ms() - t
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001 - only a warm-up
+                self.warm_ms[name] = f"failed: {type(e).__name__}"
+
+        async def translation(lang: str) -> None:
+            kw: dict[str, Any] = {"native": True} if self._gpu_planned(lang) else {}
+            await self.llm.translate_chunk("नमस्ते", lang, [], [], **kw)
+
+        async def engines() -> None:
+            health = getattr(self.gpu, "health", None)
+            if not (self.gpu.enabled and health is not None):
+                return
+            await timed("engines", health())
+            mine = [lg for lg in langs if self._gpu_speaks(lg)]
+            if mine:   # a stored voice is on the engines: one short line per language, every process at least once
+                n = max(len(mine), int(getattr(self.gpu, "capacity", 1)))
+                await timed("engine_lines", asyncio.gather(*(
+                    self.gpu.synth(self._gpu_sid or self.sess.id, WARM_LINES.get(mine[i % len(mine)], "ok"), mine[i % len(mine)])
+                    for i in range(n))))
+
+        async def hosted_line(lang: str) -> None:
+            voice: VoiceSpec = {"kind": "stock", "voice": VOICE_BY_LANG.get(lang, VOICE_BY_LANG["hi-IN"])}
+            if self.voice is not None and lang == EN and self._en_mode == "copy":
+                voice = self.voice
+            async with self._voice_turn:   # one request at a time on the hosted account; a real phrase waits its turn
+                async for _ in self.tts.synth_stream("ok", lang, voice, sample_rate=self.s.live_sample_rate):
+                    pass
+
+        async def hosted() -> None:
+            for lang in langs:
+                if not self._gpu_speaks(lang) and self.running:
+                    await timed(f"voice:{lang}", hosted_line(lang))
+
+        await asyncio.gather(*(timed(f"translate:{lg}", translation(lg)) for lg in langs), engines(), hosted())
+        self.warm_ms["total"] = self.sess.now_ms() - t0
+        if self._trace:
+            trace.event("live_warmstart", session=self.sess.id, **{k.replace(":", "_"): v for k, v in self.warm_ms.items()})
+
+    def warm_stats(self) -> dict[str, Any]:
+        """For the session's metrics: the session's start and the English voice. Empty with both flags off."""
+        out: dict[str, Any] = {}
+        if self._warm:
+            f0 = self._pitch.median_hz() if self._pitch is not None else None
+            out["warm"] = {"calls_ms": dict(self.warm_ms), "f0_hz": round(f0) if f0 else None,
+                           "speaker": self._pitch.gender() if self._pitch is not None else None,
+                           "stock_voice": {lg: dict(v) for lg, v in self._stock_pick.items()},
+                           "opening_stock_lines": dict(self._opening),
+                           "softened_lines": dict(self._handover)}
+        if self._en_mode is not None:
+            out["en_voice"] = self._en_mode
+            out["en_lines_asked_again"], out["en_lines_then_spoken"] = self.en_retries
+        return out
+
     async def _use_stored_voice(self) -> None:
         """Streamer Mode: the voice the streamer recorded (with consent) goes to the GPU engines before the first
         word, so the first phrase is already in their voice. It is not replaced during the stream."""
-        row = self.sess.row
-        if not (row.get("streamer_id") and row.get("voice_mode") == "clone" and self.gpu.enabled):
-            return
-        p = await get_store().get("voice_profiles", row.get("voice_profile_id") or "")
-        if not (p and p.get("consent_at") and p.get("ref_path") and p.get("ref_text") and not p.get("deleted_at")):
-            return
-        from app.shared.voices import voices_dir
-        from app.streamer.voice_ref import sample_text
-        vid = f"voice-{p['id']}"
         t0 = self.sess.now_ms()
+        got: tuple[str, Any] | None = None
+        ahead, self.sess.prefetch = getattr(self.sess, "prefetch", None), None
+        if ahead is not None:   # `V1_LIVE_WARMSTART`: sent when the session was created
+            try:
+                sent_ahead = await ahead
+                if sent_ahead is not None:
+                    got, self.warm_ms["stored_voice_ahead"] = (sent_ahead[0], sent_ahead[1]), sent_ahead[2]
+            except Exception as e:  # noqa: BLE001 - sent again below, as without the prefetch
+                log.info("live stored voice: the prefetch did not finish (%s)", str(e)[:120])
         try:
-            path = voices_dir() / p["ref_path"]
-            text = await sample_text(p, path, row.get("src_lang") or "hi-IN", stt=self.stt)
-            await self.gpu.set_ref(vid, str(path), text, consent_at=p["consent_at"])
+            if got is None:
+                got = await send_stored_voice(self.sess.row, self.gpu, self.stt)
         except Exception as e:  # noqa: BLE001 - fail soft: the Gnani copy of the same voice, or stock
             log.warning("live stored voice: the engines did not take it (%s)", e)
             return
-        self._gpu_sid, self._gpu_score, self._gpu_stored = vid, p.get("ref_score"), True
+        if got is None:
+            return
+        self._gpu_sid, self._gpu_score, self._gpu_stored = got[0], got[1], True
         self.gpu_ready = True
         self.voice_ready_ms = self.sess.now_ms()
         self.stored_voice_ms = self.sess.now_ms() - t0
@@ -337,6 +468,8 @@ class LivePipeline:
     def feed(self, pcm: bytes) -> None:
         if self.running and self.audio.qsize() < MAX_QUEUED_AUDIO:
             self.audio.put_nowait(pcm)
+        if self._pitch is not None and not self._pitch.done:
+            self._pitch.add(pcm)
         if self._gpu_wanted():
             self._ring.append((self.sess.now_ms(), pcm))
         if self._enrol is not None and self._speaking and self.running:
@@ -561,6 +694,7 @@ class LivePipeline:
             bus.publish(ALL, {"type": "error", "message": "Could not copy the voice from this stream; "
                                                           f"using stock voices ({str(e)[:120]})"}, to_all=False)
         finally:
+            self._copy_coming = False
             wav.unlink(missing_ok=True)
 
     async def _clone_voice(self) -> VoiceSpec | None:
@@ -579,9 +713,74 @@ class LivePipeline:
         one request at a time, so several languages in the cloned voice fall further behind with every chunk
         (3 languages: 37 s behind after 55 s). So only the first `live_clone_langs` languages get the cloned voice.
         """
+        if self._en_mode is not None and lang == EN:
+            # `V1_EN_SINGLE_VOICE`: never chosen line by line. The copy, once the session has it and while it
+            # answers (the ladder may step down to the stock voice and back); else the one stock voice.
+            if self._en_mode == "copy" and self.voice is not None and self._en_copy_up():
+                return self.voice
+            return self._stock(lang)
         if self.voice and lang in self.clone_langs and lag_ms <= self.s.live_clone_max_lag_ms:
             return self.voice
-        return {"kind": "stock", "voice": VOICE_BY_LANG.get(lang, VOICE_BY_LANG["hi-IN"])}
+        return self._stock(lang)
+
+    def _en_copy_up(self) -> bool:
+        """With the ladder: the hosted copy is asked while it answers, and now and then while it does not."""
+        return self._ladder is None or not self._ladder.down("copied") or self._ladder.may_try("copied")
+
+    def _stock(self, lang: str) -> VoiceSpec:
+        """The stock voice of a language. With `V1_LIVE_WARMSTART`: the one nearest to the speaker's pitch,
+        chosen at the language's first stock line and kept for the session."""
+        if self._pitch is None:
+            return {"kind": "stock", "voice": VOICE_BY_LANG.get(lang, VOICE_BY_LANG["hi-IN"])}
+        pick = self._stock_pick.get(lang)
+        if pick is None:
+            f0 = self._pitch.median_hz()
+            pick = self._stock_pick[lang] = {**warm.pick_stock(lang, self._pitch.gender()),
+                                             "f0_hz": round(f0) if f0 else None, "t_ms": self.sess.now_ms()}
+            if self._trace:
+                trace.event("live_stock_voice", session=self.sess.id, lang=lang, **pick)
+        return {"kind": "stock", "voice": pick["voice"]}
+
+    def _stock_failed(self, lang: str) -> None:
+        """A matched voice that made nothing (a name the service does not know): the language's usual voice from
+        now on."""
+        pick = self._stock_pick.get(lang)
+        usual = VOICE_BY_LANG.get(lang, VOICE_BY_LANG["hi-IN"])
+        if pick is not None and pick["voice"] != usual:
+            log.warning("live %s: stock voice %s made nothing, back to %s", lang, pick["voice"], usual)
+            pick.update(voice=usual, matched=False, note=f"{pick['voice']} did not answer")
+
+    def _awaiting_copy(self, lang: str) -> bool:
+        """A copied voice is on its way for this language and not there yet (the opening of a session)."""
+        if self._gpu_planned(lang):
+            return not self.gpu_ready
+        return self._copy_coming and (lang in self.clone_langs or (self._en_mode == "copy" and lang == EN))
+
+    def _soften(self, lang: str, pcm: bytes, sr: int, copied: bool, timings: dict[str, Any]) -> bytes:
+        """`V1_LIVE_WARMSTART`: the change from the opening's stock voice to the copied one, softened. Lines are
+        separate utterances, so nothing overlaps: every stock line of the opening ends in a short fade (any of
+        them may be the last), the first copied line begins with one, and the first copied lines are brought
+        part of the way to the level the stock voice spoke at."""
+        if not copied:
+            if not self._awaiting_copy(lang):
+                return pcm
+            lv = warm.level(pcm)
+            if lv:
+                prev = self._stock_level.get(lang)
+                self._stock_level[lang] = lv if not prev else 0.5 * prev + 0.5 * lv
+            self._opening[lang] = self._opening.get(lang, 0) + 1
+            timings[f"open:{lang}"] = 1
+            return warm.fade(pcm, sr, self.s.v1_warm_fade_ms, out=True)
+        n, lines = self._handover.get(lang, 0), max(0, self.s.v1_warm_level_lines)
+        if lang not in self._stock_level or n >= max(1, lines):
+            return pcm
+        self._handover[lang] = n + 1
+        timings[f"handover:{lang}"] = n + 1
+        if n < lines:
+            pcm = warm.toward(pcm, warm.level(pcm), self._stock_level[lang], 1 - (n + 1) / (lines + 1))
+        if n == 0:
+            pcm = warm.fade(pcm, sr, self.s.v1_warm_fade_ms, out=False)
+        return pcm
 
     # ---------- STT ----------
     async def _frames(self):  # type: ignore[no-untyped-def]
@@ -865,6 +1064,16 @@ class LivePipeline:
             if self._gpu_planned(lang) and not self.gpu_ready and self.sync_delay():
                 due = item[0].t_speech_ms + self.sync_delay() - GPU_VOICE_LEAD_MS
                 while self.running and not self.gpu_ready and self._gpu_wanted() and self.sess.now_ms() < due:
+                    if self._warm and not self._gpu_busy:
+                        # `V1_LIVE_WARMSTART`: no sample is on its way to the engines, so nothing says the voice is
+                        # near (measured 25 Nov 2026 with the wait: 0 of 27 lines of a session's first three
+                        # phrases got the copied voice by waiting). The matched stock voice speaks now.
+                        break
+                    await asyncio.sleep(0.1)
+            if self._en_mode == "copy" and lang == EN and self.voice is None and self._copy_coming and self.sync_delay():
+                # `V1_EN_SINGLE_VOICE`: the same for the hosted copy of English, which takes longer to make.
+                due = item[0].t_speech_ms + self.sync_delay() - self.s.v1_en_copy_lead_ms
+                while self.running and self.voice is None and self._copy_coming and self.sess.now_ms() < due:
                     await asyncio.sleep(0.1)
             # Lines for our GPU engine do not wait behind Gnani's one-at-a-time turn.
             turn = self._gpu_turn if self._gpu_speaks(lang) else self._voice_turn
@@ -1035,7 +1244,7 @@ class LivePipeline:
                     held = held[-keep_tail:]
 
         async def stream() -> None:
-            nonlocal held, spoke_at, gpu_spoke
+            nonlocal held, spoke_at, gpu_spoke, lead, carry
             if self._gpu_speaks(lang):
                 try:
                     # The engine can speak faster by itself, which sounds better than squeezing the audio afterwards.
@@ -1091,7 +1300,24 @@ class LivePipeline:
                     log.warning("live gpu voice failed (%d): %s", self._gpu_fail, e)
                     if self._trace:
                         timings[f"tts_fb:{lang}"] = 1
-            await hosted(voice)
+            if self._en_mode is None or lang != EN:
+                await hosted(voice)
+                return
+            # `V1_EN_SINGLE_VOICE`: a line the hosted voice refused before any sound (seen 25 Nov 2026: one stock
+            # line in three answered "technical difficulties", HTTP 502, within 0.2 s) is asked once more in the
+            # same voice, instead of being left out. The streamed call has no retry of its own.
+            try:
+                await hosted(voice)
+            except ProviderError as e:
+                if sent or held:
+                    raise
+                self.en_retries[0] += 1
+                timings[f"tts_retry:{lang}"] = 1
+                log.info("live %s: the hosted voice refused a line (%s), asked once more", lang, str(e)[:80])
+                lead, carry = True, b""
+                await asyncio.sleep(0.2)
+                await hosted(voice)
+                self.en_retries[1] += 1
 
         try:
             await asyncio.wait_for(stream(), TTS_TIMEOUT_S)
@@ -1107,7 +1333,7 @@ class LivePipeline:
                 self._ladder.note("copied" if voice["kind"] == "clone" else "stock", made)
                 if not made and voice["kind"] == "clone":
                     # The hosted copy of the voice did not answer: a stock voice says this line.
-                    voice = {"kind": "stock", "voice": VOICE_BY_LANG.get(lang, VOICE_BY_LANG["hi-IN"])}
+                    voice = self._stock(lang)
                     timings[f"clone:{lang}"] = 0
                     try:
                         await asyncio.wait_for(hosted(voice), TTS_TIMEOUT_S)
@@ -1117,6 +1343,8 @@ class LivePipeline:
             said_by = 0 if gpu_spoke or voice["kind"] == "clone" else 1
             for t in [timings, *[t for _, t in rest]]:
                 t[f"rung:{lang}"] = said_by if (sent or held) else 2
+        if self._pitch is not None and not gpu_spoke and voice["kind"] == "stock" and not (sent or held):
+            self._stock_failed(lang)
         if self.s.live_trim_silence:
             held = au.trim_pcm_silence(held, start=False, end=True)
         # The pace of this voice in this language, for the next phrases' word limit.
@@ -1138,6 +1366,10 @@ class LivePipeline:
                     tempo = 1.0
             if tempo * spoke_at > 1.03:
                 timings[f"tempo:{lang}"] = round(tempo * spoke_at, 2)
+        if self._warm and held:
+            copied = gpu_spoke or voice["kind"] == "clone"
+            if not (copied and sent):   # a copied line whose start has gone out already is left as it is
+                held = self._soften(lang, held, sr, copied, timings)
         publish(held)
         if self._dense_log or self._xp is not None:
             kind = "gpu" if gpu_spoke else voice["kind"]

@@ -13,7 +13,7 @@ from app.config import LANG_NAMES, get_settings
 from app.db import get_store, now_iso
 from app.live.bus import ALL
 from app.live.chat import chat
-from app.live.pipeline import LivePipeline
+from app.live.pipeline import LivePipeline, prefetch_stored_voice
 from app.live.session import LiveSession, parse_youtube_id, sessions
 from app.shared.metrics import percentile
 
@@ -102,6 +102,7 @@ async def create_session(body: CreateSession) -> dict[str, Any]:
     terms = list(dict.fromkeys(t.strip()[:60] for t in body.glossary if t.strip()))
     if terms:
         await sessions.update(sess, glossary=terms)
+    prefetch_stored_voice(sess)   # v1.1 `V1_LIVE_WARMSTART`: a streamer's stored voice goes to the engines now; nothing with the flag off
     return {"session_id": sess.id, "ingest_token": token, **sess.public()}
 
 
@@ -180,7 +181,8 @@ async def session_metrics(sid: str) -> dict[str, Any]:
             "n": len(all_ms), "heard_p50_ms": percentile(heard, 50), "heard_p95_ms": percentile(heard, 95),
             "per_lang": per_lang, **(s.pipeline.sync_stats() if s.pipeline else {}),
             **(s.pipeline.degrade_stats() if s.pipeline else {}),
-            **(s.pipeline.dense_stats() if s.pipeline else {})}
+            **(s.pipeline.dense_stats() if s.pipeline else {}),
+            **(s.pipeline.warm_stats() if s.pipeline else {})}
 
 
 # ---------- WebSockets ----------

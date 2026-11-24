@@ -183,6 +183,8 @@ class Settings(BaseSettings):
     v1_live_budget: bool = False        # v1.1: the translator gets the phrase's slot as words and letters; an answer over it is shortened once
     v1_live_ratectrl: bool = False      # v1.1: a PI controller on the dub's backlog scales that budget; dense mode over 70% speaking share
     v1_live_native_speed: bool = False  # v1.1: our voice engine is asked to speak a long line faster itself (pace floor), the rest by tempo
+    v1_live_warmstart: bool = False     # v1.1: a session's start: every language and engine warmed, a stock voice matched to the speaker's pitch until the copied voice is ready, a softened change
+    v1_en_single_voice: bool = False    # v1.1: English in a GPU-engine session is spoken in one voice for the whole session (V1_EN_VOICE)
     v1_log_dir: str = ""                # empty = logs/ at the top of the repository
     v1_store: str = "json"              # json (as v0) | postgres
     postgres_dsn: SecretStr = SecretStr("")
@@ -231,6 +233,11 @@ class Settings(BaseSettings):
     v1_dense_merge_under_words: int = 3     # dense mode: a line shorter than this joins the next one
     v1_native_max: float = 1.2              # native speed: the engine is asked for at most this much faster speech
     v1_native_floor_ms: int = 320           # ... and never for speech under this many ms a word
+    # v1.1 session start and the one English voice (app/v1/warm.py)
+    v1_warm_fade_ms: int = 150              # warm start: fade at the end of the last stock lines and the start of the first copied one
+    v1_warm_level_lines: int = 2            # ... and this many copied lines are brought towards the stock voice's level
+    v1_en_voice: str = "auto"               # auto | copy | stock. auto = the measured choice, today stock (the copy was 13 points worse on time)
+    v1_en_copy_lead_ms: int = 3500          # copy: a line waits for a copy that is still being made until this long before it is due
     # Live phrase sizes with V1_PHRASE_DYNAMIC.
     v1_first_phrase_min_words: int = 4
     v1_first_phrase_max_words: int = 6

@@ -340,3 +340,59 @@ Work that was deferred because it needs the GPU VM, a forbidden command, or a de
 - **Verify:** `data-v1\eval\ws1\<name>\summary.md` has one column per setting; `speaking share` in it says how
   dense the recording really is.
 - **Rollback:** nothing to undo; stop the comparison backends.
+
+## 20. The English voice, and what the session does when the stock voice fails, v1.1 WS2
+
+- **What:** two decisions. (a) `V1_EN_VOICE` for `V1_EN_SINGLE_VOICE`: `auto` takes the one stock voice, because
+  every line in the hosted copy was 13 points worse on time on the dense reel (`PROGRESS.md`, v1.1 WS2); `copy`
+  keeps your own voice in English at that cost, with one change of voice after the opening when the voice is
+  learned from the stream. (b) Whether a session in the stock voice should move once to the copy, and stay there,
+  when the stock voice stops answering. It does not today: on 25 Nov the hosted stock voice refused 59% of its
+  lines and `auto` left 42% of the English lines without audio, while the copy answered all of its lines.
+- **Why deferred:** (a) is a matter of which you would rather hear; nobody has listened. (b) changes a voice in
+  mid-session, which is what the flag exists to stop; it needs your yes.
+- **Commands (laptop only, no VM; costs hosted calls for the minutes spoken):**
+  ```powershell
+  powershell -File scripts\v1\ab-server.ps1 -Port 8112 -Name en-copy  -Flags "V1_LIVE_WARMSTART=true,V1_EN_SINGLE_VOICE=true,V1_EN_VOICE=copy"
+  powershell -File scripts\v1\ab-server.ps1 -Port 8113 -Name en-stock -Flags "V1_LIVE_WARMSTART=true,V1_EN_SINGLE_VOICE=true,V1_EN_VOICE=stock"
+  cd backend
+  .venv\Scripts\python.exe -m eval.live_replay ..\data-v1\eval\reel25.mp4 --out ..\data-v1\eval\ws2\hear `
+      --target copy=http://127.0.0.1:8112 --target stock=http://127.0.0.1:8113 --runs 1 --loops 8 --langs en-IN,pa-IN --keep-audio
+  ```
+  `--keep-audio` writes one WAV per dubbed line into `data-v1\eval\ws2\hear\runs\<setting>_r1\`; play the `en-IN_*.wav`
+  files in order. To live with one of them: `V1_EN_SINGLE_VOICE=true` and `V1_EN_VOICE=copy` or `stock` in v1's
+  `backend\.env`, restart the v1 backend.
+- **GPU memory:** none new.
+- **Verify:** `GET /api/live/sessions/<id>/metrics` has `"en_voice": "copy"` or `"stock"`;
+  `python -m eval.live_first ..\data-v1\eval\ws2\hear --data copy=..\data-v1\ab\en-copy --data stock=..\data-v1\ab\en-stock --lang en-IN`
+  shows "changes of voice" 1 and 0.
+- **Rollback:** `V1_EN_SINGLE_VOICE=false` and restart; English is chosen line by line again.
+
+## 21. What the session-start measurement could not cover, v1.1 WS2
+
+- **What:** (a) Streamer Mode with a recorded voice: `V1_LIVE_WARMSTART` sends the stored voice to the engines when
+  the session is created and speaks one short line per language on every engine process; tested with a fake
+  engine only. (b) A male speaker: the eight male stock voices answer on the hosted service, but no session with
+  a male voice was run, and nobody has heard whether the matched voice is the better one. (c) The English voices
+  on a night the hosted stock voice is healthy: the stock voice's timing in `PROGRESS.md` is from a night it
+  refused 59% of its lines.
+- **Why deferred:** (a) a comparison backend has an empty store, and a voice has to be recorded in v1 with consent
+  (v0's consent records are not copied; `scripts/v1/copy-voice-samples.sh` says why); your recorded voice was
+  not used for a test you did not ask for. (b) needs a recording of a male speaker that is yours to dub. (c) needs
+  another night and about 15 minutes of hosted calls.
+- **Commands (laptop only, no VM):** record the voice on `http://localhost:3100/streamer` (v1), note the
+  streamer's id, then with `V1_LIVE_WARMSTART` off and on in v1's `backend\.env` (restart the v1 backend between):
+  ```powershell
+  cd backend
+  .venv\Scripts\python.exe -m eval.live_replay ..\data-v1\eval\reel25.mp4 --out ..\data-v1\eval\ws2\streamer-off `
+      --target v1=http://127.0.0.1:8110 --busy http://127.0.0.1:8010 --runs 5 --loops 2 --langs pa-IN,ta-IN --streamer <id>
+  .venv\Scripts\python.exe -m eval.live_first ..\data-v1\eval\ws2\streamer-off --data v1=..\data-v1
+  ```
+  (the same again into `streamer-on` with the flag on). For (b): the same two commands as in `PROGRESS.md`
+  (v1.1 WS2, "test by hand") on a recording of a male speaker; `warm.speaker` in the session's `/metrics` should
+  say `male` and `warm.stock_voice` name Zayan (Punjabi), Dhruva (Bengali), Pranav (English); Tamil and Telugu
+  stay female and say so. For (c): the three-backend run of `PROGRESS.md` once more.
+- **GPU memory:** none new.
+- **Verify:** `first.md` in each folder: first audio p50 / p95 of the first 10 phrases, lines in a stock voice
+  (with a recorded voice: 0 expected in both).
+- **Rollback:** nothing to undo; `V1_LIVE_WARMSTART=false`.
