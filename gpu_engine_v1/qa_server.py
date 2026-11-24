@@ -6,6 +6,8 @@
       similarity  cosine similarity of speaker embeddings, dubbed line against the speaker's sample (`ref`)
   POST /diarize  multipart: audio  -> {segments: [{start, end, speaker}]}
   GET  /health
+  GET  /gpu      what `nvidia-smi` says on this machine (memory, use, temperature, power, memory per process);
+                 read-only, loads nothing. The status page shows it as the GPU: from the laptop the card cannot be seen.
 
 Models and licences (checked 23 Nov 2026):
   hear-back   Whisper large-v3-turbo through faster-whisper (MIT; 809 M parameters). The live Whisper on 9030 is a
@@ -32,7 +34,7 @@ from typing import Any
 import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 
-from common import STUB, env, read_mono
+from common import STUB, env, gpu_summary, read_mono
 
 DEVICE = env("QA_DEVICE", "cpu")
 STT_MODEL = env("QA_STT_MODEL", "large-v3-turbo")
@@ -152,6 +154,11 @@ async def diarize(audio: UploadFile = File(...)) -> dict[str, Any]:
     finally:
         Path(path).unlink(missing_ok=True)
     return {"segments": segs}
+
+
+@app.get("/gpu")
+async def gpu() -> dict[str, Any]:
+    return await asyncio.to_thread(gpu_summary)
 
 
 @app.get("/health")

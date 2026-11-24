@@ -222,3 +222,97 @@ Work that was deferred because it needs the GPU VM, a forbidden command, or a de
 - **Studio HQ's translation order** when the big model is missing: the routing file says our small model first,
   then the hosted one (`studio_hq.translate`). The hosted model may translate better than the small one; swap the
   two names in `backend/config/routing.yaml` if a comparison says so.
+
+## 16. Tunnel watchdog (`scripts\v1\tunnel-watchdog.ps1`), v1.1
+
+- **What:** a second window beside v0's `gpu_engine\tunnel.ps1`. Every 10 s it looks at the tunnel ports
+  (9001-9003, 9010, 9020, 9030, 9040) and tells four cases apart: the port answers; nothing listens (no ssh);
+  ssh listens and closes at once (the server on the GPU machine is down, the tunnel is fine); ssh listens and
+  nothing comes back (the link under ssh is dead). It also notes when this PC was asleep. Log:
+  `data-v1\tunnel-watchdog.log`.
+- **Why deferred:** it was written and not run: it may start `ssh` and, with one switch, end an `ssh.exe`; both are
+  the user's to do. Its syntax was checked with PowerShell's parser, and a copy of its port check was tried on
+  four local test ports (answers; hang, found after 3.0 s; closed; refused, found after 2.0 s). Whether a real
+  ssh shows "closed" for a dead server and "hang" for a dead link was reasoned, not seen.
+- **The choice about "restart only the tunnel":** v0's `tunnel.ps1` already restarts each ssh within 2 s of its
+  exit, and ssh exits about 10 s after the link dies (`ServerAliveInterval=5`, `ServerAliveCountMax=2`). A second
+  script starting ssh for the same ports would fight it. So:
+  - while a `tunnel.ps1` window runs, the watchdog starts nothing and ends nothing; it reports;
+  - when no `tunnel.ps1` window runs and a port has had no ssh for 20 s, it dials that group itself, with the
+    same ssh options as `tunnel.ps1` (needs `-Key` and `-Target`);
+  - a stuck ssh that it did not start is named in the log and left alone. Only with `-RestartStuck` does it end
+    that one `ssh.exe`, after checking that this process is the one listening on the hanging port and that its
+    command line forwards that port; `tunnel.ps1` then reconnects it. It never ends a PowerShell window or
+    another ssh.
+- **Run** (a new PowerShell window, in the v1 checkout):
+  ```powershell
+  # 1. report only: safe next to everything, changes nothing
+  powershell -ExecutionPolicy Bypass -File scripts\v1\tunnel-watchdog.ps1
+  # 2. also take over when the tunnel window is closed (the same key and target as tunnel.ps1)
+  powershell -ExecutionPolicy Bypass -File scripts\v1\tunnel-watchdog.ps1 -Key C:\path\to\key -Target user@gpu-host
+  # 3. also end a stuck ssh (read a day of the log from 1 or 2 first)
+  powershell -ExecutionPolicy Bypass -File scripts\v1\tunnel-watchdog.ps1 -Key C:\path\to\key -Target user@gpu-host -RestartStuck
+  ```
+- **GPU memory:** none. **Verify:** the window prints `WATCHDOG started (...)` and then nothing while all ports
+  answer; `Get-Content data-v1\tunnel-watchdog.log -Tail 20`. **Rollback:** Ctrl+C in its window (an ssh it
+  started ends with it; `tunnel.ps1`'s own are untouched).
+
+## 17. Stop the laptop sleeping on AC power, v1.1
+
+- **What was found (read-only, Windows event log against the stream watcher's log, 24 Nov 2026):** all three
+  "link stalls" of that day were this PC in Modern Standby, not the tunnel. The watcher's own lines already said
+  so: the hosted services were among the 8 that did not answer.
+
+  | Watcher: nothing answers | Windows: standby |
+  |---|---|
+  | 15:05:53 to 15:07:46 (2 min) | 15:05:18 to 15:07:04 |
+  | 16:01:05 to 19:01:23 (3 h) | 16:01:00, sleep at 16:43:06, back at 19:00:51 |
+  | 19:17:07 to 20:01:54 (44 min) | 19:17:03 to 20:01:13 |
+
+  `powercfg /a` says this PC's standby is "S0 Low Power Idle, Network Disconnected": in standby the network is
+  off, so the tunnel, the hosted services and the backend itself all stop. No breaker and no watchdog can work
+  through that. Settings now (read with `powercfg /qh`): closing the lid on AC = Sleep; power button = Sleep;
+  sleep after 180 min idle on AC; hibernate on AC = never.
+- **Why deferred:** these change the user's Windows power settings.
+- **Commands** (PowerShell or cmd; no admin needed for the current power plan):
+  ```powershell
+  powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0     # closing the lid on AC: do nothing
+  powercfg /change standby-timeout-ac 0                                # never sleep when idle on AC
+  powercfg /change hibernate-timeout-ac 0                              # never hibernate on AC (already so)
+  powercfg /setactive SCHEME_CURRENT                                   # apply
+  ```
+  The power button and the Start menu's Sleep still put it to sleep: do not use them while a stream is live.
+  On battery nothing changes (it sleeps after 3 min idle, as now): keep the charger in during a stream.
+- **Verify:**
+  ```powershell
+  powercfg /qh SCHEME_CURRENT SUB_BUTTONS LIDACTION     # Current AC Power Setting Index: 0x00000000
+  powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE  # Current AC Power Setting Index: 0x00000000
+  # after a few hours: no new "entering Modern Standby" lines while on the charger
+  Get-WinEvent -FilterHashtable @{LogName='System'; Id=506,507,42} -MaxEvents 10 | Format-Table TimeCreated, Id, Message -Wrap
+  ```
+- **GPU memory:** none. **Rollback** (the values read on 24 Nov 2026):
+  ```powershell
+  powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 1
+  powercfg /change standby-timeout-ac 180
+  powercfg /setactive SCHEME_CURRENT
+  ```
+
+## 18. The GPU's real numbers on the status page (`GET /gpu` on the VM), v1.1
+
+- **What:** the status page used to read the card of the machine the backend runs on, which on the laptop is its
+  own 6 GB card, and called it the GPU. It now says "A100 (VM): unknown" until a server on the GPU machine reports
+  the card. `gpu_engine_v1/qa_server.py` has a new read-only `GET /gpu` (what `nvidia-smi` says there: memory used,
+  free and total, how busy, temperature, power, memory per process). It loads nothing.
+- **Why deferred:** it needs the QA server running on the VM (item 6: CPU only) and, from the laptop, one more
+  forwarded port (9045), which v0's `tunnel.ps1` does not carry and which was not ours to add.
+- **Commands:** item 6 on the VM, then check there: `curl -s http://127.0.0.1:9045/gpu`. From the laptop, in a
+  window of its own (the same key and target as the tunnel):
+  ```powershell
+  ssh -i C:\path\to\key -N -o IdentitiesOnly=yes -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -o ConnectTimeout=8 -L 127.0.0.1:9045:127.0.0.1:9045 user@gpu-host
+  ```
+  and in v1's `backend/.env`: `V1_GPU_STATS_URL=http://127.0.0.1:9045/gpu` (this feeds the status page only;
+  setting `V1_QA_URL` instead also switches the QA server's scoring in). Restart the v1 backend.
+- **GPU memory:** none (the QA server runs on CPU; `/gpu` only reads `nvidia-smi`).
+- **Verify:** `/health` shows the A100's free memory of 40 GB instead of "unknown";
+  `curl -s http://127.0.0.1:8110/api/v1/health` has `"gpu": {"total_gb": 40.0, ...}`.
+- **Rollback:** empty `V1_GPU_STATS_URL`; the page says "unknown" again.

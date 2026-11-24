@@ -42,6 +42,7 @@ class GpuVoice:
         self.ref_text_fix: Any = None
         self.last_synth_ms: float | None = None   # the engine's own time for the last line
         self.last_latency_s: float | None = None  # ... and the whole round trip
+        self.breakers: list[Any] | None = None    # v1 (`V1_BREAKER`): one per engine; None = calls go out as always
 
     @property
     def enabled(self) -> bool:
@@ -72,7 +73,12 @@ class GpuVoice:
             async def send() -> httpx.Response:
                 return await self._client.post(self.urls[i] + "/ref", data={"session_id": session_id, "ref_text": ref_text},
                                                files={"audio": ("ref.wav", audio, "audio/wav")}, timeout=20.0)
-            return dict((await request_with_retry(send, what="gpu_voice.ref")).json())
+            if self.breakers is None:
+                return dict((await request_with_retry(send, what="gpu_voice.ref")).json())
+            from app.v1 import breaker
+            limit = self.s.v1_breaker_voice_timeout_s * breaker.REF_TIMEOUT_FACTOR
+            return dict((await breaker.call(self.breakers[i], lambda: request_with_retry(send, what="gpu_voice.ref"),
+                                            limit)).json())
 
         res = await asyncio.gather(*(one(i) for i in range(len(self.urls))), return_exceptions=True)
         ok = {i for i, r in enumerate(res) if not isinstance(r, BaseException)}
@@ -84,6 +90,11 @@ class GpuVoice:
     async def synth(self, session_id: str, text: str, lang: str, speed: float | None = None) -> tuple[bytes, int]:
         """One line in the session's copied voice -> (PCM16 mono, sample rate). `speed` > 1 = faster speech."""
         ready = self._has_ref.get(session_id) or set(range(len(self.urls)))
+        if self.breakers is not None:   # an engine whose circuit is open is not asked; none left = fail at once
+            ready = {k for k in ready if not self.breakers[k].blocked()}
+            if not ready:
+                from app.v1.breaker import CircuitOpen
+                raise CircuitOpen("gpu_voice.tts: every engine's circuit is open", retryable=True)
         i = min(ready, key=lambda k: self._busy[k])
         body = {"session_id": session_id, "text": text, "lang": lang, "fmt": self.s.gpu_voice_format,
                 "speed": round(speed or self.s.gpu_voice_speed, 3)}
@@ -97,7 +108,12 @@ class GpuVoice:
         self._busy[i] += 1
         t0 = time.perf_counter()
         try:
-            resp = await request_with_retry(send, what="gpu_voice.tts", retries=0)
+            if self.breakers is None:
+                resp = await request_with_retry(send, what="gpu_voice.tts", retries=0)
+            else:
+                from app.v1 import breaker
+                resp = await breaker.call(self.breakers[i], lambda: request_with_retry(send, what="gpu_voice.tts", retries=0),
+                                          self.s.v1_breaker_voice_timeout_s)
         finally:
             self._busy[i] -= 1
         self.last_latency_s = time.perf_counter() - t0

@@ -7,6 +7,13 @@ endpoints and, when a session ends, reads that backend's store file to sum the s
 
 Writes <out>/<name>_<session>.csv (a row every 20 s), <out>/<name>_<session>.summary.txt (at the end) and
 <out>/events.log (one line per thing worth knowing; the same lines go to stdout).
+
+Lines about the link to the GPU machine (from a backend with V1_BREAKER on, asked every 20 s at
+/api/v1/circuits; a backend without that endpoint is simply not asked again):
+  CIRCUIT OPEN <endpoint>: <why>          the endpoint is not called for 30 s; the next provider answers
+  CIRCUIT CLOSED <endpoint> after <n> s   it answers again and is in use
+  CIRCUIT LINK STALL / LINK BACK          every GPU endpoint failed in the same look / one answers again
+  RUNG [backend session] a -> b (why)     a live session stepped down or up (V1_LIVE_DEGRADE)
 """
 from __future__ import annotations
 
@@ -14,6 +21,7 @@ import argparse
 import csv
 import json
 import time
+import urllib.error
 import urllib.request
 from collections import Counter
 from pathlib import Path
@@ -92,6 +100,8 @@ class Watch:
         self.bad_engines: set[str] = set()
         self.both = False
         self.tick = 0
+        self.circuit_url = health_url.rsplit("/health", 1)[0] + "/circuits" if health_url.endswith("/health") else ""
+        self.circuit_seen: int | None = None      # id of the last circuit event printed; None = not asked yet
         out.mkdir(parents=True, exist_ok=True)
 
     def say(self, text: str) -> None:
@@ -133,6 +143,8 @@ class Watch:
         st["polls"] += 1
         if st["polls"] % SUMMARY_EVERY == 0:
             self.say(f"SUMMARY {tag} {self.brief(m)}")
+        if m.get("rung") != pm.get("rung"):
+            self.say(f"RUNG {tag} {pm.get('rung')} -> {m.get('rung')} ({m.get('rung_why') or 'back to normal'})")
         if m.get("sync_delay_ms") != pm.get("sync_delay_ms"):
             self.say(f"HOLD {pm.get('sync_delay_ms')}->{m.get('sync_delay_ms')} {tag} {self.brief(m)}")
         for lang, v in last20.items():
@@ -180,6 +192,43 @@ class Watch:
                 self.say(f"ENGINE BACK {name}")
         self.bad_engines = bad
 
+    def circuits(self) -> None:
+        """Opens and closes of the backend's circuit breakers since the last look."""
+        if not self.circuit_url:
+            return
+        try:
+            got = get(f"{self.circuit_url}?after={self.circuit_seen or 0}", timeout=5)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:           # a backend from before the breakers: nothing to ask
+                self.circuit_url = ""
+            return
+        except Exception:  # noqa: BLE001 - the backend is away; BACKEND DOWN says so
+            return
+        if not isinstance(got, dict) or not got.get("on"):
+            return
+        events = got.get("events") or []
+        if self.circuit_seen is None:   # first look: say what is open now, not the history
+            for c in got.get("circuits") or []:
+                if c.get("state") != "closed":
+                    self.say(f"CIRCUIT OPEN {c['name']}: {c.get('reason', '')} (already, for {c.get('down_s')} s)")
+            self.circuit_seen = max([e["id"] for e in events], default=0)
+            return
+        if int(got.get("last") or 0) < self.circuit_seen:
+            self.circuit_seen = 0       # the backend restarted and its ids began again: ask from the beginning
+            return
+        for e in events:
+            name, kind = e.get("name"), e.get("event")
+            if kind == "open":
+                self.say(f"CIRCUIT OPEN {name}: {e.get('reason', '')}")
+            elif kind == "close":
+                self.say(f"CIRCUIT CLOSED {name} after {e.get('down_s')} s ({e.get('retries', 0)} retries failed first)")
+            elif kind == "link_stall":
+                self.say(f"CIRCUIT LINK STALL all {e.get('services')} GPU endpoints failed at once ({e.get('reason', '')}); "
+                         "the hosted services answer until the link is back")
+            elif kind == "link_back":
+                self.say(f"CIRCUIT LINK BACK after {e.get('down_s')} s: {e.get('answering')} of {e.get('services')} GPU endpoints answer")
+            self.circuit_seen = max(self.circuit_seen, int(e.get("id", 0)))
+
     def run(self) -> None:
         self.say("WATCH started: " + ", ".join(f"{n}={b}" for n, b, _ in self.backends))
         while True:
@@ -210,6 +259,7 @@ class Watch:
             self.both = total > 1
             if self.health_url and self.tick % 3 == 0:        # once a minute
                 self.engines()
+            self.circuits()
             self.tick += 1
             time.sleep(EVERY_S)
 

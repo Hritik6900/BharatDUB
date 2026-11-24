@@ -42,7 +42,10 @@ for c in h["checks"]:
 on = [k for k, v in h["flags"].items() if v is True]
 print("flags on: " + (", ".join(on) if on else "none (behaves as v0)") + "; store: " + str(h["flags"].get("V1_STORE")))
 g = h.get("gpu")
-print("GPU on the backend machine: " + ("%s, %.1f GB free of %.1f" % (g["name"], g["free_gb"], g["total_gb"]) if g else "none (the backend is not on the GPU machine)"))
+print("GPU %s: " % h.get("gpu_name", "A100 (VM)") + ("%.1f GB free of %.1f" % (g["free_gb"], g["total_gb"]) if g else "unknown (no /gpu endpoint on the VM yet)"))
+for c in h.get("circuits") or []:
+    if c["state"] != "closed":
+        print("warn  circuit %s is %s for %s s (%s)" % (c["name"], c["state"], c.get("down_s"), c.get("reason", "")))
 sys.exit(bad)
 ' || bad=1
 fi
@@ -51,7 +54,7 @@ if command -v nvidia-smi >/dev/null 2>&1; then
   free="$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | head -1 | awk '{printf "%d", $1/1024}')"
   card="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)"
   # This is the card of the machine the check runs on. On the VM that is the model servers' card; on a laptop it is not.
-  if [ "${free:-0}" -ge "$MIN_FREE_GB" ]; then ok "GPU of this machine ($card): $free GB free"; else warn "GPU of this machine ($card): ${free:-?} GB free (under $MIN_FREE_GB GB)"; fi
+  if [ "${free:-0}" -ge "$MIN_FREE_GB" ]; then ok "card of the machine this check runs on ($card; the A100 only when run on the VM): $free GB free"; else warn "card of the machine this check runs on ($card; the A100 only when run on the VM): ${free:-?} GB free (under $MIN_FREE_GB GB)"; fi
 fi
 if [ "$(code http://127.0.0.1:9044/v1/models)" = "200" ]; then
   warn "GPU mode: HQ window (the big translation model is loaded; Live translates through the hosted model). Run: scripts/v1/gpu-mode.sh normal --run"

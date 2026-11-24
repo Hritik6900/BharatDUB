@@ -1,6 +1,10 @@
 """`GET /api/v1/health`: one answer for the status page. Green or red per v1 service and per shared GPU server,
-plus the GPU's memory when it can be read. Every check runs at the same time with a short timeout, so one slow
-server does not hold the page."""
+plus the GPU's memory when the GPU machine reports it. Every check runs at the same time with a short timeout, so
+one slow server does not hold the page.
+
+The GPU is an A100 on a VM. `gpu` in the answer is that card or None ("unknown"): it comes from a `/gpu` endpoint
+on the VM (`V1_GPU_STATS_URL`, else the QA server's). The card of the machine this backend runs on is a different
+thing (a laptop's own 6 GB card was once shown as "the GPU"); it is given as `local_card` and never as `gpu`."""
 import asyncio
 import shutil
 import time
@@ -56,9 +60,38 @@ def servers(s: Settings) -> list[tuple[str, str, str, str]]:
     return out
 
 
-async def gpu_memory() -> dict[str, Any] | None:
-    """Used, free and total GPU memory in GB from `nvidia-smi` (read-only), when this machine has a GPU.
-    The card's name is given with it: on a laptop this is the laptop's own card, not the model servers' one."""
+GPU_NAME = "A100 (VM)"
+
+
+def gpu_stats_url(s: Settings) -> str:
+    if s.v1_gpu_stats_url:
+        return s.v1_gpu_stats_url
+    return s.v1_qa_url.rstrip("/") + "/gpu" if s.v1_qa_url else ""
+
+
+async def vm_gpu(client: httpx.AsyncClient, s: Settings) -> dict[str, Any] | None:
+    """The model servers' card as the GPU machine itself reports it (`nvidia-smi` there), or None = unknown."""
+    url = gpu_stats_url(s)
+    if not url:
+        return None
+    try:
+        r = await client.get(url, timeout=TIMEOUT_S)
+        body = r.json() if r.status_code == 200 else {}
+        card = (body.get("gpus") or [None])[0] if isinstance(body, dict) else None
+        if not isinstance(card, dict) or body.get("stub"):
+            return None
+        out = {k: card[k] for k in ("name", "used_gb", "free_gb", "total_gb", "util_pct", "temp_c", "power_w")
+               if card.get(k) is not None}
+        if not all(isinstance(out.get(k), (int, float)) for k in ("used_gb", "free_gb", "total_gb")):
+            return None
+        return {**out, "processes": body.get("processes") or [], "source": url}
+    except (httpx.HTTPError, ValueError, TypeError):
+        return None
+
+
+async def local_card() -> dict[str, Any] | None:
+    """The card of the machine THIS BACKEND runs on, from `nvidia-smi` (read-only). On the laptop that is the
+    laptop's own card, which runs none of the models: it is reported as `local_card`, never as the GPU."""
     exe = shutil.which("nvidia-smi")
     if not exe:
         return None
@@ -127,17 +160,36 @@ async def report() -> dict[str, Any]:
             jobs.append(_redis_ok(s.redis_url))
         jobs.append(_hosted(client, "hosted speech and voice", s.gnani_base, bool(s.gnani_api_key.get_secret_value())))
         jobs.append(_hosted(client, "hosted translation", s.llm_base_url, bool(s.llm_base_url and s.llm_model)))
-        checks, gpu = await asyncio.gather(asyncio.gather(*jobs), gpu_memory())
+        checks, gpu, card = await asyncio.gather(asyncio.gather(*jobs), vm_gpu(client, s), local_card())
     reported = [c["info"]["gpu_gb"] for c in checks if isinstance(c.get("info", {}).get("gpu_gb"), (int, float))]
     needed = [c for c in checks if c["kind"] != "hosted" or c.get("configured")]
     return {"ok": all(c["ok"] for c in needed), "version": "v1", "checks": list(checks), "flags": flags(s),
-            "gpu": gpu, "gpu_reported_gb": round(sum(reported), 2) if reported else None,
-            "mock_providers": s.mock_providers}
+            "gpu": gpu, "gpu_name": GPU_NAME, "local_card": card,
+            "gpu_reported_gb": round(sum(reported), 2) if reported else None,
+            "mock_providers": s.mock_providers, **_circuits(s)}
+
+
+def _circuits(s: Settings) -> dict[str, Any]:
+    """`V1_BREAKER`: every breaker's state and the last opens and closes. Nothing with the flag off."""
+    if not s.v1_breaker:
+        return {}
+    from app.v1 import breaker
+    return {"circuits": breaker.snapshot(), "circuit_events": breaker.events()[-20:]}
 
 
 @router.get("/api/v1/health")
 async def health() -> dict[str, Any]:
     return await report()
+
+
+@router.get("/api/v1/circuits")
+async def circuits(after: int = 0) -> dict[str, Any]:
+    """The circuit breakers of this backend: their state now and what happened after event `after` (the stream
+    watcher asks every 20 s). `on` is False with `V1_BREAKER` off."""
+    from app.v1 import breaker
+    on = get_settings().v1_breaker
+    return {"on": on, "circuits": breaker.snapshot() if on else [], "events": breaker.events(after) if on else [],
+            "last": breaker.last_id() if on else 0}
 
 
 @router.get("/api/v1/flags")

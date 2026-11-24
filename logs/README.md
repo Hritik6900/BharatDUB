@@ -57,3 +57,8 @@ are not in `api/`; their timing per phrase is in `sessions/` and `trace/`.
 | `tempo` | speed-up applied to fit (1.3 is the limit) |
 | `copied_voice`, `on_gpu` | 1 when the line was in the copied voice, and when our GPU engine made it |
 | `skipped` | `unheard` (no viewer on that language), `late` (too late to be worth saying) |
+
+With `V1_BREAKER` and `V1_LIVE_DEGRADE` on (v1.1), `streams/events.log` also has `CIRCUIT OPEN <endpoint>: <why>`,
+`CIRCUIT CLOSED <endpoint> after <n> s`, `CIRCUIT LINK STALL`, `CIRCUIT LINK BACK` and
+`RUNG [backend session] a -> b (why)`; the trace has `circuit` and `live_degrade` events, and each stored Live
+phrase has `rung:<lang>` (0 copied voice, 1 stock voice, 2 no voice, 3 not translated).

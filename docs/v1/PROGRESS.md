@@ -288,3 +288,135 @@ What the numbers say:
   against a database (item 5: its test is written and skipped).
 - **v0 after this phase:** all nine checks ok. Tests: 159 pass, 1 skipped.
 - **Test:** `scripts/v1/demo-check.sh && scripts/v1/warmup.sh`. **Roll back:** nothing to roll back.
+
+## v1.1 WS0: never die (`V1_BREAKER`, `V1_LIVE_DEGRADE`), 24 Nov 2026
+
+Why: on 24 Nov every GPU service was unreachable at once three times (2 min, 44 min, 3 h). Live has to step down
+and come back, not die; and the status page showed the laptop's own 6 GB card as "the GPU".
+
+**First, what those three stalls were** (read-only: Windows' event log against the stream watcher's log): all
+three were this laptop in Modern Standby, whose network is off ("S0 Low Power Idle, Network Disconnected").
+15:05:53-15:07:46 against standby 15:05:18-15:07:04; 16:01:05-19:01:23 against standby from 16:01:00 and sleep
+until 19:00:51; 19:17:07-20:01:54 against standby 19:17:03-20:01:13. The watcher had it in its own lines: the
+hosted services were among the 8 that did not answer. A sleeping PC also stops the backend, so nothing in this
+workstream runs during it; the cure is three `powercfg` lines (`NEEDS_APPROVAL.md` item 17). What is built here
+is for the stalls a PC that is awake does have (a dead tunnel, a stuck ssh, a server down on the GPU machine).
+
+- **Flags, and the choice:** the breaker has its own flag, `V1_BREAKER`, and the ladder its own,
+  `V1_LIVE_DEGRADE`; both default off. The breaker was not put inside `V1_ROUTER`: it is attached where a GPU
+  provider object is built, in the router and in v0's fixed table alike, so it works with the router on or off.
+  With both flags off no breaker object exists, no provider carries one, the pipeline has no ladder, and the
+  code paths are the old ones (three tests say so: providers, status answer, a Live session with a dead voice).
+- **Changed, breaker** (`backend/app/v1/breaker.py`, new): one breaker per GPU endpoint (provider + host:port).
+  A timeout, or 2 failures within 10 s, opens it for 30 s: calls fail at once with `CircuitOpen` and the fallback
+  that was always there answers (hosted translation, hosted speech-to-text, a hosted voice). Then one try. An
+  answer with a client error (HTTP 4xx) does not count against the endpoint. Hooks, each a no-op without a breaker:
+  `providers/llm_openai.py` (`_chat`: a live call gets 3 s as a whole on our model), `providers/tts_gpu.py`
+  (one breaker per engine: a dead engine is left out and the others keep speaking; 4 s a line),
+  `providers/stt_gpu.py` (file calls, the stream's connect, and a ping every 5 s so a dead link is noticed in
+  seconds). `providers/__init__.py` and `v1/router.py` attach them. Hosted providers get none.
+- **Link-stall detector** (`LinkWatch`, same file): while a Live session runs, every GPU endpoint's health is
+  asked every 5 s (2 s limit). All of them failing in one round is the link: every circuit opens at once, so no
+  phrase pays a timeout to find out. Its probe is also the half-open try (no phrase is spent on testing a dead
+  endpoint), and after a failed probe it tries again next round, so an endpoint is back in use within seconds of
+  the link returning.
+- **Ladder** (`backend/app/v1/degrade.py`, new; `live/pipeline.py`): copied voice, stock voice, captions only,
+  original sound. Two failures in a row step down, one success steps up; while no voice answers a line still
+  tries one every 10 s. New with the flag on: a line whose hosted copy of the voice fails is said in a stock
+  voice; a streamer's stored voice may hold a session's start up 8 s at most and is asked for again every 15 s
+  until the engines take it; any error from a voice (not only the two kinds caught before) is a failed line, not
+  a crashed one. The rung goes out in the `clock` message once a second (a viewer who joins later knows it), in a
+  `degrade` message on every change, in the session's metrics (`rung`, `rung_why`, `rung_changes`), in the trace,
+  and per stored phrase (`rung:<lang>`: 0 copied, 1 stock, 2 no voice, 3 not translated).
+  Voice stickiness is as before: a session's copied voice stays its voice; while its engine's circuit is open
+  the line is said by a stock voice at once instead of waiting.
+- **Viewer page** (`web/app/watch/[id]/page.tsx`, additive): a small note under the captions, "Audio returning
+  shortly. Captions continue." on the captions rung and "Dub paused. You hear the original sound; the dub returns
+  by itself." on the last one, where a viewer who is listening gets the stream's own sound at full volume until the
+  dub is back. Nothing shows when the backend sends no rung.
+- **Status page** (`v1/health.py`, `web/app/health/page.tsx`): `gpu` is now the GPU machine's own report or
+  nothing; the page says "A100 (VM): unknown" until a server on the VM reports it. The card of the machine the
+  backend runs on is given as `local_card` and is not shown as the GPU. `gpu_engine_v1/qa_server.py` has
+  `GET /gpu` (`nvidia-smi` there: memory, use, temperature, power, per process); `V1_GPU_STATS_URL` points the
+  backend at it (item 18). The page also lists the circuit breakers when the flag is on; `GET /api/v1/circuits`.
+- **Stream watcher** (`scripts/v1/stream-watch.py`): `CIRCUIT OPEN <endpoint>: <why>`, `CIRCUIT CLOSED <endpoint>
+  after <n> s`, `CIRCUIT LINK STALL`, `CIRCUIT LINK BACK` (asked every 20 s) and `RUNG [session] a -> b (why)`.
+  A backend without the endpoint (the one running now, until it is restarted) is asked once and then left.
+  **The watcher window has to be restarted to print the new lines.**
+- **Tunnel watchdog** (`scripts/v1/tunnel-watchdog.ps1`, new, NOT run; item 16): tells apart no ssh, a stuck ssh,
+  a dead server on the GPU machine and a PC that slept. v0's `tunnel.ps1` already reconnects by itself, so the
+  watchdog starts a tunnel only when no `tunnel.ps1` window runs, and ends an ssh it did not start only with
+  `-RestartStuck`.
+- **Also:** `scripts/v1/ab-server.*` force the two new flags (and `V1_API_LOG`) off like the others;
+  `demo-check.sh` prints the VM's card or "unknown" and any open circuit; tests force `V1_LLM_PREFIX_CACHE` off too.
+
+### Measured
+
+Material: the dense 24.9 s Hindi reel, six loops (about 160 s), Tamil, GPU engine, voice learned from the stream
+with consent, sync mode, comparison backends on 8111-8113 with `V1_ROUTER=true`. The GPU endpoints were reached
+through a small relay on the laptop that can stop passing bytes (connections stay open and get nothing: a stalled
+link). One voice engine (9001), translation (9020) and speech-to-text (9030) went through it. One session at a
+time; nobody was live on v0 or v1. Windows are by when a phrase was spoken.
+
+**All three GPU endpoints stalled for 50 s, from second 43 of the session:**
+
+| during the stall | flags off (1 run) | breaker + ladder on (3 runs) |
+|---|---|---|
+| phrases spoken by the speaker | 22 | 23, 24, 23 |
+| translated | 4 (18 went out in the source language) | 23, 24, 23 (all) |
+| dubbed | 4 | 23, 24, 23 (all, in a stock voice) |
+| first audio after the phrase, median | 8.2 s (of the 4) | 3.5, 3.1, 3.4 s (before the stall: 2.1, 2.2, 2.5 s) |
+| first audio, worst | 8.7 s | 7.0, 7.0, 7.7 s (the phrases caught when the stall began) |
+| translated by the hosted model instead of ours | 0 | 23, 24, 23 |
+
+With the flags off a phrase waited for our translation model until the pipeline's own 8 s limit cut the whole
+call, so the hosted model was never reached. With them on the rung went to "stock" 3.1, 4.6 and 4.8 s after the
+stall began, and every later phrase went straight to the hosted services. After the link returned: in the first
+two runs (an earlier build, where a failed retry meant another full 30 s) the copied voice was back 34.1 and
+34.5 s later, with 14 of 33 phrases still in a stock voice; in the final build (the detector probes again every
+5 s) 5.6 s later, 33 of 33 phrases in the copied voice and no translation by the hosted model. One run of the
+final build.
+
+**GPU endpoints dead from the first second** (flags on, 1 run, the earlier build): 75 of 75 phrases translated and
+dubbed (stock voice, hosted translation), first audio median 3.7 s / p95 5.8 s, the session ended only when it
+was stopped.
+
+**No hosted voice and no hosted translation reachable, then the voice engine stalled at 38 s, then everything at
+78 s, all back at 113 s** (flags on, 1 run of the final build; an earlier run of the same plan found a bug, below):
+the session went stock, captions (no hosted voice, own voice not learned yet), copied at 13.8 s, captions 4.0 s
+after the voice stalled, original 19.6 s after everything stalled (the speech-to-text stream), captions, copied
+8.5 s after everything returned. 67 phrases, a caption for each (1 in the source language), 21 phrases during the
+stalls with no audio (15 of them not sent to any voice), 23 of 24 dubbed phrases after it in the copied voice.
+The session was live throughout and ended when stopped.
+
+**Limits against healthy calls:** over the four runs with a working GPU, through the relay: 169 voice lines, the
+slowest 1.36 s (limit 4 s); 204 translation calls on our model, the slowest 1.13 s (limit 3 s). No healthy call
+came near its limit. The two limits were chosen, not tuned: on 21 Nov a real stream had lines of 5-17 s on a
+stalling link, and those would now go to the hosted services after 3-4 s.
+
+**Found by the last run and fixed:** a hosted voice whose connection drops raises an error that is neither of the
+two kinds the pipeline caught, so the line failed without the ladder hearing of it (the session stayed on
+"stock" with no audio). With the ladder on every voice error now counts; with it off the old path is untouched.
+
+**Not measured:** a real stalled tunnel (the relay stands in for it; the tunnel was not ours to touch); a stall
+longer than 50 s; two or three languages at once; Streamer Mode with a stored voice through a stall (tests with a
+fake engine only); the viewer page in a browser (type check only: the build that serves port 3100 was not
+remade); the watchdog as a whole; `/gpu` on the real card. Each stall run is one or three runs on one reel: the
+on/off difference is all-or-nothing, the timing numbers carry the usual run-to-run spread.
+
+- **Tests:** 185 pass, 1 skipped (was 163 + 1). New: `tests/test_v1_breaker.py` (21: the breaker's states; a GPU
+  translation model that hangs costs one short wait, then none; a dead voice engine is left out and the other
+  speaks; speech-to-text with an open circuit goes straight to the hosted one; a link stall opens every circuit
+  and the detector's probe closes them; the ladder down and up through all four rungs on a Live session with
+  fake providers; a GPU machine that does not answer cannot hold a streamer's session start; flags off = no
+  breaker anywhere and nothing about rungs sent or stored; the status answer never gives this machine's card as
+  the GPU; the stream watcher's new lines, also against a backend without the endpoint) and one in `tests/test_v1_servers.py` (`/gpu`).
+- **v0 after this workstream:** all nine checks ok (`scripts/v1/v0-check.sh`). Nothing of v0 was edited, started or stopped.
+- **Test by hand:** `scripts\v1\ab-server.ps1 -Port 8111 -Name try -Flags "V1_ROUTER=true,V1_BREAKER=true,V1_LIVE_DEGRADE=true"`,
+  a Live session on it with the GPU engine, then close the tunnel window for a minute: `/health` on that backend
+  shows the circuits open, the session keeps dubbing in a stock voice, `GET /api/live/sessions/<id>/metrics`
+  shows `rung`, and the copied voice returns a few seconds after the tunnel does.
+- **Roll back:** `V1_BREAKER=false` and `V1_LIVE_DEGRADE=false` (the default) and restart the backend. The status
+  page's GPU line and the watcher's new lines are not behind a flag: they only stop showing something wrong, or
+  print more.
+

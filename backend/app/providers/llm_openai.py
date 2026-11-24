@@ -34,6 +34,7 @@ class OpenAILLM:
         self.s = settings or get_settings()
         self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
         self.last_latency_s: float | None = None
+        self.breaker: Any = None   # v1 (`V1_BREAKER`): set on our own model only; None = calls go out as always
 
     async def _chat(self, system: str, user: str, *, model: str | None = None, temperature: float = 0.3,
                     max_tokens: int | None = None, timeout: float | None = None,
@@ -54,7 +55,13 @@ class OpenAILLM:
             return await self._client.post(url, headers=headers, json=body, timeout=timeout)
 
         t0 = time.perf_counter()
-        resp = await request_with_retry(send, what="llm.chat")
+        if self.breaker is None:
+            resp = await request_with_retry(send, what="llm.chat")
+        else:
+            # A call that names its timeout is a live line: it gets the breaker's limit as a whole, retry included.
+            from app.v1 import breaker
+            limit = min(timeout, self.s.v1_breaker_translate_timeout_s) if timeout else None
+            resp = await breaker.call(self.breaker, lambda: request_with_retry(send, what="llm.chat"), limit)
         self.last_latency_s = time.perf_counter() - t0
         try:
             content = resp.json()["choices"][0]["message"]["content"] or ""

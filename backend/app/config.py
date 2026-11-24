@@ -178,6 +178,8 @@ class Settings(BaseSettings):
     v1_studio_hq: bool = False          # the HQ Studio path can be asked for (quality=hq on a job)
     v1_fit_115: bool = False            # Studio speeds a line up by at most 1.15x (v0: 1.35x), then shortens
     v1_api_log: bool = False            # one record per outbound provider request (no bodies, no keys) under V1_LOG_DIR/api
+    v1_breaker: bool = False            # circuit breakers on our GPU endpoints + the link-stall detector (app/v1/breaker.py)
+    v1_live_degrade: bool = False       # Live steps down (copied voice, stock voice, captions only, original sound) and back up
     v1_log_dir: str = ""                # empty = logs/ at the top of the repository
     v1_store: str = "json"              # json (as v0) | postgres
     postgres_dsn: SecretStr = SecretStr("")
@@ -190,6 +192,22 @@ class Settings(BaseSettings):
     v1_big_llm_url: str = ""            # :9044 OpenAI-compatible
     v1_big_llm_model: str = "big"
     v1_qa_url: str = ""                 # :9045 back-check + speaker similarity (+ diarization)
+    # Breakers (V1_BREAKER): a timeout, or `fails` failed calls within `window_s`, opens an endpoint's circuit for
+    # `open_s`; then one call is let through. The two limits are the whole time one live call may take on our GPU
+    # before the next provider is asked (a line's translation, a line's voice); other calls keep their own timeouts.
+    v1_breaker_fails: int = 2
+    v1_breaker_window_s: float = 10.0
+    v1_breaker_open_s: float = 30.0
+    v1_breaker_translate_timeout_s: float = 3.0
+    v1_breaker_voice_timeout_s: float = 4.0
+    v1_link_probe_every_s: float = 5.0      # the detector asks every GPU endpoint this often while a session is live
+    v1_link_probe_timeout_s: float = 2.0
+    # Ladder (V1_LIVE_DEGRADE): two failures in a row take a step down; while a step is down it is tried again
+    # every `probe_ms`, and the first success steps back up.
+    v1_degrade_fails: int = 2
+    v1_degrade_probe_ms: int = 10000
+    v1_degrade_voice_wait_s: float = 8.0    # a streamer's stored voice may hold a session's start up this long
+    v1_gpu_stats_url: str = ""          # the GPU machine's own numbers for the status page; empty = V1_QA_URL + /gpu
     # Live phrase sizes with V1_PHRASE_DYNAMIC.
     v1_first_phrase_min_words: int = 4
     v1_first_phrase_max_words: int = 6

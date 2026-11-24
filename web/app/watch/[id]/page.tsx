@@ -43,7 +43,11 @@ function Watch() {
   const hold = useRef(false); // this page paused the video so the dub can catch up
   const [hasVideo, setHasVideo] = useState(false);
   const clock = useYouTubeClock(iframe, hasVideo);
+  // Where the session stands when a service behind it is away (sent once a second, only by a backend that has
+  // the ladder switched on): "captions" = no voice answers for now, "original" = no dub at all for now.
+  const [rung, setRung] = useState("");
   const onEvent = useCallback((m: Record<string, unknown>) => {
+    if (m.type === "clock") setRung(typeof m.rung === "string" ? m.rung : "");
     if (m.type !== "sync") return;
     sync.current = { media: Number(m.media_s), at: performance.now(), playing: Boolean(m.playing), delay: Number(m.delay_ms) };
     setSyncDelay(Number(m.delay_ms));
@@ -121,11 +125,12 @@ function Watch() {
   const yt = (cmd: "mute" | "unMute") =>
     iframe.current?.contentWindow?.postMessage(JSON.stringify({ event: "command", func: cmd, args: [] }), "*");
   useEffect(() => {
-    const full = ytAudio || choice === "src";
+    // No dub for now: a viewer who is listening gets the stream's own sound until the dub is back.
+    const full = ytAudio || choice === "src" || (rung === "original" && listening);
     const under = bed && listening && !full;  // only once the viewer has tapped to hear the dub
     iframe.current?.contentWindow?.postMessage(JSON.stringify({ event: "command", func: "setVolume", args: [full ? 100 : BED_VOLUME] }), "*");
     yt(full || under ? "unMute" : "mute");
-  }, [ytAudio, choice, bed, listening]);
+  }, [ytAudio, choice, bed, listening, rung]);
 
   const listen = async () => {
     await feed.ensureAudio();
@@ -192,6 +197,12 @@ function Watch() {
               ))}
               {!caps.length && <span className="font-sans text-base font-normal text-muted">{live ? "Captions appear when the streamer speaks." : "The stream has not started yet."}</span>}
             </p>
+            {choice !== "src" && (rung === "captions" || rung === "original") && (
+              <p role="status" className="mt-3 inline-flex items-center gap-2 rounded-chip border border-line px-3 py-1 text-xs text-muted">
+                <span className="pulse-dot size-1.5 rounded-full bg-fg" />
+                {rung === "captions" ? "Audio returning shortly. Captions continue." : "Dub paused. You hear the original sound; the dub returns by itself."}
+              </p>
+            )}
             <p className="mt-2 flex items-center gap-1.5 text-xs text-muted">
               <Tag aria-hidden className="size-3.5" />
               AI-dubbed by Bharat Dub

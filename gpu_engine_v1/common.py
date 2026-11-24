@@ -6,6 +6,8 @@ check and the backend's handling of each server can be tested before the real mo
 """
 import io
 import os
+import shutil
+import subprocess
 
 import numpy as np
 import soundfile as sf
@@ -56,3 +58,43 @@ def read_mono(raw: bytes, sr: int = 16000) -> np.ndarray:
         n = int(len(x) * sr / rate)
         x = np.interp(np.linspace(0, len(x) - 1, n), np.arange(len(x)), x).astype(np.float32)
     return x
+
+
+def _smi(query: str, fields: str) -> list[list[str]]:
+    exe = shutil.which("nvidia-smi")
+    if not exe:
+        return []
+    out = subprocess.run([exe, f"--query-{query}={fields}", "--format=csv,noheader,nounits"],
+                         capture_output=True, text=True, timeout=5, check=False).stdout
+    return [[x.strip() for x in line.split(",")] for line in out.splitlines() if line.strip()]
+
+
+def _num(x: str) -> float | None:
+    try:
+        return float(x)
+    except ValueError:
+        return None
+
+
+def gpu_summary() -> dict:
+    """What `nvidia-smi` says on this machine, read-only: per card its memory (GB), how busy it is, temperature
+    and power; per process its memory. For the status page, which cannot see the VM's card from the laptop."""
+    if STUB:
+        return {"stub": True, "gpus": [], "processes": []}
+    try:
+        gpus = []
+        for name, used, free, total, util, temp, power in _smi(
+                "gpu", "name,memory.used,memory.free,memory.total,utilization.gpu,temperature.gpu,power.draw"):
+            mb = [_num(used), _num(free), _num(total)]
+            gpus.append({"name": name, "used_gb": round(mb[0] / 1024, 1) if mb[0] is not None else None,
+                         "free_gb": round(mb[1] / 1024, 1) if mb[1] is not None else None,
+                         "total_gb": round(mb[2] / 1024, 1) if mb[2] is not None else None,
+                         "util_pct": _num(util), "temp_c": _num(temp), "power_w": _num(power)})
+        procs = []
+        for pid, pname, mem in _smi("compute-apps", "pid,process_name,used_memory"):
+            mb_p = _num(mem)
+            procs.append({"pid": int(pid) if pid.isdigit() else None, "name": pname.rsplit("/", 1)[-1],
+                          "used_gb": round(mb_p / 1024, 1) if mb_p is not None else None})
+        return {"stub": False, "gpus": gpus, "processes": procs}
+    except (OSError, ValueError, subprocess.SubprocessError) as e:
+        return {"stub": False, "gpus": [], "processes": [], "error": type(e).__name__}

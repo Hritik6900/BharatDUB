@@ -45,9 +45,15 @@ scripts/v1/v0-check.sh            # v0 is still fine (read-only)
 scripts/v1/gpu-mode.sh status     # which model servers answer, free GPU memory, who is live
 ```
 
-Pages: `/health` (green or red per service, GPU memory, flags that are on) and `/metrics-ui` (numbers from the
+Pages: `/health` (green or red per service, the GPU machine's card when it reports it, else "A100 (VM): unknown",
+circuit breakers, flags that are on) and `/metrics-ui` (numbers from the
 trace). Endpoints: `GET /api/v1/health`, `/api/v1/flags`, `/api/v1/routing`, `/api/v1/metrics/summary?hours=24`,
 `/metrics` (Prometheus), `POST /api/v1/warmup`.
+
+**When everything stops answering at once:** look at `data-v1/streamwatch/events.log`. `LINK STALL` with the hosted
+services in the list means this PC was away (asleep), not the tunnel: all three stalls of 24 Nov 2026 were the
+laptop in standby (`NEEDS_APPROVAL.md` item 17). `scripts\v1\tunnel-watchdog.ps1` (item 16) tells a sleeping PC, a
+dead tunnel, a stuck ssh and a dead server on the GPU machine apart.
 
 **Before a demo:** 15 minutes ahead run `demo-check.sh` and `warmup.sh`; the card must be in normal mode (not an HQ
 window) and no other session live. One GPU through one address is one stream.
@@ -72,9 +78,17 @@ change. What each one does, and what was measured, is in `PROGRESS.md` and `EVAL
 | `V1_STUDIO_HQ` | the HQ choice on `/studio` and `quality=hq` on a job | off: every job is standard |
 | `V1_FIT_115` | Studio speeds a line up by at most 1.15x, then shortens | off: 1.35x |
 | `V1_API_LOG` | one record per outbound provider request in `logs/api/<date>/<session or job>.jsonl` (no bodies, no keys) | off: nothing written |
+| `V1_BREAKER` | circuit breakers on our GPU endpoints and the link-stall detector: a timeout, or 2 failures in 10 s, and the endpoint is not called for 30 s (the next provider answers at once); while a session is live every GPU endpoint is asked for its health every 5 s | off: every call waits for its own timeout, as v0 |
+| `V1_LIVE_DEGRADE` | Live's ladder: copied voice, stock voice, captions only ("audio returning shortly" on `/watch`), original sound; back up by itself | off: as v0 |
 | `V1_STORE` | `postgres` (with `POSTGRES_DSN`) | `json` |
 
 Not a flag but a setting: `LIVE_FIT_MAX_TEMPO=1.2` caps the Live speed-up at 1.2x (v0: 1.3).
+
+The two reliability flags belong together (measured together, `PROGRESS.md` v1.1 WS0). Their limits are settings:
+`V1_BREAKER_TRANSLATE_TIMEOUT_S=3` and `V1_BREAKER_VOICE_TIMEOUT_S=4` (the whole time one live call may take on our
+GPU before the next provider is asked), `V1_BREAKER_OPEN_S=30`, `V1_BREAKER_FAILS=2`, `V1_BREAKER_WINDOW_S=10`,
+`V1_LINK_PROBE_EVERY_S=5`. `GET /api/v1/circuits` and the status page show every circuit; the stream watcher prints
+`CIRCUIT OPEN / CLOSED / LINK STALL / LINK BACK` and `RUNG` lines.
 
 To compare a flag on and off on the same machine, start a second backend on another port with only that flag:
 `scripts/v1/ab-server.sh 8112 dynamic V1_PHRASE_DYNAMIC=true`, then

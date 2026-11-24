@@ -19,7 +19,8 @@ from app.providers import get_gpu_voice, get_llm, get_stt, get_tts
 from app.providers.base import ProviderError, VoiceSpec
 from app.shared import audio_utils as au
 from app.shared.metrics import percentile
-from app.v1 import apilog, trace
+from app.v1 import apilog, breaker, trace
+from app.v1.degrade import RUNGS, Ladder
 from app.v1.phrase import DynamicPhraser, ShortLineMerger, SpecTracker, rest_of
 
 log = logging.getLogger("live")
@@ -171,6 +172,13 @@ class LivePipeline:
         self._spec = SpecTracker(self.s.v1_spec_stable_ms) if self.s.v1_spec_translate else None
         self._spec_for: dict[int, dict[str, asyncio.Task[str]]] = {}   # phrase -> translations started ahead
         self._stages: Any = None   # the scorer for the live back-check, made when first needed
+        # `V1_LIVE_DEGRADE`: the ladder (copied voice, stock voice, captions only, original sound). None = off.
+        self._ladder = Ladder(sess.now_ms, fails=self.s.v1_degrade_fails,
+                              probe_ms=self.s.v1_degrade_probe_ms) if self.s.v1_live_degrade else None
+        self._rung: tuple[int, str] | None = None
+        self.rungs: list[dict[str, Any]] = []   # every change of rung: {t_ms, rung, why}
+        self._stored_busy = False
+        self._stored_try_at = 0
         self._voice_turn = asyncio.Semaphore(max(1, self.s.gnani_max_concurrency))
         self._gpu_turn = asyncio.Semaphore(max(1, int(getattr(self.gpu, "capacity", 1))))
         self._src_ms_per_word = 350.0             # how fast the speaker talks (from finished lines)
@@ -216,8 +224,19 @@ class LivePipeline:
         apilog.set_test("live", self.sess.id)   # the API call log files this session's calls together
         terms = [t["term"] for t in await get_store().select("glossary_terms")]
         self.glossary = list(dict.fromkeys(DEFAULT_GLOSSARY + terms + list(self.sess.row.get("glossary") or [])))
+        if self.s.v1_breaker:
+            breaker.watch().start()   # the link-stall detector runs while a session is live
         self.voice = await self._clone_voice()
-        await self._use_stored_voice()
+        if self._ladder is None:
+            await self._use_stored_voice()
+        else:   # a GPU machine that does not answer must not hold the start up; the voice is asked for again later
+            self._stored_try_at = self.sess.now_ms()
+            try:
+                await asyncio.wait_for(self._use_stored_voice(), self.s.v1_degrade_voice_wait_s)
+            except TimeoutError:
+                log.warning("live stored voice: no answer in %.0f s, starting without it", self.s.v1_degrade_voice_wait_s)
+            self._rung = self.rung()    # where the session begins; every change from here on is announced
+            self.rungs.append({"t_ms": self.sess.now_ms(), "rung": RUNGS[self._rung[0]], "why": self._rung[1]})
         consent = self.sess.row.get("voice_from_stream") or {}
         gpu_all = self.gpu.enabled and all(self.gpu.speaks(lg) for lg in self.sess.langs)
         if self.voice is None and consent.get("consent_at") and not gpu_all:
@@ -231,6 +250,8 @@ class LivePipeline:
         if not self.running:
             return
         self.running = False
+        if self.s.v1_breaker:
+            breaker.watch().stop()
         await self.audio.put(None)
         chunk = self.assembler.flush()
         if chunk:
@@ -576,6 +597,8 @@ class LivePipeline:
                 raise
             except Exception as e:  # noqa: BLE001 - reconnect (15 min cap, network)
                 log.warning("live stt error: %s", e)
+                if self._ladder is not None:
+                    self._ladder.note("stt", False)
                 # A PC clock that is hours off makes every TLS certificate look "not yet valid" or "expired".
                 why = ("this PC's date, time or time zone is wrong, so the secure connection is refused. Sync the clock "
                        "(Windows: Settings, Time & language, Sync now)." if "CERTIFICATE_VERIFY_FAILED" in str(e)
@@ -588,6 +611,8 @@ class LivePipeline:
 
     def _on_stt(self, ev: Any) -> None:
         now = self.sess.now_ms()
+        if self._ladder is not None and ev.kind != "error":
+            self._ladder.note("stt", True)
         if ev.kind == "final" and ev.text:
             self._maybe_gpu_ref(ev.text, now)
             n = len(ev.text.split())
@@ -684,7 +709,8 @@ class LivePipeline:
             await asyncio.sleep(0.1)
             self._ticks += 1
             if self._ticks % 10 == 0:   # the session clock, so viewers can place `t_speech_ms` on their own
-                self.sess.bus.broadcast({"type": "clock", "t_ms": self.sess.now_ms(), "offset_ms": self.offset_delay()})
+                self.sess.bus.broadcast({"type": "clock", "t_ms": self.sess.now_ms(), "offset_ms": self.offset_delay(),
+                                         **(self._rung_tick() if self._ladder is not None else {})})
             chunk = self.assembler.poll(self.sess.now_ms())
             if chunk:
                 self._dispatch(chunk)
@@ -791,6 +817,8 @@ class LivePipeline:
             text, untranslated = chunk.text, True
             bus.publish(ALL, {"type": "error", "message": f"{lang} translation failed: {str(e)[:120]}"},
                         to_all=False)
+        if self._ladder is not None:
+            self._ladder.note("translate", not untranslated)
         timings = self._pending[chunk.seq]["timings"] if chunk.seq in self._pending else {}
         timings[f"t_translated:{lang}"] = self.sess.now_ms()
         if prev is not None and not prev.done():
@@ -865,10 +893,13 @@ class LivePipeline:
                                    "pcm_b64": "", "last": True})
 
         if untranslated:
+            if self._ladder is not None:
+                timings[f"rung:{lang}"] = 3
             end_of_audio()
             return
         if self._trace:
             timings[f"tts_chars:{lang}"] = len(text)
+        gpu_spoke = False   # this line came from our voice engine
         # Decided when this chunk's turn to speak comes. `waiting` is how much dubbed audio a viewer of this
         # language still has to play (see _playhead): a phrase is heard only after everything before it.
         now = self.sess.now_ms()
@@ -894,6 +925,12 @@ class LivePipeline:
         if unheard or too_late:
             for t in [timings, *[t for _, t in rest]]:
                 t[f"skipped:{lang}"] = "unheard" if unheard else "late"
+            end_of_audio()
+            return
+        if self._ladder is not None and not self._voice_may_try(lang):
+            # Captions only: no voice answers. One line now and then still tries; that is the way back.
+            for t in [timings, *[t for _, t in rest]]:
+                t[f"skipped:{lang}"], t[f"rung:{lang}"] = "degraded", 2
             end_of_audio()
             return
         if target is not None:
@@ -947,8 +984,24 @@ class LivePipeline:
 
         spoke_at = 1.0  # the speed the GPU voice was asked to speak at
 
+        async def hosted(voice: VoiceSpec) -> None:
+            nonlocal lead, held, carry
+            async for pcm in self.tts.synth_stream(text, lang, voice, sample_rate=sr, speed=self.s.live_tts_speed):
+                pcm = carry + pcm
+                cut = len(pcm) // 2 * 2
+                pcm, carry = pcm[:cut], pcm[cut:]
+                if lead and self.s.live_trim_silence:
+                    pcm = au.trim_pcm_silence(pcm, start=True, end=False)
+                    if not pcm:
+                        continue
+                lead = False
+                held += pcm
+                if not fit and len(held) > keep_tail:
+                    publish(held[:-keep_tail])
+                    held = held[-keep_tail:]
+
         async def stream() -> None:
-            nonlocal lead, held, carry, spoke_at
+            nonlocal held, spoke_at, gpu_spoke
             if self._gpu_speaks(lang):
                 try:
                     # The engine can speak faster by itself, which sounds better than squeezing the audio afterwards.
@@ -981,31 +1034,44 @@ class LivePipeline:
                     if self._trace and getattr(self.gpu, "last_synth_ms", None):
                         timings[f"gpu_ms:{lang}"] = round(float(self.gpu.last_synth_ms))
                     self._gpu_fail = 0
+                    gpu_spoke = True
+                    if self._ladder is not None:
+                        self._ladder.note("copied", True)
                     return
                 except Exception as e:  # noqa: BLE001 - fail soft: this line goes to the Gnani voice instead
                     self._gpu_fail += 1
+                    if self._ladder is not None:
+                        self._ladder.note("copied", False)
                     self._gpu_retry_at = self.sess.now_ms() + GPU_RETRY_MS
                     log.warning("live gpu voice failed (%d): %s", self._gpu_fail, e)
                     if self._trace:
                         timings[f"tts_fb:{lang}"] = 1
-            async for pcm in self.tts.synth_stream(text, lang, voice, sample_rate=sr, speed=self.s.live_tts_speed):
-                pcm = carry + pcm
-                cut = len(pcm) // 2 * 2
-                pcm, carry = pcm[:cut], pcm[cut:]
-                if lead and self.s.live_trim_silence:
-                    pcm = au.trim_pcm_silence(pcm, start=True, end=False)
-                    if not pcm:
-                        continue
-                lead = False
-                held += pcm
-                if not fit and len(held) > keep_tail:
-                    publish(held[:-keep_tail])
-                    held = held[-keep_tail:]
+            await hosted(voice)
 
         try:
             await asyncio.wait_for(stream(), TTS_TIMEOUT_S)
         except (ProviderError, TimeoutError) as e:
             bus.publish(ALL, {"type": "error", "message": f"{lang} voice failed: {str(e)[:120]}"}, to_all=False)
+        except Exception as e:  # noqa: BLE001 - e.g. the hosted voice's connection dropped mid-line
+            if self._ladder is None:
+                raise   # as before: the worker closes the phrase
+            log.warning("live %s voice failed: %s: %s", lang, type(e).__name__, str(e)[:120])
+        if self._ladder is not None:
+            if not gpu_spoke:
+                made = bool(sent or held)
+                self._ladder.note("copied" if voice["kind"] == "clone" else "stock", made)
+                if not made and voice["kind"] == "clone":
+                    # The hosted copy of the voice did not answer: a stock voice says this line.
+                    voice = {"kind": "stock", "voice": VOICE_BY_LANG.get(lang, VOICE_BY_LANG["hi-IN"])}
+                    timings[f"clone:{lang}"] = 0
+                    try:
+                        await asyncio.wait_for(hosted(voice), TTS_TIMEOUT_S)
+                    except Exception as e:  # noqa: BLE001 - no voice for this line; its caption is out
+                        bus.publish(ALL, {"type": "error", "message": f"{lang} voice failed: {str(e)[:120]}"}, to_all=False)
+                    self._ladder.note("stock", bool(sent or held))
+            said_by = 0 if gpu_spoke or voice["kind"] == "clone" else 1
+            for t in [timings, *[t for _, t in rest]]:
+                t[f"rung:{lang}"] = said_by if (sent or held) else 2
         if self.s.live_trim_silence:
             held = au.trim_pcm_silence(held, start=False, end=True)
         # The pace of this voice in this language, for the next phrases' word limit.
@@ -1047,6 +1113,66 @@ class LivePipeline:
         self.sess.bus.broadcast({"type": "stats", **self.stats()})
 
     # ---------- v1 (each used only with its flag on) ----------
+    def _gpu_blocked(self) -> bool:
+        """Every engine of the copied voice has its circuit open (`V1_BREAKER`); False when there are no breakers."""
+        brs = getattr(self.gpu, "breakers", None)
+        return bool(brs) and all(b.blocked() for b in brs)
+
+    def _wants_stored(self) -> bool:
+        row = self.sess.row
+        return bool(row.get("streamer_id") and row.get("voice_mode") == "clone" and self.gpu.enabled)
+
+    def _voice_may_try(self, lang: str) -> bool:
+        """`V1_LIVE_DEGRADE`: is a voice asked for this line? Yes while one answers; with none, now and then."""
+        assert self._ladder is not None
+        if self._gpu_speaks(lang) and not self._gpu_blocked() and not self._ladder.down("copied"):
+            return True
+        return self._ladder.may_try("stock")
+
+    def rung(self) -> tuple[int, str]:
+        """`V1_LIVE_DEGRADE`: where on the ladder this session stands now, and why it is not higher."""
+        assert self._ladder is not None
+        consent = self.sess.row.get("voice_from_stream") or {}
+        wants = bool(self.voice is not None or self._wants_stored() or self._gpu_stored
+                     or (consent.get("consent_at") and (self.gpu.enabled or self._enrol is not None)))
+        ready = self.gpu_ready or self.voice is not None
+        up = (self._gpu_up() and not self._gpu_blocked()) if self.gpu_ready else True
+        return self._ladder.level(wants_copied=wants, copied_ready=ready, copied_up=up)
+
+    def _rung_tick(self) -> dict[str, Any]:
+        """Once a second: note a change of rung (viewers, trace, log), ask again for a stored voice that did not
+        load, and give the rung to the clock message, so a viewer who joins later knows it too."""
+        now = self.sess.now_ms()
+        level, why = self.rung()
+        if self._rung is None or self._rung[0] != level:
+            was = RUNGS[self._rung[0]] if self._rung is not None else None
+            self.rungs.append({"t_ms": now, "rung": RUNGS[level], "why": why})
+            del self.rungs[:-200]
+            if was is not None:
+                log.warning("live %s: %s -> %s (%s)", self.sess.id[:8], was, RUNGS[level], why or "back")
+                self.sess.bus.broadcast({"type": "degrade", "rung": RUNGS[level], "was": was, "why": why, "t_ms": now})
+                if self._trace:
+                    trace.event("live_degrade", session=self.sess.id, rung=RUNGS[level], was=was, why=why, t_ms=now)
+        self._rung = (level, why)
+        if (self._wants_stored() and not self._gpu_stored and not self._stored_busy and not self._gpu_blocked()
+                and now - self._stored_try_at >= 15000):
+            self._stored_busy, self._stored_try_at = True, now
+            self.tasks.append(asyncio.create_task(self._stored_again()))
+        return {"rung": RUNGS[level]}
+
+    async def _stored_again(self) -> None:
+        try:
+            await self._use_stored_voice()
+        finally:
+            self._stored_busy = False
+
+    def degrade_stats(self) -> dict[str, Any]:
+        """For the session's metrics: the rung now and every change. Empty with the flag off."""
+        if self._ladder is None:
+            return {}
+        level, why = self._rung if self._rung is not None else self.rung()
+        return {"rung": RUNGS[level], "rung_why": why, "rung_changes": list(self.rungs)}
+
     def _spec_kw(self, lang: str, text: str) -> dict[str, Any]:
         """What `_translate` would ask of the translator for these words, worked out now."""
         behind = self._lag.get(lang, 0) if self.sync_delay() else self._playhead.get(lang, 0) - self.sess.now_ms()

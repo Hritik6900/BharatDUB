@@ -19,6 +19,14 @@ def engine_of(engine: str | None = None) -> str:
     return "gpu" if want == "gpu" and s.gpu_mode_ready and not s.mock_providers else "cloud"
 
 
+def _guard(provider: str, obj: Any) -> Any:
+    """v1 (`V1_BREAKER`): a GPU provider gets its circuit breaker. Flag off = the object as it is."""
+    if not get_settings().v1_breaker:
+        return obj
+    from app.v1 import breaker
+    return breaker.attach(provider, obj)
+
+
 def _router() -> Any:
     """v1: the config-driven router when `V1_ROUTER` is on, else None and the fixed table below is used."""
     if not get_settings().v1_router:
@@ -59,8 +67,8 @@ def _stt(engine: str) -> Any:
         hosted = GnaniSTT() if s.gnani_api_key.get_secret_value() else None
         if hosted is not None and s.gpu_stt_first == "hosted":
             from app.providers.fallback import FallbackSTT
-            return FallbackSTT(hosted, GpuSTT(s, backup=None))   # the hosted service hears better; ours is behind it
-        return GpuSTT(s, backup=hosted)
+            return FallbackSTT(hosted, _guard("whisper_gpu", GpuSTT(s, backup=None)))   # the hosted service hears better; ours is behind it
+        return _guard("whisper_gpu", GpuSTT(s, backup=hosted))
     return GnaniSTT()
 
 
@@ -86,14 +94,14 @@ def _gpu_voice(engine: str) -> Any:
     s = get_settings()
     if engine == "gpu" and s.gpu_voice_model == "mio" and s.gpu_mio_url and not s.mock_providers:
         from app.providers.tts_gpu_mio import MioVoice
-        return MioVoice(s)      # takes the speaker from the sound alone: no sample text to rewrite
-    gpu = GpuVoice(s.model_copy(update={"gpu_voice_url": ""}) if s.mock_providers else s)
+        return _guard("mio", MioVoice(s))      # takes the speaker from the sound alone: no sample text to rewrite
+    gpu = _guard("indicf5", GpuVoice(s.model_copy(update={"gpu_voice_url": ""}) if s.mock_providers else s))
     if engine == "gpu":
         gpu.ref_text_fix = _local_llm().to_devanagari
         if s.gpu_voice_guard and gpu.enabled:
             from app.providers.tts_gpu_guard import GuardedVoice
             from app.providers.tts_gpu_mio import MioVoice
-            return GuardedVoice(gpu, MioVoice(s) if s.gpu_mio_url else None, s)
+            return GuardedVoice(gpu, _guard("mio", MioVoice(s)) if s.gpu_mio_url else None, s)
     return gpu
 
 
@@ -102,9 +110,9 @@ def _local_llm() -> Any:
 
     from app.providers.llm_local import LocalLLM
     s = get_settings()
-    return LocalLLM(s.model_copy(update={
+    return _guard("gemma", LocalLLM(s.model_copy(update={
         "llm_base_url": s.gpu_llm_url, "llm_model": s.gpu_llm_model, "llm_model_fast": "",
-        "llm_api_key": SecretStr("local"), "llm_reasoning_effort": "", "llm_reasoning_effort_fast": ""}))
+        "llm_api_key": SecretStr("local"), "llm_reasoning_effort": "", "llm_reasoning_effort_fast": ""})))
 
 
 @lru_cache

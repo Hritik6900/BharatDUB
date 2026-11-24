@@ -91,3 +91,18 @@ def test_words_heard_matches_the_backend_scoring():
     for said, heard in (("ஒன்று இரண்டு மூன்று", "ஒன்று மூன்று"), ("aaj hum khelenge", "aaj ham khelenge yaar"), ("", "x"),
                         ("পি সি আর ব্যবহার হয়", "পিসিআর ব্যবহার হয়")):
         assert qa_server.words_heard(said, heard) == words_heard(said, heard)
+
+
+async def test_qa_server_gpu_endpoint_reads_the_card_and_knows_none_in_stub_mode(monkeypatch):
+    async with client(qa_server.app) as c:
+        assert (await c.get("/gpu")).json() == {"stub": True, "gpus": [], "processes": []}
+    import common
+    rows = {"gpu": [["NVIDIA A100-SXM4-40GB", "35533", "5427", "40960", "19", "51", "110.5"]],
+            "compute-apps": [["4242", "/opt/venv/bin/python3", "13414"], ["4243", "python", "[N/A]"]]}
+    monkeypatch.setattr(common, "STUB", False)
+    monkeypatch.setattr(common, "_smi", lambda query, fields: rows[query])
+    got = common.gpu_summary()
+    assert got["gpus"] == [{"name": "NVIDIA A100-SXM4-40GB", "used_gb": 34.7, "free_gb": 5.3, "total_gb": 40.0,
+                            "util_pct": 19.0, "temp_c": 51.0, "power_w": 110.5}]
+    assert got["processes"] == [{"pid": 4242, "name": "python3", "used_gb": 13.1},
+                                {"pid": 4243, "name": "python", "used_gb": None}]

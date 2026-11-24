@@ -139,6 +139,10 @@ class Router:
         return self._objs[key]
 
     def _make(self, kind: str, name: str) -> Any:
+        from app.providers import _guard   # `V1_BREAKER`: our own endpoints get a circuit breaker; off = untouched
+        return _guard(name, self._build(kind, name))
+
+    def _build(self, kind: str, name: str) -> Any:
         s = self.s
         if kind == "stt":
             if name == "prisma":
@@ -200,8 +204,9 @@ class Router:
         rest = self._stt_chain(names[1:])
         if names[0] == "whisper_gpu":
             # Our model first: its own client carries the fallback and goes back to the engine once it answers again.
+            from app.providers import _guard
             from app.providers.stt_gpu import GpuSTT
-            return GpuSTT(self.s, backup=rest)
+            return _guard("whisper_gpu", GpuSTT(self.s, backup=rest))
         from app.providers.fallback import FallbackSTT
         return FallbackSTT(self._one("stt", names[0]), rest)
 
@@ -236,7 +241,8 @@ class Router:
             if s.gpu_voice_guard and gpu.enabled:
                 from app.providers.tts_gpu_guard import GuardedVoice
                 from app.providers.tts_gpu_mio import MioVoice
-                gpu = GuardedVoice(gpu, MioVoice(s) if s.gpu_mio_url else None, s)
+                from app.providers import _guard
+                gpu = GuardedVoice(gpu, _guard("mio", MioVoice(s)) if s.gpu_mio_url else None, s)
         self._objs[key] = gpu
         return gpu
 

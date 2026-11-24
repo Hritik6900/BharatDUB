@@ -80,6 +80,9 @@ measured 1.8 s first audio there; `NEEDS_APPROVAL.md` item 3), not these flags.
 | 13 | Backup bucket; VM snapshot; restore rehearsal | the cloud console |
 | 14 | Prices for the cost per minute | the real rates |
 | 15 | Decisions (below) | you |
+| 16 | Tunnel watchdog window (v1.1) | you start it; it reports only unless given the key and `-RestartStuck` |
+| 17 | Stop the laptop sleeping on AC power (v1.1): all three stalls of 24 Nov were standby | three `powercfg` lines |
+| 18 | The A100's real numbers on the status page (v1.1) | the QA server on the VM (item 6) and one more forwarded port |
 
 ## 4. Decisions needed
 

@@ -20,8 +20,11 @@ interface V1Health {
   ok: boolean;
   checks: Check[];
   flags: Record<string, boolean | string>;
-  gpu: { name: string; used_gb: number; free_gb: number; total_gb: number } | null;
+  // The model servers' card, as the GPU machine itself reports it. null = unknown (never this PC's own card).
+  gpu: { name?: string; used_gb: number; free_gb: number; total_gb: number; util_pct?: number; temp_c?: number; power_w?: number; processes?: { name: string; used_gb: number | null }[] } | null;
+  gpu_name?: string;
   gpu_reported_gb: number | null;
+  circuits?: { name: string; state: "closed" | "open" | "half_open"; opens: number; down_s?: number; reason?: string }[];
   mock_providers: boolean;
 }
 
@@ -100,20 +103,54 @@ export default function HealthPage() {
               );
             })}
 
-            <section className="card mt-5 p-6" aria-label="GPU memory">
-              <h2 className="eyebrow">GPU memory</h2>
+            <section className="card mt-5 p-6" aria-label="GPU">
+              <h2 className="eyebrow">GPU: {h.gpu_name ?? "A100 (VM)"}</h2>
               {h.gpu ? (
-                <p className="mt-3">
-                  <span className="tnum h-display text-4xl">{h.gpu.free_gb.toFixed(1)} GB</span>
-                  <span className="ml-3 text-sm text-muted">free of {h.gpu.total_gb.toFixed(1)} GB ({h.gpu.used_gb.toFixed(1)} GB in use) on the card of the machine this backend runs on: {h.gpu.name}</span>
-                </p>
+                <>
+                  <p className="mt-3">
+                    <span className="tnum h-display text-4xl">{h.gpu.free_gb.toFixed(1)} GB</span>
+                    <span className="ml-3 text-sm text-muted">
+                      free of {h.gpu.total_gb.toFixed(1)} GB ({h.gpu.used_gb.toFixed(1)} GB in use)
+                      {h.gpu.util_pct != null && <>, {h.gpu.util_pct}% busy</>}
+                      {h.gpu.temp_c != null && <>, {h.gpu.temp_c} °C</>}
+                      {h.gpu.power_w != null && <>, {Math.round(h.gpu.power_w)} W</>}
+                      {h.gpu.name && <>. Reported by the GPU machine: {h.gpu.name}</>}
+                    </span>
+                  </p>
+                  {!!h.gpu.processes?.length && (
+                    <p className="mt-2 font-mono text-xs text-muted">{h.gpu.processes.map((x) => `${x.name} ${x.used_gb ?? "?"} GB`).join(" · ")}</p>
+                  )}
+                </>
               ) : (
-                <p className="mt-3 text-sm text-muted">
-                  Not measured here: the machine this backend runs on has no GPU.
-                  {h.gpu_reported_gb != null && <> The servers that report it hold {h.gpu_reported_gb} GB in tensors (less than their process totals).</>}
+                <p className="mt-3">
+                  <span className="h-display text-2xl">{h.gpu_name ?? "A100 (VM)"}: unknown</span>
+                  <span className="mt-2 block text-sm text-muted">
+                    The models run on a GPU machine that this page cannot see into yet: no server there reports the card.
+                    {h.gpu_reported_gb != null && <> The servers that say so hold {h.gpu_reported_gb} GB in tensors (less than their process totals).</>}
+                  </span>
                 </p>
               )}
             </section>
+
+            {!!h.circuits?.length && (
+              <section className="card mt-5 p-6" aria-label="Circuit breakers">
+                <h2 className="eyebrow">Circuit breakers</h2>
+                <p className="mt-1 text-sm text-muted">An endpoint that stops answering is left alone for a while and the next provider answers; it is tried again by itself.</p>
+                <ul className="mt-3">
+                  {h.circuits.map((c) => (
+                    <li key={c.name} className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line py-3 first:border-t-0">
+                      {c.state === "closed" ? <CircleCheck aria-hidden className="size-5 shrink-0 text-ok" /> : <CircleX aria-hidden className="size-5 shrink-0 text-danger" />}
+                      <span className="min-w-48 flex-1 font-medium">{c.name}</span>
+                      <span className={`text-sm ${c.state === "closed" ? "text-muted" : "text-danger"}`}>
+                        {c.state === "closed" ? "in use" : c.state === "open" ? `not called, for ${Math.round(c.down_s ?? 0)} s now` : `being tried again after ${Math.round(c.down_s ?? 0)} s`}
+                      </span>
+                      <span className="tnum w-28 text-right font-mono text-sm text-muted">opened {c.opens}x</span>
+                      {c.state !== "closed" && c.reason && <span className="w-full pl-9 font-mono text-xs text-muted">{c.reason}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
 
             <section className="card mt-5 p-6" aria-label="Flags">
               <h2 className="eyebrow">New behaviour switched on</h2>

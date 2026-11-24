@@ -45,6 +45,7 @@ class GpuSTT:
         self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=3.0))
         self.backup = backup
         self.fell_back = 0   # calls answered by the backup
+        self.breaker: Any = None   # v1 (`V1_BREAKER`); None = calls go out as always
 
     async def transcribe(self, wav_path: str, lang: str = "indic-auto", *, fmt: str | None = None,
                          keyterms: list[str] | None = None) -> STTResult:
@@ -62,7 +63,11 @@ class GpuSTT:
 
         t0 = time.perf_counter()
         try:
-            j = (await request_with_retry(send, what="gpu_stt.transcribe")).json()
+            if self.breaker is None:
+                j = (await request_with_retry(send, what="gpu_stt.transcribe")).json()
+            else:
+                from app.v1 import breaker
+                j = (await breaker.call(self.breaker, lambda: request_with_retry(send, what="gpu_stt.transcribe"))).json()
         except (ProviderError, httpx.HTTPError, ValueError) as e:
             if self.backup is None:
                 raise ProviderError(f"gpu_stt.transcribe: {e}") from e
@@ -80,10 +85,24 @@ class GpuSTT:
         query = {"min_silence_ms": h.get("x-min-silence-ms", "500"),
                  "partial_interval_ms": h.get("x-partial-interval-ms", str(self.s.live_partial_interval_ms))}
         url = self.url.replace("https://", "wss://").replace("http://", "ws://") + "/stream?" + urlencode(query)
+        br = self.breaker
         try:
             if lang not in HEARS or sample_rate != 16000:
                 raise ProviderError(f"gpu_stt: not for {lang} at {sample_rate} Hz")
-            ws = await websockets.connect(url, max_size=2**22, open_timeout=4)
+            if br is None:
+                ws = await websockets.connect(url, max_size=2**22, open_timeout=4)
+            else:
+                if not br.allow():
+                    raise ProviderError(f"gpu_stt.stream: circuit open ({br.last_reason})")
+                try:   # with a breaker the socket also notices a dead link in seconds (a ping every 5 s)
+                    ws = await websockets.connect(url, max_size=2**22, open_timeout=4, ping_interval=5, ping_timeout=5)
+                except asyncio.CancelledError:
+                    br.release()
+                    raise
+                except Exception as e:  # noqa: BLE001 - counted, then handled below like any other
+                    br.fail(f"stream: {type(e).__name__}", timed_out=isinstance(e, TimeoutError))
+                    raise
+                br.ok()
         except Exception as e:  # noqa: BLE001 - engine down or another language: the hosted service takes the stream
             if self.backup is None:
                 raise ProviderError(f"gpu_stt.stream: {e}") from e
@@ -100,7 +119,7 @@ class GpuSTT:
                 yield ev
                 if can_return and not back and time.perf_counter() - checked >= RETURN_CHECK_S:
                     checked = time.perf_counter()
-                    back = bool((await self.health()).get("ok"))
+                    back = bool((await self.health()).get("ok")) and (br is None or not br.blocked())
                 if back and ev.kind == "final":
                     return
             return
@@ -129,8 +148,9 @@ class GpuSTT:
                             ev.text, ev.stable_text = without_noise(ev.text), without_noise(ev.stable_text)
                         if ev:
                             await queue.put(ev)
-            except websockets.ConnectionClosed:
-                pass
+            except websockets.ConnectionClosed as e:
+                if br is not None and isinstance(e, websockets.ConnectionClosedError):
+                    br.fail("stream dropped")
             finally:
                 await queue.put(None)
 
