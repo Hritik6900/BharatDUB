@@ -316,3 +316,27 @@ Work that was deferred because it needs the GPU VM, a forbidden command, or a de
 - **Verify:** `/health` shows the A100's free memory of 40 GB instead of "unknown";
   `curl -s http://127.0.0.1:8110/api/v1/health` has `"gpu": {"total_gb": 40.0, ...}`.
 - **Rollback:** empty `V1_GPU_STATS_URL`; the page says "unknown" again.
+
+## 19. Two or three dense recordings of your own for the Live replay, v1.1 WS1
+
+- **What:** 2-3 recordings of about 10 minutes each, your own content (or content you have the right to dub),
+  where the speaker talks almost without a pause: a class, a commentary, a rant. Any file ffmpeg reads (mp4, mkv,
+  m4a, wav). Put them in `data-v1\eval\dense\` (the folder is not in the repository; nothing in it is committed).
+- **Why deferred:** Live audio is never stored, so no real stream can be replayed. The only dense material on this
+  machine is one 24.9 s reel; `docs/v1/LIVE_DENSE_REPORT.md` is measured on that reel played eight times in a
+  row, which repeats the same 11-12 phrases and says nothing about a speaker who changes pace or topic over ten
+  minutes. The densest long sessions in the logs (62% speaking over 16 minutes on 24 Nov) left only their numbers.
+- **Commands (laptop only, no VM, no sudo; costs hosted speech-to-text for the minutes replayed):**
+  ```powershell
+  # four comparison backends, each in its own window (they stop with Ctrl+C)
+  powershell -File scripts\v1\ab-server.ps1 -Port 8111 -Name m-off    -Flags "LIVE_SYNC_ADAPT=false"
+  powershell -File scripts\v1\ab-server.ps1 -Port 8113 -Name m-ctl    -Flags "LIVE_SYNC_ADAPT=false,V1_LIVE_BUDGET=true,V1_LIVE_RATECTRL=true"
+  cd backend
+  .venv\Scripts\python.exe -m eval.live_replay ..\data-v1\eval\dense\<file> --out ..\data-v1\eval\ws1\<name> `
+      --target off=http://127.0.0.1:8111 --target ctl=http://127.0.0.1:8113 --runs 3 --langs pa-IN,ta-IN
+  ```
+  The harness waits while a stream is live on 8010 or 8110 and skips the run if it is still live after 30 minutes.
+- **GPU memory:** none new (the engines that already run).
+- **Verify:** `data-v1\eval\ws1\<name>\summary.md` has one column per setting; `speaking share` in it says how
+  dense the recording really is.
+- **Rollback:** nothing to undo; stop the comparison backends.

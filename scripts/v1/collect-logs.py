@@ -13,6 +13,8 @@ logs/api/ is written by the v1 backend itself while it runs (V1_API_LOG) and is 
 Nothing that was said is copied: no source text, no translation, no voice sample, no voice or token id.
 
   python scripts/v1/collect-logs.py v0=C:/.../BharatDUB/backend/data/local_db.json v1=data-v1/local_db.json
+  # the sessions and trace of a comparison backend (scripts/v1/ab-server.*) under a name of their own:
+  python scripts/v1/collect-logs.py ... ws1-off=data-v1/ab/m-off/local_db.json --more-trace ws1-off=data-v1/ab/m-off/trace
 """
 from __future__ import annotations
 
@@ -66,14 +68,14 @@ def phrase_rows(chunks: list[dict]) -> list[dict]:
                         "heard_ms": diff(t, f"t_heard:{lang}", "t_speech_end"),
                         "late_ms": t.get(f"late:{lang}"), "tempo": t.get(f"tempo:{lang}"),
                         "copied_voice": t.get(f"clone:{lang}"), "on_gpu": t.get(f"gpu:{lang}"),
-                        "skipped": t.get(f"skipped:{lang}"),
-                        # v1.1 (stored from 24 Nov 2026 on; empty before): lengths, never the words themselves
-                        "dub_ms": t.get(f"dub_ms:{lang}"), "dub_raw_ms": t.get(f"dub_raw_ms:{lang}"),
-                        "slot_ms": t.get(f"slot_ms:{lang}"), "dur_ratio": t.get(f"dur_ratio:{lang}"),
-                        "backlog_ms": t.get(f"backlog:{lang}"), "tgt_words": t.get(f"tgt_words:{lang}"),
-                        "tgt_chars": t.get(f"tgt_chars:{lang}"), "budget_ms": t.get(f"budget_ms:{lang}"),
-                        "budget_scale": t.get(f"ctl:{lang}"), "reasked": t.get(f"reasked:{lang}"),
-                        "merged_into": t.get(f"merged:{lang}")})
+                        "skipped": t.get(f"skipped:{lang}")})
+            # v1.1 (stored from 24 Nov 2026 on): lengths, never the words themselves. A field is written only
+            # where it was measured, so the records of older sessions stay as they were.
+            more = {"dub_ms": f"dub_ms:{lang}", "dub_raw_ms": f"dub_raw_ms:{lang}", "slot_ms": f"slot_ms:{lang}",
+                    "dur_ratio": f"dur_ratio:{lang}", "backlog_ms": f"backlog:{lang}", "tgt_words": f"tgt_words:{lang}",
+                    "tgt_chars": f"tgt_chars:{lang}", "budget_ms": f"budget_ms:{lang}", "budget_scale": f"ctl:{lang}",
+                    "reasked": f"reasked:{lang}"}
+            out[-1].update({name: t[key] for name, key in more.items() if t.get(key) is not None})
     return out
 
 
@@ -93,7 +95,7 @@ def session_index(version: str, s: dict, chunks: list[dict], rows: list[dict]) -
         if not spoken:
             continue
         late = [r["late_ms"] for r in spoken if r["late_ms"] is not None]
-        val = lambda key: [r[key] for r in spoken if r[key] is not None]  # noqa: E731
+        val = lambda key: [r[key] for r in spoken if r.get(key) is not None]  # noqa: E731
         out.append({**common, "lang": lang, "spoken": len(spoken),
                     "first_audio_p50_ms": pct(val("first_audio_ms"), 50), "first_audio_p95_ms": pct(val("first_audio_ms"), 95),
                     "translate_p50_ms": pct(val("translate_ms"), 50), "voice_p50_ms": pct(val("voice_ms"), 50),
@@ -135,6 +137,8 @@ def main() -> None:
     ap.add_argument("stores", nargs="+", help="version=path to that backend's store file")
     ap.add_argument("--out", default=str(ROOT / "logs"))
     ap.add_argument("--trace", default=str(ROOT / "data-v1" / "trace"))
+    ap.add_argument("--more-trace", action="append", default=[], metavar="NAME=FOLDER",
+                    help="the trace of a comparison backend (data-v1/ab/<name>/trace); copied to logs/trace/<NAME>/")
     ap.add_argument("--streams", default=str(ROOT / "data-v1" / "streamwatch"))
     a = ap.parse_args()
     out = Path(a.out)
@@ -168,6 +172,9 @@ def main() -> None:
         print(f"{version}: {n} live sessions, {len(table(db, 'jobs'))} studio jobs")
     write_csv(out / "sessions" / "index.csv", index)
     write_csv(out / "jobs" / "index.csv", jobs)
+    for item in a.more_trace:
+        name, folder = item.split("=", 1)
+        print(f"trace of {name}: {copy_folder(Path(folder), out / 'trace' / name, ('*.jsonl',))} file(s)")
     print(f"trace files: {copy_folder(Path(a.trace), out / 'trace', ('*.jsonl',))}, "
           f"stream watch files: {copy_folder(Path(a.streams), out / 'streams', ('*.log', '*.csv', '*.txt'))}")
     print(f"written to {out}")

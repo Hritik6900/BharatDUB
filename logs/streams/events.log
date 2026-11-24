@@ -17,3 +17,7 @@
 2026-11-24 15:07:46 ENGINE BACK voice 3 (IndicF5)
 2026-11-24 15:07:52 WATCH started: v0=http://127.0.0.1:8010, v1=http://127.0.0.1:8110
 2026-11-24 15:08:20 WATCH started: v0=http://127.0.0.1:8010, v1=http://127.0.0.1:8110
+2026-11-24 16:01:05 LINK STALL 8 services did not answer at once: hosted speech and voice, hosted translation, separation (Demucs), speech-to-text (Whisper), translation (Gemma), voice 1 (IndicF5), voice 2 (IndicF5), voice 3 (IndicF5)
+2026-11-24 19:01:23 LINK BACK 8 services answer again
+2026-11-24 19:17:07 LINK STALL 8 services did not answer at once: hosted speech and voice, hosted translation, separation (Demucs), speech-to-text (Whisper), translation (Gemma), voice 1 (IndicF5), voice 2 (IndicF5), voice 3 (IndicF5)
+2026-11-24 20:01:54 LINK BACK 8 services answer again

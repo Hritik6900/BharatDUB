@@ -58,11 +58,14 @@ are not in `api/`; their timing per phrase is in `sessions/` and `trace/`.
 | `copied_voice`, `on_gpu` | 1 when the line was in the copied voice, and when our GPU engine made it |
 | `skipped` | `unheard` (no viewer on that language), `late` (too late to be worth saying) |
 | `dub_ms`, `dub_raw_ms` | v1.1: the dubbed audio that was sent, and the same line at the voice's own pace (before any speed-up) |
-| `slot_ms`, `dur_ratio` | v1.1: the span of the source phrase (of all of them when several were spoken in one call), and `dub_ms / slot_ms` |
+| `slot_ms`, `dur_ratio` | v1.1: the span of the source phrase (of all of them when several were spoken in one call: then only the first of them has these fields), and `dub_ms / slot_ms` |
 | `backlog_ms` | v1.1: how far the dub queue was behind the video when this phrase's turn came |
 | `tgt_words`, `tgt_chars` | v1.1: length of the translated line in words and in letters (no text) |
 | `budget_ms`, `budget_scale`, `reasked` | v1.1 with `V1_LIVE_BUDGET`: the duration the translator was given, the controller's scale, 1 = a shorter line was asked for, 2 = and used |
-| `merged_into` | the phrase was spoken in one call with the phrase of this `seq` |
+
+The v1.1 fields are in a record only where they were measured (a backend with the trace or the dense-speech
+flags on, from 24 Nov 2026). `sessions/ws1-*/` and `trace/ws1-*/` are the comparison backends of the v1.1 WS1
+measurement (`docs/v1/LIVE_DENSE_REPORT.md`): off, budget, ctl (budget + controller), native, tight.
 
 `audio_ms` is NOT the length of the dub: a line from our voice engine is sent in one piece (about 0 ms) and a
 streamed stock voice arrives faster than it plays. Before v1.1 the dub's length was not stored at all; for older

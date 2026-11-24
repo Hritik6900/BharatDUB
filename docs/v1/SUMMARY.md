@@ -52,6 +52,9 @@ Numbers are from `EVAL_REPORT.md` (three runs per Live setup, one run per Studio
 | `V1_LIVE_STOCK_DEFAULT` | a product rule, not a speed change | **your call** |
 | `V1_TTS_SERVER`, `V1_TTS_MAYA` | servers not loaded | off |
 | `V1_STORE=postgres` | never run against a database | `json` |
+| `V1_LIVE_BUDGET` (v1.1) | dense reel, Punjabi + Tamil, 5 runs: within 0.25 s 63.5% -> 80.6%, within 1 s 86.5% -> 92.3%, dub length / slot p90 1.42 -> 1.17, lines at 1.3x 46 -> 24 of 185; 15% fewer letters said; `LIVE_DENSE_REPORT.md` | **on** for Punjabi and languages like it; **your call** for Tamil (7 of 20 lines read had lost something that mattered) |
+| `V1_LIVE_RATECTRL` (v1.1) | with the budget: within 0.25 s 83.1%, within 1 s 91.8%, p90 1.11; inside the spread against the budget alone; 15 lines a run at 1.4x | off until someone has heard 1.4x |
+| `V1_LIVE_NATIVE_SPEED` (v1.1) | acts on 6.6 lines a run, all Tamil; no number moved | **off** |
 
 Against the targets: Studio words heard back 92.5% (target 96%): not reached. Live first audio 2.3-2.5 s through
 the link (target 1.8 s) and on time 56-70% (target 90%): not reached, and no Live flag moves either. Hard-audio
@@ -83,6 +86,7 @@ measured 1.8 s first audio there; `NEEDS_APPROVAL.md` item 3), not these flags.
 | 16 | Tunnel watchdog window (v1.1) | you start it; it reports only unless given the key and `-RestartStuck` |
 | 17 | Stop the laptop sleeping on AC power (v1.1): all three stalls of 24 Nov were standby | three `powercfg` lines |
 | 18 | The A100's real numbers on the status page (v1.1) | the QA server on the VM (item 6) and one more forwarded port |
+| 19 | Two or three dense recordings of about 10 minutes, your own content, for the Live replay (v1.1 WS1) | the files in `data-v1\eval\dense\`; hosted speech-to-text for the minutes replayed |
 
 ## 4. Decisions needed
 

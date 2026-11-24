@@ -408,3 +408,22 @@ async def test_a_line_that_arrives_late_gets_the_time_that_is_left_and_a_short_l
     p._pending[c2.seq] = {"timings": {}}
     await p._translate(TA, c2, [], None)
     assert llm.seen[-1]["max_words"] == 2 and llm.seen[-1]["max_chars"] == 8   # 0.7 s: 11 letters, 8 at the slow speed
+
+
+def test_collected_logs_have_the_new_fields_only_where_they_were_measured():
+    spec = importlib.util.spec_from_file_location(
+        "collect_logs_dense", Path(__file__).resolve().parents[2] / "scripts" / "v1" / "collect-logs.py")
+    cl = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cl)
+    old = {"seq": 1, "t_speech_ms": 0, "src_text": "ek do teen", "timings": {
+        "t_speech_end": 900, "t_stt_final": 1500, "t_translated:ta-IN": 2000, "t_first_audio:ta-IN": 3000}}
+    new = {"seq": 2, "t_speech_ms": 1000, "src_text": "chaar paanch chheh", "timings": {
+        "t_speech_end": 1900, "t_stt_final": 2500, "t_translated:ta-IN": 3000, "t_first_audio:ta-IN": 4000,
+        "dub_ms:ta-IN": 950, "dub_raw_ms:ta-IN": 1100, "slot_ms:ta-IN": 900, "dur_ratio:ta-IN": 1.056,
+        "backlog:ta-IN": 0, "tgt_words:ta-IN": 3, "tgt_chars:ta-IN": 18, "budget_ms:ta-IN": 900, "ctl:ta-IN": 1.0}}
+    a, b = cl.phrase_rows([old, new])
+    assert "dur_ratio" not in a and "src_text" not in a and "src_text" not in b      # an old record stays as it was
+    assert b["dur_ratio"] == 1.056 and b["backlog_ms"] == 0 and b["tgt_chars"] == 18 and b["budget_scale"] == 1.0
+    assert "reasked" not in b                                                         # not measured: not written
+    rows = cl.session_index("v1", {"id": "abcdef123456", "created_at": "2026-11-24T10:00:00"}, [old, new], [a, b])
+    assert rows[0]["dur_ratio_p50"] == 1.056 and rows[0]["backlog_p95_ms"] == 0

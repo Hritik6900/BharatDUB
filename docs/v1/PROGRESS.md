@@ -420,3 +420,102 @@ on/off difference is all-or-nothing, the timing numbers carry the usual run-to-r
   page's GPU line and the watcher's new lines are not behind a flag: they only stop showing something wrong, or
   print more.
 
+## v1.1 WS1: Live on dense speech (`V1_LIVE_BUDGET`, `V1_LIVE_RATECTRL`, `V1_LIVE_NATIVE_SPEED`), 24 Nov 2026
+
+The full account with every table is `docs/v1/LIVE_DENSE_REPORT.md`. Three flags, all off by default; with them
+off the Live pipeline is v0's (test `test_flags_off_nothing_new_is_asked_stored_or_built`).
+
+### What changed
+
+- **`backend/app/v1/dense.py`** (new, no I/O): `letters()`; `ExpansionModel` (per language and kind of voice: ms
+  of dub per target letter, per target word, per source word; a running average over the lines spoken, started
+  from a seed file; turns a slot into words and letters, a text into an expected duration); `RateController`
+  (PI on the backlog in seconds, scale 1.0 to 0.6, lets go within seconds once the backlog is gone);
+  `SpeakingShare` (share of the last 30 s the speaker talked; dense over 70%, until under 60%).
+- **New per phrase and language** (`live/pipeline.py`, written with `V1_TRACE` or one of the flags; nothing with
+  everything off): `dur_ratio` = dubbed seconds sent / seconds of the source slot, `backlog` (how far the dub
+  queue was behind the video when the phrase's turn came), `dub_ms`, `dub_raw_ms`, `slot_ms`, `tgt_words`,
+  `tgt_chars`, and with the flags `budget`, `budget_chars`, `budget_ms`, `est0_ms`, `est_ms`, `reasked`, `ctl`
+  (the scale), `ctl_i` (the integral), `dense`, `share`, `native`. They are in the stored phrase, the trace
+  (`v1/trace.py`, two new Prometheus histograms), `/api/v1/metrics/summary` and `/metrics-ui` (dub length / slot
+  p50 / p90 and backlog p95 per language; `v1/metrics.py`, `web/app/metrics-ui/page.tsx`), a session's
+  `/metrics` (`dense`, `ratectrl`, `expansion`), the stream watcher's end-of-stream summary
+  (`scripts/v1/stream-watch.py`; **the watcher window has to be restarted to print it**) and `logs/sessions/`
+  (`scripts/v1/collect-logs.py`, only where measured; `--more-trace` copies a comparison backend's trace).
+- **`V1_LIVE_BUDGET`**: the translator gets the phrase's own slot as words and letters, a compact register and
+  "keep names and numbers" (`providers/llm_local.py`, `llm_openai.py`: new `max_chars`, `compact`, sent only with
+  the flag). The answer's expected duration is checked; over by more than 15%: one request for a shorter line
+  (`shorten`, 2.5 s at most), used when shorter and well formed. A line that arrives late gets the time left
+  until the next phrase is due. Our engine's slow speed for lines of one to three words is counted. It replaces
+  v0's word limit (`live_length_budget`) for the phrases it can plan and leaves it for the rest (how the two
+  relate: report, section 2).
+- **`V1_LIVE_RATECTRL`**: the controller's scale multiplies that budget. Dense mode: budget at most 0.9 of the
+  slot, lines under 3 words join the next (the merger of `V1_PHRASE_DYNAMIC`, active only while dense), speed-up
+  up to 1.4x (`V1_DENSE_MAX_TEMPO`). Without `V1_LIVE_BUDGET` it changes only the speed limit and the join.
+- **`V1_LIVE_NATIVE_SPEED`**: v0's engines take `speed` per line and no duration (`DISCOVERY.md`), so the wanted
+  duration becomes a speed: at most 1.2x, never under 320 ms a word, the rest by tempo. Nothing on the engines
+  was changed; the v1 voice server (:9041) was not touched.
+- **Seed** `backend/config/live_expansion.json`, built by `backend/eval/v1/expansion_seed.py`. The stored history
+  had no dub length: `audio_ms` in `logs/sessions/` is the time between audio messages (about 0 for a line sent
+  in one piece). It can be worked out for a phrase whose successor queued straight behind it, which gives ms per
+  source word only (Punjabi 266, Tamil 231, Bengali 195 on our engine's copied voice). Ms per letter and word
+  come from the new fields: Punjabi 57.8 / 229, Tamil 56.1 / 360, from one flags-off run of this work. Other
+  languages start on v0's limit until their first line.
+- **Harness** `backend/eval/live_replay.py` (a file's sound and clock into Live in real time, any length,
+  settings in turn, waits while a stream is live on 8010 or 8110, mean and spread, optional WAV per phrase) and
+  `backend/eval/live_judge.py` (words heard back on a sample of those lines).
+- **Also:** `ab-server.*` and the tests force the three flags off like the others; `RUNBOOK.md` has the flags
+  and their settings; `logs/README.md` the new fields; `NEEDS_APPROVAL.md` item 19 asks for two or three dense
+  recordings of about 10 minutes (no long real recording exists here).
+
+### Measured
+
+One 24.9 s reel played 8 times in a row (211 s a run; the speaker talks 89% of the time, 5.1 words a second: a
+loop of one reel, no long real recording exists), GPU engine, Punjabi + Tamil, voice learned from the stream with
+consent, sync mode, hold fixed at 6 s, four comparison backends in turn, **5 runs each**, mean (lowest-highest):
+
+| | off | budget | budget + controller | + engine speed |
+|---|---|---|---|---|
+| Within 0.25 s of its moment | 63.5% (57.9-68.6) | 80.6% (77.8-83.6) | 83.1% (81.9-84.4) | 82.8% (80.5-85.9) |
+| Within 1 s (target 90%) | 86.5% (84.2-90.6) | 92.3% (89.8-96.1) | 91.8% (89.2-95.3) | 91.5% (87.7-94.7) |
+| dur_ratio p50 / p90 (target p90 1.0) | 0.98 / 1.42 | 0.91 / 1.17 | 0.85 / 1.11 | 0.84 / 1.09 |
+| Backlog p95 (ms) | 1535 (1063-2043) | 844 (414-1307) | 1191 (443-2667) | 1690 (421-4588) |
+| Skipped as too late per 10 min (target 1) | 7.1 (0-17.9) | 7.8 (0-35.8) | 9.5 (0-32.7) | 19.7 (0-44.8) |
+| Lines at 1.3x / 1.4x, of about 185 | 46 / 0 | 24 / 0 | 8 / 15 | 9 / 16 |
+| First audio p50 / p95 (ms) | 2408 / 3924 | 2627 / 4403 | 2651 / 4686 | 2618 / 4746 |
+| Copied voice | 97.4% | 96.1% | 94.8% | 95.6% |
+
+- **Targets:** within 1 s at 90%: reached with the budget (7 of 10 runs at 90% or more, the rest 89.2-89.8%).
+  dur_ratio p90 at 1.0: **not reached** (1.11; Punjabi 1.05, Tamil 1.17). One skip in 10 minutes: **not
+  reached in any setting**; skips come in bursts behind stalls (none in 11 of 20 runs).
+- **What is left:** phrases more than 1 s late because they queued behind a long dub fell from 8.9% to 2-3%;
+  those whose own audio arrived late stayed at 5-6% and are now the larger part (long utterances the recogniser
+  gives out only at their end; stalls). Of the lines still longer than their slot, 65 of 108 in Tamil are lines
+  of one to three words, which the engine has to say slowly.
+- **Cost:** 15-18% fewer letters said (3.55 -> 2.91 a source word in Punjabi, 3.72 -> 3.08 in Tamil); every
+  second line is asked for twice (translation p50 537 -> 714 ms). Words heard back, 40 lines a cell: Punjabi
+  87.7% -> 80.1%, Tamil 84.4% -> 82.9%. 20 lines read against their sources: Punjabi 2 lost something that
+  mattered, Tamil 7 (read by the author, not a native speaker).
+- **A check with no tolerance** (`V1_BUDGET_OVER=1.0`, 3 runs against 3): dur_ratio p90 1.10 against 1.07, the
+  median 0.78 against 0.84: no gain, shorter lines. Default stays 1.15.
+- **Engine speed:** 6.6 lines a run, all Tamil (Punjabi is already under the pace floor); no timing number moved;
+  words heard back 89.3% (33 lines) against 87.9% (33 lines sped up by tempo alone).
+- **Found on the way, not fixed:** speech fed in a session's first seconds, before the speech-to-text connection
+  is open, reaches it in one burst and is stamped as 27 words in a 1 s slot; the harness starts with 6 s of
+  silence for that reason. In one run a session's first line took 16.8 s to its first audio.
+- **Not measured:** a real long recording, one viewer language, Streamer Mode with a stored voice, a stock voice,
+  the hosted engine, other languages, dense mode's parts one by one, how 1.4x sounds, the flags together with
+  WS0's or with `V1_PHRASE_DYNAMIC`, the viewer's page in a browser.
+- **Recommendation:** `V1_LIVE_BUDGET` on for Punjabi and languages like it; for Tamil it trades content for
+  timing and is the user's call. `V1_LIVE_RATECTRL` off until someone has heard 1.4x (or with
+  `V1_DENSE_MAX_TEMPO=1.3`, not measured). `V1_LIVE_NATIVE_SPEED` off.
+
+- **Tests:** 207 pass, 1 skipped (was 185 + 1). New: `tests/test_v1_dense.py` (22: the model learns from lines, leaves out short and swallowed ones and starts a language without a seed; a missing or broken seed file; the controller tightens, never goes under its floor, does not wind up and lets go; the speaking share and its two thresholds; flags off = nothing new asked, stored or built; the budget as words and letters, the second answer used, kept out when it is in Latin letters or too slow; the fall back to v0's limit; dur_ratio and backlog stored, in the trace and in the summary; the controller's state in the metrics; dense mode joins a short line and allows 1.4x; engine speed with its floor and cap; a late line gets the time that is left and a short line counts as slow; both translators' prompts; the seed builder; the watcher's summary; the log collector; the three flags default off).
+- **v0 after this workstream:** all nine checks ok (`scripts/v1/v0-check.sh`). Nothing of v0 was edited, started or stopped; its store file was read by the log collector only. No comparison backend is left running.
+- **Test by hand:** `scripts\v1\ab-server.ps1 -Port 8112 -Name try -Flags "V1_LIVE_BUDGET=true,V1_LIVE_RATECTRL=true"`,
+  then `python -m eval.live_replay ..\data-v1\eval\reel25.mp4 --out ..\data-v1\eval\ws1\try --target on=http://127.0.0.1:8112 --runs 1 --loops 4`
+  from `backend\`: the table has `dur_ratio`, `backlog`, `asked to shorten`, `dense phrases`;
+  `GET /api/live/sessions/<id>/metrics` shows `ratectrl` and `expansion`; `/metrics-ui` on that port shows the two
+  new columns. With the flags off the same run has `dur_ratio` and `backlog` (the trace is on) and no budget.
+- **Roll back:** the three flags to `false` (the default) and restart the backend. The new numbers in the trace
+  and the pages are measurements only and stay.
