@@ -449,17 +449,17 @@ async def test_hq_job_with_the_text_flags_on(rig):  # noqa: F811
 
 
 @needs_ffmpeg
-async def test_hq_job_with_the_new_flags_off_is_as_before(rig):  # noqa: F811
+async def test_hq_job_with_the_new_flags_off_is_as_before_but_for_the_review(rig):  # noqa: F811
     r, tmp, made, stages, monkeypatch = rig
     assert not any(getattr(r.s, f) for f in WS3_FLAGS)
     monkeypatch.setattr(hq, "stages_for", lambda job_id, engine: stages(job_id, engine, own=True, checks=[1.0, 0.3, 0.4, 0.95, 1.0]))
     job = await r.create_job(make_video(tmp / "u.mp4"), "reel.mp4", ["ta-IN"], quality="hq")
     await r.run(job["id"])
     st = made[0]
-    assert [c.split(":")[0] for c in st.chats] == ["translate", "translate", "review", "translate"]   # clean, translate, review, numbers
+    assert [c.split(":")[0] for c in st.chats] == ["translate", "translate", "translate"]   # clean, translate, numbers
     meta = json.loads((r.job_dir(job["id"]) / "meta.json").read_text(encoding="utf-8"))
-    assert "glossary_auto" not in meta["hq"] and "transcript_put_back" not in meta["hq"]
-    assert set(meta["hq"]["text:ta-IN"]) == {"reviewed_changed", "normalised", "over_limit"}
+    assert "glossary_auto" not in meta["hq"]
+    assert set(meta["hq"]["text:ta-IN"]) == {"review", "reviewed_changed", "normalised", "over_limit"}
     assert not (Path(r.s.data_dir) / "hq_review").exists() and not (Path(r.s.data_dir) / "calibration").exists()
     segs = await r.spoken_segments(job["id"])
     trs = [(await r.store.select("translations", segment_id=s["id"], lang="ta-IN"))[0] for s in segs]
@@ -467,6 +467,48 @@ async def test_hq_job_with_the_new_flags_off_is_as_before(rig):  # noqa: F811
     assert keys == {"idx", "path", "provider", "text", "engine_speed", "dur_s", "speed", "backcheck", "similarity",
                     "scored_by", "passed", "why", "gpu_ms"}             # a stored take has the fields it always had
     assert len(trs[1]["alts"]) == 3 and set(trs[1]["qa"]) == {"backcheck", "similarity", "by", "provider"}
+
+
+# ---------- HQ never runs without the review ----------
+def test_review_is_required_whenever_hq_is_on():
+    s = get_settings()
+    off = s.model_copy(update={"v1_studio_hq": False, "v1_hq_review": False})
+    assert not review.required(off) and flags.flags(off)["V1_HQ_REVIEW"] is False
+    hq_on = off.model_copy(update={"v1_studio_hq": True})                    # the review's own flag still off
+    assert review.required(hq_on) and flags.flags(hq_on)["V1_HQ_REVIEW"] is True
+    assert review.required(off.model_copy(update={"v1_hq_review": True}))
+
+
+@needs_ffmpeg
+async def test_hq_on_and_the_review_flag_off_the_review_still_runs(rig):  # noqa: F811
+    r, tmp, made, stages, monkeypatch = rig
+    assert r.s.v1_studio_hq and r.s.v1_hq_review is False
+
+    def scripted(job_id, engine):
+        # The reviewer fails line 2 and writes it again; the "clean" step returns lines that were never said.
+        made.append(ScriptedStages(r.s, [{"ok": True}, {"ok": False, "rule": "meaning", "text": "விலை ஆயிரம்", "note": "wrong amount"},
+                                         {"ok": True}], checks=[1.0] * 9))
+        return made[-1]
+    monkeypatch.setattr(hq, "stages_for", scripted)
+    job = await r.create_job(make_video(tmp / "u.mp4"), "reel.mp4", ["ta-IN"], quality="hq")
+    await r.run(job["id"])
+    assert (await r.store.get("jobs", job["id"]))["status"] == "done"
+    st = made[0]
+    meta = json.loads((r.job_dir(job["id"]) / "meta.json").read_text(encoding="utf-8"))
+    assert len(st.asked) == 1 and len(st.asked[0][1]) == 3                  # every line went to the rubric review
+    assert not any(c.startswith("review") for c in st.chats)               # ... and not to the plain one
+    assert meta["hq"]["text:ta-IN"]["review"] == {"model": "gemini", "asked": 3, "edited": 1, "rejected": 0, "by_rule": {"meaning": 1}}
+    assert meta["hq"]["transcript_put_back"] == 3                          # the transcript guard ran too
+    segs = await r.spoken_segments(job["id"])
+    assert all(not s["src_text"].startswith("bilkul alag") for s in segs)
+    trs = [(await r.store.select("translations", segment_id=s["id"], lang="ta-IN"))[0] for s in segs]
+    assert trs[1]["text"] == "விலை ஆயிரம்"                                  # the reviewer's line is the one dubbed
+    assert (Path(r.s.data_dir) / "hq_review" / f"{job['id']}.jsonl").exists()   # and the edit is on record
+
+    # A standard job on the same server is not reviewed: the rule is about HQ.
+    plain = await r.create_job(make_video(tmp / "p.mp4"), "plain.mp4", ["ta-IN"])
+    await r.run(plain["id"])
+    assert len(made) == 1 and len(st.asked) == 1
 
 
 # ---------- calibration ----------

@@ -6,7 +6,9 @@ closed them. Numbers quoted below come from the documents named beside them; see
 [docs/handbook/RESULTS.md](docs/handbook/RESULTS.md) for the measured results with their conditions.
 
 **Flags.** Every behaviour added in v1 and v1.1 sits behind a flag whose default is off; with every flag off v1
-builds the same providers and runs the same pipeline as v0. Tests force every v1 flag off whatever the local env
+builds the same providers and runs the same pipeline as v0. Since v1.2 Part 1 (26 Nov 2026) three things are on
+without a flag being set: `V1_HQ_ADAPTIVE` (HQ jobs only), the review of every HQ job, and the viewer hold's way
+back (`LIVE_SYNC_EASE`, a kill switch). Tests force every v1 flag off whatever the local env
 file says. Recommended settings: `docs/v1/RUNBOOK.md`, "Recommended settings".
 
 ## [Unreleased]
@@ -18,14 +20,40 @@ file says. Recommended settings: `docs/v1/RUNBOOK.md`, "Recommended settings".
 - `scripts/docs/gen_docs.py` (with `gen-docs.ps1`) regenerates the handbook's generated blocks: commit history,
   ADR and experiment indexes, result tables from `logs/` and `backend/eval/results.csv`.
 - `scripts/docs/docs-check.py`: fails when a generated block is stale or code changed without a changelog entry.
+- **v1.2 Part 1, kept Live recordings (ADR-0034):** a recording is deleted by itself `V1_RECORD_KEEP_DAYS` (30)
+  days after it ended, checked when the backend starts and every half hour; `GET /api/v1/recordings` lists what
+  is kept and `DELETE /api/v1/recordings/<session>` removes one; `/live` shows the list with a Delete button.
+  Recording itself stays opt-in (`V1_LIVE_RECORD` and the session's own tick).
+- **v1.2 Part 1, licences:** Demucs, Silero VAD and IndicF5's lineage read on their official pages on 26 Nov 2026
+  and recorded with links in `docs/v1/MODELS.md` and `docs/handbook/MODELS.md`. IndicF5: legal confirmation
+  needed (`docs/v1/NEEDS_APPROVAL.md` item 28). Demucs: code MIT, weights "not clear" by its maintainer.
 
 ### Changed
+
+- **v1.2 Part 1:** `V1_HQ_ADAPTIVE` is on: the default in code and in `backend/.env.example`, and the same
+  recommendation with the same measured reason in `docs/v1/V1_1_SUMMARY.md`, `docs/v1/RUNBOOK.md` and
+  `docs/v1/SUMMARY.md` (61% less voice time against five fixed takes, the same take kept on 76 of 76 lines; the
+  same 143 takes as v1's earlier rule). Tests and comparison backends still force it off unless asked.
+- **v1.2 Part 1:** Studio HQ never runs without the review. An HQ job is reviewed against the rubric and its
+  transcript guarded whatever `V1_HQ_REVIEW` says; `/api/v1/flags` shows `V1_HQ_REVIEW` as on whenever
+  `V1_STUDIO_HQ` is on. Standard jobs are untouched.
+- `docs/handbook/PITCH_FACTS.md`: the real 67-minute stream is row 1 of "Safe to say" (it was row 3), with its
+  conditions spelled out; no number changed. One more line under "Do not claim" (licences).
 
 ### Removed
 
 ### Fixed
 
+- **v1.2 Part 1, the viewer hold never came back down (ADR-0035, EXP-030).** After the hold grew during a slow
+  link it now eases back to its normal value (6 s) in steps of 250 ms once phrases are ready early again, never
+  under it and never while a phrase is late; `/watch` plays 1.1x after each step until it has caught up (not
+  run in a browser). Kill switch `LIVE_SYNC_EASE=false`. Measured on a link slowed for 70 s, 2 runs each: hold at
+  the end 11.0 s and 11.0 s without it, 6.25 s and 6.0 s with it.
+
 ### Security
+
+- A kept recording no longer stays for good: 30 days, then deleted; any one deletable at once (ADR-0034). The
+  delete call takes a recording's name only, never a path.
 
 ## [v1.1] - 2026-11-25
 

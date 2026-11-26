@@ -1,6 +1,7 @@
 # Open questions
 
-Numbered questions that block a decision or a claim. Dated 2026-11-25. Sources: `docs/v1/SUMMARY.md` section 4,
+Numbered questions that block a decision or a claim. Dated 2026-11-25; questions 3, 7, 13, 18 and 20 updated and
+question 21 added on 2026-11-26 (v1.2 Part 1). A closed question keeps its number. Sources: `docs/v1/SUMMARY.md` section 4,
 `docs/v1/V1_1_SUMMARY.md` sections 3-4, `docs/v1/NEEDS_APPROVAL.md` (current item numbers), `docs/v1/MODELS.md`,
 SPEC sections 20-21. Owner: **founder** (a decision, a recording, a price, a listener) or **engineering** (a run
 or a build). Plan view: [ROADMAP.md](ROADMAP.md).
@@ -22,6 +23,9 @@ or a build). Plan view: [ROADMAP.md](ROADMAP.md).
 - **Owner:** founder. **Blocked on:** item 22 (and 19 c for the healthy night).
 
 ### 3. May Studio HQ be offered without `V1_HQ_REVIEW`? Is our Whisper's second hearing worth keeping?
+- **First half answered, 26 Nov 2026 (founder): no.** HQ never runs without the review, and the code enforces it:
+  an HQ job is reviewed and its transcript guarded whatever `V1_HQ_REVIEW` says (`app/v1/hq/review.py`, tested).
+  The second half (the second hearing) stays open.
 - **Why it matters:** without the review two of three test videos were dubbed from a damaged transcript; the
   second hearing is where the Latin-letter lines came from, and the hosted hearing measured better.
 - **What would answer it:** an HQ run with the hosted hearing only, compared line by line with the review on.
@@ -47,9 +51,13 @@ or a build). Plan view: [ROADMAP.md](ROADMAP.md).
 - **Owner:** founder (rule), engineering (run). **Blocked on:** none.
 
 ### 7. How long are recordings kept, and does deleting a voice delete them?
-- **Why it matters:** `V1_LIVE_RECORD` keeps a speaker's dubbed voice and picture with no automatic deletion; the
-  uploads rule is 24 hours.
-- **What would answer it:** a written retention rule, then code for it.
+- **First half answered and built, 26 Nov 2026 (founder):** recording stays opt-in; a recording is deleted by
+  itself 30 days after it ended (`V1_RECORD_KEEP_DAYS`, checked when the backend starts and every half hour); the
+  user can delete any recording (`/live` list, `DELETE /api/v1/recordings/<session>`). [ADR-0034](adr/0034-recording-retention.md).
+- **Still open: does deleting a voice delete the recordings spoken in it?** Today it does not, and it could not:
+  a recording does not say whose voice it holds (`session.json` has no voice or streamer id), and deleting a voice
+  profile removes the sample and the embedding only. No rule was given, so none was built.
+- **What would answer it:** the founder's rule; then the recording has to store the voice profile's id.
 - **Owner:** founder. **Blocked on:** item 25.
 
 ### 8. What does a dubbed minute cost, and what is the price?
@@ -83,10 +91,16 @@ or a build). Plan view: [ROADMAP.md](ROADMAP.md).
 - **What would answer it:** the founder's recorded voice against itself and its copies on the QA server.
 - **Owner:** engineering. **Blocked on:** item 4.
 
-### 13. Do the speaker model's training data, IndicF5's terms, Demucs, Silero and the hosted vendors' terms allow commercial use?
-- **Why it matters:** the speaker model is Apache-2.0 but trained on VoxCeleb (no licence stated); v0's notes say
-  IndicF5's commercial use is "unanswered"; Demucs and Silero licences are not recorded in our documents.
-- **What would answer it:** a legal read before a contract.
+### 13. Do the speaker model's training data, Demucs' weights and the hosted vendors' terms allow commercial use?
+- **Why it matters:** the speaker model is Apache-2.0 but trained on VoxCeleb (no licence stated). The hosted
+  vendors' terms were never reviewed.
+- **Recorded on 26 Nov 2026 from the official repositories** ([MODELS.md](MODELS.md), `../v1/MODELS.md`):
+  Silero VAD is MIT (licence file; its README: "Published under permissive license (MIT)"). Demucs' code is MIT
+  in both repositories, but the maintained one's README says of the weights: "The license of the weights is not
+  clear: MusDB contains some data that were only usable for research purpose." So Demucs is **not** settled by
+  its MIT file. IndicF5 moved to question 21.
+- **What would answer it:** a legal read before a contract; for Demucs, a separation model whose weights carry a
+  clear licence, or a lawyer's view on the weights.
 - **Owner:** founder. **Blocked on:** item 24.
 
 ## Engineering
@@ -113,20 +127,51 @@ or a build). Plan view: [ROADMAP.md](ROADMAP.md).
 - **What would answer it:** a planned two-stream run with the backend on the VM; the vendor's account limits.
 - **Owner:** engineering. **Blocked on:** items 1-2.
 
-### 18. How should the hold come back down after a stall?
+### 18. How should the hold come back down after a stall? (server side built 26 Nov 2026; browser test open)
 - **Why it matters:** on the 67-minute stream it grew from 6 s to 11 s and stayed; a viewer's player leaves a small
   offset alone, so lowering it on the server would not move viewers already watching.
-- **What would answer it:** a viewer-page change and a browser test.
-- **Owner:** engineering. **Blocked on:** none.
+- **Built and measured on 26 Nov 2026** ([ADR-0035](adr/0035-hold-ease-back.md),
+  [EXP-030](experiments/EXP-030-hold-ease-back.md)): the server gives the hold back in steps of 250 ms once phrases
+  have time in hand again (after a slow link of 70 s: 11.0 s with the rule off at the end of both runs; 6.25 s
+  and 6.0 s with it on, 2 runs each), and the viewer page plays 1.1x after each step until it has caught up.
+  Kill switch `LIVE_SYNC_EASE=false`.
+- **Still open:** the viewer page's catch-up was type-checked, not run in a browser. Whether a YouTube embed (a
+  live one above all) takes the 1.1x is not known.
+- **What would answer it:** a browser test of `/watch` through a slow spell, on an uploaded video and on a live
+  broadcast (`window.__bdSync` shows where the player is against where it should be, and its speed).
+- **Owner:** engineering. **Blocked on:** none (it needs a browser test set up in `web/`, and the website rebuilt).
 
 ### 19. Does the restore from backup work, and do the engines come back warm in 5 minutes?
 - **Why it matters:** the restore was never rehearsed and the engines do not start by themselves.
 - **What would answer it:** a bucket, one backup, one restore on another machine; a timed VM restart.
 - **Owner:** founder (bucket, snapshot), engineering (rehearsal). **Blocked on:** items 15, 1-3.
 
-### 20. Should `V1_HQ_ADAPTIVE` be on?
-- **Why it matters:** the sources disagree. `docs/v1/V1_1_SUMMARY.md` section 3 says on (61% less voice time
+### 20. Should `V1_HQ_ADAPTIVE` be on? (closed 26 Nov 2026: on)
+- **Answer (founder, 26 Nov 2026): on.** The four places now say the same thing with the same measured reason:
+  against five takes of every line 61% less voice time (206 s against 524 s over three videos) with the same take kept on 76 of 76 lines; against v1's earlier rule (up to 4 takes until one passes) the same number of takes (143), so it costs nothing.
+  The code's default is on as well (it acts on HQ jobs only); tests and comparison backends still force it off
+  unless a test or a run asks for it. NEEDS_APPROVAL item 27, point 1, is closed.
+- **As it stood on 25 Nov:** the sources disagreed. `docs/v1/V1_1_SUMMARY.md` section 3 says on (61% less voice time
   against five fixed takes, the same take kept on 76 of 76 lines); `docs/v1/RUNBOOK.md` section 3,
   `docs/v1/SUMMARY.md` and `backend/.env.example` say off (against v1's own rule both make 143 takes).
 - **What would answer it:** the founder's choice; no new measurement is needed. Then make the four places agree.
-- **Owner:** founder. **Blocked on:** item 27.
+- **Owner:** founder. **Blocked on:** nothing (closed).
+
+### 21. Is IndicF5 open to commercial use? Status: **legal confirmation needed** (26 Nov 2026)
+- **Why it matters:** IndicF5 is the copied voice of the product (in use on 9001-9003). Two sources say two things.
+- **Source A, MIT:** the model's Hugging Face record has `license: mit` (https://huggingface.co/ai4bharat/IndicF5,
+  API record read 26 Nov 2026, revision `fb652a96e508091045890dae5bb99fe511facbcf`, gated). Its page says nothing
+  about commercial use; its terms of use are about consent ("only clone voices for which you have explicit
+  permission"). Its GitHub repository (https://github.com/AI4Bharat/IndicF5) has no licence file.
+- **Source B, non-commercial lineage:** the card of a model fine-tuned from it, `dheeyantra/dhee-indic-f5`
+  (https://huggingface.co/dheeyantra/dhee-indic-f5, CC-BY-NC-4.0, read 26 Nov 2026), says: "This model inherits
+  non-commercial terms from its lineage: it is fine-tuned from `ai4bharat/IndicF5`, which builds on **F5-TTS**
+  (trained on the **Emilia** dataset, CC-BY-NC-4.0) and **IIT-Madras Indic TTS** data (non-commercial)." The same
+  card lists its base model as "`ai4bharat/IndicF5` (MIT)". F5-TTS's own pages agree on its half: "The pre-trained
+  models are licensed under the CC-BY-NC license due to the training data Emilia"
+  (https://github.com/SWivid/F5-TTS, README; Hugging Face tag `cc-by-nc-4.0`).
+- **Not known:** whether IndicF5's weights started from F5-TTS's pre-trained (Emilia) weights or were trained from
+  nothing on the data AI4Bharat lists (Rasa, IndicTTS, LIMMITS, IndicVoices-R): neither AI4Bharat page says. The
+  terms of the IndicTTS and LIMMITS data were not read. The third party's claim is a claim, not a ruling.
+- **What would answer it:** written confirmation of commercial use from AI4Bharat, or a legal review.
+- **Owner:** founder. **Blocked on:** item 28.

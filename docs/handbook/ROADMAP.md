@@ -28,7 +28,7 @@ From `docs/v1/ARCHITECTURE.md` (targets), `docs/v1/EVAL_REPORT.md` and `docs/v1/
 | 3 | Stop the five comparison backends on 8111-8115 | item 18 |
 | 4 | Switch v1's flags to the recommended set; decide `V1_BREAKER` + `V1_LIVE_DEGRADE` and `V1_LIVE_BUDGET` | [RUNBOOK.md](RUNBOOK.md#flags-and-the-recommended-v1-env); SUMMARY section 4 decision 4 |
 | 5 | Choose the English voice (`V1_EN_VOICE`), and whether a stock-voice session may move to the copy when the stock voice fails | item 22; [INC-06](INCIDENTS.md#inc-06-hosted-stock-voice-refusing-lines-http-502) |
-| 6 | Decide whether Studio HQ is offered at all without `V1_HQ_REVIEW` | SUMMARY section 4 decision 6; [INC-07](INCIDENTS.md#inc-07-hq-transcript-damage-found) |
+| 6 | ~~Decide whether Studio HQ is offered at all without `V1_HQ_REVIEW`~~ decided 26 Nov 2026: never, enforced in code | SUMMARY section 4 decision 6; [INC-07](INCIDENTS.md#inc-07-hq-transcript-damage-found) |
 
 ## Next (the GPU machine, in the checklist's order)
 
@@ -42,7 +42,8 @@ From `docs/v1/ARCHITECTURE.md` (targets), `docs/v1/EVAL_REPORT.md` and `docs/v1/
 | 12 | Pin model versions after the first good start | 12 |
 | 13 | Measurements only the founder can enable: session start with a recorded voice, a male speaker, English on a healthy night; 2-3 dense 10-minute recordings; 30 labels a language; listeners for the blind test | 19, 20, 21, 26 |
 | 14 | Prices for the cost per minute (no figure is shown until rates are set) | 23 |
-| 15 | A pitch video of a real stream, and how long recordings stay | 25 |
+| 15 | A pitch video of a real stream (how long recordings stay: decided and built 26 Nov 2026, 30 days, [ADR-0034](adr/0034-recording-retention.md)); whether deleting a voice deletes its recordings | 25 |
+| 15a | Get written confirmation of commercial use from AI4Bharat / legal review (IndicF5) | 28 |
 
 ## Later (product gaps, SPEC section 20)
 
@@ -57,7 +58,7 @@ From `docs/v1/ARCHITECTURE.md` (targets), `docs/v1/EVAL_REPORT.md` and `docs/v1/
 | 22 | **Capacity:** more than one stream per GPU / per hosted account (one GPU through one tunnel is one stream; hosted account = 1 request at a time) | not measured beyond one test run |
 | 23 | **Never-tested paths:** a person at a real microphone for a long session, a real YouTube Live broadcast with outside viewers, a phone on a mobile network, word error rate on ground-truth clips | SPEC section 20 |
 | 24 | Speech-to-text fallback for the Standard engine and for non-Hindi sources | [INC-02](INCIDENTS.md#inc-02-hosted-stt-outage) |
-| 25 | The hold that grows during stalls and never comes back down (viewer page change + browser test) | SPEC section 21, open |
+| 25 | The hold that grows during stalls and never comes back down: server rule and viewer-page change built 26 Nov 2026 ([ADR-0035](adr/0035-hold-ease-back.md)); **a browser test of the viewer page is still to do** | SPEC section 21; [EXP-030](experiments/EXP-030-hold-ease-back.md) |
 
 Decided in [ADR-0019](adr/0019-v1-on-laptop.md) (revisit with items 1-3), [ADR-0026](adr/0026-gated-models.md),
 [ADR-0033](adr/0033-deploy-kit-4gb-rule.md).

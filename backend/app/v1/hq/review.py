@@ -1,4 +1,5 @@
-"""Studio HQ: the rubric review (`V1_HQ_REVIEW`).
+"""Studio HQ: the rubric review (`V1_HQ_REVIEW`; since 26 Nov 2026 part of every HQ job whatever the flag says,
+see `required`).
 
 The hosted model (the `gemini` provider of `providers/`; when it is not configured, the `review` list of the
 routing file) reads every translated line of a video against a written rubric and may replace a line. It must
@@ -24,6 +25,14 @@ from app.v1 import trace
 from app.v1.hq import text as hqtext
 
 REASONS = ("meaning", "numbers_names", "register", "length")
+
+
+def required(settings: Any) -> bool:
+    """Is the review part of an HQ job? Always, when HQ is on: HQ never runs without it, whatever `V1_HQ_REVIEW`
+    says (decided 26 Nov 2026). Without the review HQ's merge and clean steps dubbed two of three test videos from
+    a damaged transcript (25 of 38 lines no longer the line heard, 0 with it), and heard-back cannot see that.
+    Every place that used to read the flag asks here; the flag alone still answers for code outside an HQ job."""
+    return bool(settings.v1_studio_hq or settings.v1_hq_review)
 RUBRIC = """Check every line against these four rules, in this order. A line passes only when all four hold.
 
 1. MEANING KEPT. The dub says what the source says: nothing added, nothing left out, nothing changed. A statement

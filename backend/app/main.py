@@ -17,6 +17,7 @@ from app.studio import routes as studio_routes
 from app.v1 import health as v1_health
 from app.v1 import listen as v1_listen
 from app.v1 import metrics as v1_metrics
+from app.v1 import record as v1_record
 
 log = logging.getLogger("app")
 settings = get_settings()
@@ -34,10 +35,17 @@ async def sweep_expired_uploads() -> int:
     return n
 
 
+async def sweep_old_recordings() -> int:
+    """Kept Live recordings past `V1_RECORD_KEEP_DAYS` (app/v1/record.py). Runs whether or not recording is on now."""
+    return len(await asyncio.to_thread(v1_record.sweep_now))
+
+
 async def _sweeper() -> None:
     while True:
         with suppress(Exception):
             await sweep_expired_uploads()
+        with suppress(Exception):
+            await sweep_old_recordings()
         await asyncio.sleep(1800)
 
 
@@ -58,6 +66,8 @@ async def close_stale_sessions() -> int:
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     with suppress(Exception):
         await close_stale_sessions()
+    with suppress(Exception):   # at start, before anything else: a server that was off for a while has catching up to do
+        await sweep_old_recordings()
     task = asyncio.create_task(_sweeper())
     yield
     task.cancel()
@@ -80,6 +90,7 @@ app.include_router(streamer_routes.router)
 app.include_router(v1_health.router)
 app.include_router(v1_metrics.router)
 app.include_router(v1_listen.router)   # every route answers 404 unless V1_LISTEN_TEST is on
+app.include_router(v1_record.router)   # kept Live recordings: list and delete (nothing exists unless one was asked for)
 
 
 @app.get("/health")

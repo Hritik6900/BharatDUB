@@ -48,6 +48,8 @@ export function useLiveFeed(
     offsetMs: number;
     onEvent?: (m: Record<string, unknown>) => void;
     videoNow?: () => number | null;
+    /** The speed the viewer's video plays at (1 = normal): a phrase due in 2 s of video is due sooner at 1.1x. */
+    videoRate?: () => number;
     /** A streamer's own mic: every phrase plays this long after it was spoken (YouTube's delay). null = off. */
     speechOffsetMs?: number | null;
   },
@@ -138,7 +140,8 @@ export function useLiveFeed(
       if (typeof mediaS !== "number" || performance.now() - lastSync.current > 5000) return null;
       const v = optsRef.current.videoNow?.();
       if (v == null) return null;
-      const wait = mediaS - v + optsRef.current.offsetMs / 1000;
+      const speed = optsRef.current.videoRate?.() || 1;
+      const wait = (mediaS - v) / speed + optsRef.current.offsetMs / 1000;
       return wait > MAX_SYNC_WAIT_S ? null : wait;
     };
 

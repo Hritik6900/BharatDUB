@@ -91,7 +91,8 @@ each time). Numbers are **measured** unless labelled. Sources: SPEC sections 17,
   asked every 15 s and the hosted stream ends at the next final (`stt_gpu.RETURN_CHECK_S`). Also fixed from the
   same stream: phrase cut one word early, tails repeating dubbed words, "nan" lines, stale "live" sessions closed
   at start, VAD CPU use.
-- **Follow-ups:** the hold does not come back down (open; needs a viewer-page change and a browser test); one GPU
+- **Follow-ups:** the hold does not come back down (built 26 Nov 2026: ADR-0035, EXP-030; the viewer page's part
+  still needs a browser test); one GPU
   through one tunnel is one stream (rule); backend on the VM (items 1-3); breaker + ladder (v1.1 WS0,
   [ADR-0027](adr/0027-breakers-degrade-ladder.md)); tunnel watchdog (item 17). See
   [ADR-0011](adr/0011-borrowed-a100-ssh-tunnels.md), [EXP-016](experiments/EXP-016-real-stream-67min.md).

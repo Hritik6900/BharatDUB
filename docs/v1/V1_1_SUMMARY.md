@@ -2,7 +2,8 @@
 
 What v1.1 added to v1, what each part measured, which flags to switch on, what waits for you, and the commands.
 Every number here is quoted from the report named beside it; nothing was measured for this page. Where a target
-was not reached it says so. Detail per workstream: `PROGRESS.md`. Code defaults: every flag off.
+was not reached it says so. Detail per workstream: `PROGRESS.md`. Code defaults: every flag off, except
+`V1_HQ_ADAPTIVE` (on since 26 Nov 2026, v1.2 Part 1; it acts on HQ jobs only).
 
 Tests: 311 pass, 1 skipped. v0 was not changed.
 
@@ -119,11 +120,12 @@ of `backend/.env.example`.
 | `V1_LIVE_NATIVE_SPEED` | off | no timing number moved |
 | `V1_LIVE_WARMSTART` | off | no proven gain |
 | `V1_EN_SINGLE_VOICE` | on once you chose `V1_EN_VOICE` (checklist item 22) | removes the second voice; `copy` costs timing, `stock` is not your voice |
-| `V1_HQ_JUDGE` + `V1_HQ_REVIEW` | on whenever `V1_STUDIO_HQ` is on | corrected count; review is what keeps the transcript intact |
-| `V1_HQ_ADAPTIVE` | on | 61% less voice time against fixed 5, same takes kept |
+| `V1_HQ_JUDGE` | on whenever `V1_STUDIO_HQ` is on | corrected count |
+| `V1_HQ_REVIEW` | nothing to set: since 26 Nov 2026 an HQ job is always reviewed, whatever this flag says (enforced in code, tested) | review is what keeps the transcript intact: 25 of 38 lines damaged without it, 0 with it |
+| `V1_HQ_ADAPTIVE` | **on** (decided 26 Nov 2026; also the code's default now) | against five takes of every line 61% less voice time (206 s against 524 s over three videos) with the same take kept on 76 of 76 lines; against v1's earlier rule (up to 4 takes until one passes) the same number of takes (143), so it costs nothing |
 | `V1_HQ_NORMALISE`, `V1_HQ_AUTO_GLOSSARY` | off | normaliser changed no line on the test videos (no digits); glossary's effect not separated |
 | `V1_HQ_CALIBRATE`, `V1_LISTEN_TEST` | on when you want to label or run a listening test | pages only |
-| `V1_LIVE_RECORD` | off; on only for a pitch recording | Live audio is otherwise never stored |
+| `V1_LIVE_RECORD` | off; on only for a pitch recording | Live audio is otherwise never stored. A kept recording is deleted by itself after `V1_RECORD_KEEP_DAYS` (30) and can be deleted at any time (list on `/live`, `DELETE /api/v1/recordings/<session>`) |
 
 One thing from the earlier list to look at again: `V1_LIVE_STOCK_DEFAULT=true` means a `/live` session without a
 streamer profile never learns a voice, and every v1.1 Live number was measured with a learned voice.
@@ -154,6 +156,8 @@ streamer profile never learns a voice, and every v1.1 Live number was measured w
 | 24 | The decisions in one place | you |
 | 25 | A pitch video of a real stream; how long recordings stay | you + laptop |
 | 26 | Listeners for the blind listening test | you |
+| 27 | Documentation: the handbook's "(unconfirmed)" items (its `V1_HQ_ADAPTIVE` point was settled on 26 Nov 2026: on) | you |
+| 28 | Get written confirmation of commercial use from AI4Bharat / legal review (IndicF5) | you |
 
 Items 16-18 take five minutes and need no VM. Known before deploying: by the estimates 31B does not fit beside the
 voice engines; whether the 12B checkpoint starts on the machine's vLLM is not known; the deploy kit has not run on

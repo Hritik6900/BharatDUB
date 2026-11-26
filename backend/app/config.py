@@ -154,6 +154,15 @@ class Settings(BaseSettings):
     # for the rest of a session. Measured 2026-11-21 with the hold fixed at 6 / 7.5 / 9 s: 91 / 90 / 90% of phrases
     # started within 1 s of their moment, so a longer hold only removes the rare worst cases.
     live_sync_grow_step_ms: int = 1000
+    # The way back (app/v1/hold.py). The hold only ever grew: on a 67-minute stream it went from 6 s to 11 s during
+    # stalls of the link and stayed there. On: once nothing was late for `live_sync_ease_after_ms` and phrases are
+    # ready at least step + spare before their moment, the hold goes down `live_sync_ease_step_ms` at most every
+    # `live_sync_ease_every_ms`, to the value the session began with and never under it. False = it only grows.
+    live_sync_ease: bool = True
+    live_sync_ease_step_ms: int = 250
+    live_sync_ease_every_ms: int = 5000
+    live_sync_ease_after_ms: int = 20000
+    live_sync_ease_spare_ms: int = 500
     live_warmup: bool = True              # one tiny translation when a session starts, so the first phrase is not slow
     live_sync_slack_ms: int = 400         # a dubbed phrase may run this much longer than the speech before it is sped up
     live_sync_clone_spare_ms: int = 2000  # the copied voice is used when at least this long is left before the audio is needed
@@ -256,7 +265,10 @@ class Settings(BaseSettings):
     v1_hq_judge_by_lang: str = ""       # another order for single languages: "hi-IN=whisper_gpu,prisma;ta-IN=prisma"
     v1_hq_calibrate: bool = False       # /studio/calibrate and its routes: a person labels dubbed lines blind, the judge is compared with the labels
     v1_hq_calibrate_min_labels: int = 30    # under this many labels (or under 5 of either kind) no threshold is recommended
-    v1_hq_adaptive: bool = False        # one take first; more (up to v1_hq_adaptive_max) only when its score is under the threshold
+    # On by default since 26 Nov 2026 (the founder's decision): against five takes of every line 61% less voice time
+    # (206 s against 524 s over three videos) with the same take kept on 76 of 76 lines; against v1's earlier rule
+    # (up to v1_hq_nbest until one passes) the same number of takes (143). Acts on HQ jobs only.
+    v1_hq_adaptive: bool = True         # one take first; more (up to v1_hq_adaptive_max) only when its score is under the threshold
     v1_hq_adaptive_max: int = 5
     v1_hq_adaptive_same_stop: bool = False  # adaptive: no further take once two takes were heard back as the very same words (measured: 11% fewer takes, a lower-scored take kept on 3 of 76 lines)
     v1_hq_adaptive_min: float = 0.0     # the threshold for "make more takes"; 0 = v1_hq_backcheck_min
@@ -264,12 +276,14 @@ class Settings(BaseSettings):
     v1_hq_normalise: bool = False       # numbers, dates, the rupee sign, % and short forms written out by rule in the target language before the voice (hi, bn, ta, en)
     v1_hq_auto_glossary: bool = False   # names, brands and repeated English terms found in the job's transcript are used as its glossary
     v1_hq_auto_glossary_max: int = 40
+    # An HQ job is always reviewed, whatever this says (app/v1/hq/review.py `required`): HQ on means review on.
     v1_hq_review: bool = False          # the hosted model reviews every translated line against the written rubric and may edit; every edit is logged
     v1_hq_duck_db: float = -9.0         # sidechain ducking: how far the background goes down under speech
     v1_hq_loudness_lufs: float = -16.0  # 0 = no loudness normalisation
     # v1.1 pitch kit (app/v1/record.py, pitch.py, listen.py)
     v1_live_record: bool = False        # a Live session that asked for it (record=true when it is made) saves its dubbed audio and phrase times under <DATA_DIR>/recordings; with this off, or without the ask, nothing is written
     v1_record_dir: str = ""             # empty = <DATA_DIR>/recordings
+    v1_record_keep_days: int = 30       # a recording is deleted by itself this many days after it ended (at start and every half hour); 0 = never by itself
     v1_listen_test: bool = False        # /listen-test and its routes: blind A/B pairs from <DATA_DIR>/listen/pairs, ratings in <DATA_DIR>/listen
     v1_listen_dir: str = ""             # empty = <DATA_DIR>/listen
     # Cost per minute on the numbers page: nothing is shown for a rate that is 0 (not set).

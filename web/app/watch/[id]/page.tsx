@@ -14,6 +14,12 @@ import { lang } from "@/lib/langs";
 
 const BED_VOLUME = 18; // percent: the original stream under the dub
 const HOLD_MAX_S = 45; // up to this far ahead the video simply waits; beyond it, it is sent to the right place
+// The hold came down (the server gives it back in small steps once the dub is in time again after a stall): this
+// player is then a little behind where it should be, and plays slightly faster until it is there. Only then: a
+// player that is behind for another reason is left alone, as before.
+const CATCHUP_RATE = 1.1;
+const CATCHUP_FROM_S = 0.15; // behind by more than this: catch up
+const CATCHUP_DONE_S = 0.05; // within this: normal speed again
 
 export default function WatchPage() {
   return (
@@ -41,6 +47,8 @@ function Watch() {
   const sync = useRef<{ media: number; at: number; playing: boolean; delay: number } | null>(null);
   const [syncDelay, setSyncDelay] = useState(0);
   const hold = useRef(false); // this page paused the video so the dub can catch up
+  const easing = useRef(false); // the hold came down and this player has not caught up with it yet
+  const fast = useRef(false); // this page asked the player for CATCHUP_RATE
   const [hasVideo, setHasVideo] = useState(false);
   const clock = useYouTubeClock(iframe, hasVideo);
   // Where the session stands when a service behind it is away (sent once a second, only by a backend that has
@@ -49,6 +57,7 @@ function Watch() {
   const onEvent = useCallback((m: Record<string, unknown>) => {
     if (m.type === "clock") setRung(typeof m.rung === "string" ? m.rung : "");
     if (m.type !== "sync") return;
+    if (sync.current && Number(m.delay_ms) < sync.current.delay) easing.current = true;
     sync.current = { media: Number(m.media_s), at: performance.now(), playing: Boolean(m.playing), delay: Number(m.delay_ms) };
     setSyncDelay(Number(m.delay_ms));
   }, []);
@@ -71,6 +80,7 @@ function Watch() {
     onEvent,
     videoNow,
     speechOffsetMs: mine ? offset : null,
+    videoRate: clock.rate,
   });
   const s = feed.session;
   useEffect(() => setHasVideo(Boolean(s?.youtube_video_id)), [s?.youtube_video_id]);
@@ -81,19 +91,32 @@ function Watch() {
     const id = setInterval(() => {
       const c = sync.current;
       const age = c ? performance.now() - c.at : Infinity;
+      const speed = (on: boolean) => {
+        if (on === fast.current) return;
+        fast.current = on;
+        clock.cmd("setPlaybackRate", [on ? CATCHUP_RATE : 1]);
+      };
       if (!c || age > 5000) {
         if (c) {
           sync.current = null;
           setSyncDelay(0);
         }
+        easing.current = false;
+        speed(false);
         return;
       }
       const v = clock.now();
-      if (v == null || !c.playing) return;
+      if (v == null || !c.playing) {
+        speed(false);
+        return;
+      }
       // Where this player should be: the console's video time, less the delay the dub needs.
       const ahead = v - (c.media + age / 1000 - c.delay / 1000);
       // For checking sync from the browser console or a test: where the video is against where it should be.
-      (window as unknown as { __bdSync?: unknown }).__bdSync = { v, ahead, hold: hold.current, delay: c.delay, playing: clock.playing() };
+      (window as unknown as { __bdSync?: unknown }).__bdSync = { v, ahead, hold: hold.current, delay: c.delay, playing: clock.playing(), easing: easing.current, fast: fast.current, rate: clock.rate() };
+      // After the hold came down: a little faster until this player is where it should be, then normal speed.
+      if (easing.current && (ahead > -CATCHUP_DONE_S || ahead < -3 || hold.current)) easing.current = false;
+      speed(easing.current && clock.playing() && (fast.current || ahead < -CATCHUP_FROM_S));
       if (hold.current) {
         if (ahead <= 0.15) {
           hold.current = false;
@@ -114,7 +137,7 @@ function Watch() {
       // has to be roughly right.
     }, 500);
     return () => clearInterval(id);
-  }, [hasVideo, clock.now, clock.playing, clock.cmd]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [hasVideo, clock.now, clock.playing, clock.cmd, clock.rate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (s && !choice) setChoice(s.target_langs[0] ?? "src");

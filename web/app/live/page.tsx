@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, Captions, Check, Copy, Cpu, ExternalLink, Headphones, MessagesSquare, Mic, MonitorPlay, Plus, Presentation, Radio, Square, Terminal, Timer, Users } from "lucide-react";
+import { ArrowRight, Captions, Check, Copy, Cpu, ExternalLink, Headphones, MessagesSquare, Mic, MonitorPlay, Plus, Presentation, Radio, Square, Terminal, Timer, Trash2, Users } from "lucide-react";
 import { Shell } from "@/components/layout/Shell";
 import { Button } from "@/components/ui/Button";
 import { DelayBadge } from "@/components/ui/DelayBadge";
@@ -72,6 +72,64 @@ const HOW = [
   { icon: MessagesSquare, text: "Their chat reaches you translated." },
 ];
 
+interface KeptRecording {
+  session: string;
+  started_at: string | null;
+  ended_at: string | null;
+  kept_since: string;
+  deleted_after: string | null;
+  langs: string[];
+  bytes: number;
+}
+interface Kept {
+  keep_days: number;
+  recordings: KeptRecording[];
+}
+const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "unknown");
+
+/** The dubs kept on this server (a session that was made with the tick), each with the day it goes by itself and a delete button. */
+function KeptRecordings({ kept, onChange }: { kept: Kept; onChange: () => void }) {
+  const [busy, setBusy] = useState("");
+  const [err, setErr] = useState("");
+  const remove = async (sid: string) => {
+    if (!window.confirm("Delete this recording for good? Its dubbed sound, captions and timings are removed from the server.")) return;
+    setBusy(sid);
+    setErr("");
+    try {
+      await api(`/api/v1/recordings/${encodeURIComponent(sid)}`, { method: "DELETE" });
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+    setBusy("");
+    onChange();
+  };
+  return (
+    <section className="rounded-[14px] border border-line p-4" aria-labelledby="kept-h">
+      <h2 id="kept-h" className="text-[0.95rem] font-medium">Recordings kept on this server</h2>
+      <p className="mt-1 text-sm text-muted">
+        {kept.keep_days > 0 ? `Each is deleted by itself ${kept.keep_days} days after its session ended.` : "Nothing is deleted by itself on this server."} Deleting one here removes it at once.
+      </p>
+      <ul className="mt-3 divide-y divide-line">
+        {kept.recordings.map((r) => (
+          <li key={r.session} className="flex flex-wrap items-center justify-between gap-3 py-2.5">
+            <span className="min-w-0">
+              <span className="tnum block font-mono text-sm">{r.session.slice(0, 8)} <span className="font-sans text-muted">{day(r.ended_at ?? r.started_at ?? r.kept_since)}</span></span>
+              <span className="block text-sm text-muted">
+                {r.langs.map((c) => lang(c).name).join(", ") || "no dub yet"} · {(r.bytes / 1e6).toFixed(1)} MB{r.deleted_after ? ` · goes on ${day(r.deleted_after)}` : ""}
+              </span>
+            </span>
+            <Button variant="ghost" size="sm" disabled={busy === r.session} onClick={() => remove(r.session)} aria-label={`Delete recording ${r.session.slice(0, 8)}`}>
+              <Trash2 aria-hidden className="size-4" />
+              {busy === r.session ? "Deleting…" : "Delete"}
+            </Button>
+          </li>
+        ))}
+      </ul>
+      {err && <Notice tone="error" role="alert">{err}</Notice>}
+    </section>
+  );
+}
+
 function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
   const [yt, setYt] = useState("");
   const [langs, setLangs] = useState<string[]>(["ta-IN", "bn-IN", "en-IN"]);
@@ -84,11 +142,17 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
   const [record, setRecord] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  // Recordings already kept on this server. Listed (with their delete buttons) whether or not recording is on now.
+  const [kept, setKept] = useState<Kept | null>(null);
+  const loadKept = useCallback(() => {
+    api<Kept>("/api/v1/recordings").then(setKept).catch(() => setKept(null));
+  }, []);
   useEffect(() => {
     api<Record<string, unknown>>("/api/v1/flags")
       .then((f) => setCanRecord(f.V1_LIVE_RECORD === true))
       .catch(() => setCanRecord(false));
-  }, []);
+    loadKept();
+  }, [loadKept]);
   const toggle = (c: string) => setLangs((l) => (l.includes(c) ? l.filter((x) => x !== c) : l.length >= 4 ? l : [...l, c]));
   const create = async () => {
     setBusy(true);
@@ -171,11 +235,13 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
               </label>
               <p className="mt-2 pl-7 text-sm text-muted">
                 Bharat Dub does not store live audio. Tick this only to make a side-by-side video of this session: the dubbed sound of
-                every language, its captions and their timing are then saved in the server&apos;s data folder until someone deletes them.
-                The stream&apos;s own sound is not saved. Leave it off and nothing is kept.
+                every language, its captions and their timing are then saved in the server&apos;s data folder. A recording is deleted
+                by itself {kept && kept.keep_days > 0 ? `${kept.keep_days} days after the session ended` : "only when someone deletes it"}, and
+                you can delete it at any time in the list below. The stream&apos;s own sound is not saved. Leave it off and nothing is kept.
               </p>
             </div>
           )}
+          {kept && kept.recordings.length > 0 && <KeptRecordings kept={kept} onChange={loadKept} />}
           {err && <Notice tone="error" role="alert">{err}</Notice>}
           <div className="flex flex-wrap items-center gap-5">
             <Button size="lg" disabled={!langs.length || busy || (voice === STREAM && !voiceConsent)} onClick={create}>

@@ -8,7 +8,7 @@ memory figures are the cards' own, not ours.
 
 | Port | Server | Model | Licence | Commercial use | Disk | GPU memory (source) | Fits beside v0 now? |
 |---|---|---|---|---|---|---|---|
-| 9041 | voice, batching | `ai4bharat/IndicF5` (0.4 B) | MIT, gated (auto) | yes; terms: copy only voices you have permission for | 1.4 GB | not stated; v0's engines hold about 4 GB each as processes | no: under the 4 GB headroom rule |
+| 9041 | voice, batching | `ai4bharat/IndicF5` (0.4 B) | MIT tag, gated (auto) | **legal confirmation needed** (see "checked on 26 Nov 2026" at the end: a non-commercial lineage is claimed); terms: copy only voices you have permission for | 1.4 GB | not stated; v0's engines hold about 4 GB each as processes | no: under the 4 GB headroom rule |
 | 9042 | Maya 2 | `maya-research/maya2-native` (2.5 B) | Apache-2.0, not gated | yes | 5.0 GB | 7.7 GB steady, 9.2 GB while loading, +0.5 GB context (card) | no |
 | 9043 | Indic Transcribe | `bodhan-ai/indic-transcribe-core` (1.2 B) | Indic Open Model License v1.0, gated (auto) | **self-hosting yes; a hosted service others call needs written sign-off**; attribution | 4.6 GB (repo 9.8 GB) | 9.2 GiB at batch 8 (card) | no |
 | 9044 | big translation model | `google/gemma-4-12B-it-qat-w4a16-ct` or `...-31B-...` | Apache-2.0, not gated | yes | 10.3 GB / 23.3 GB | about 11-14 GB / 20-23 GB + cache (estimate from the weights) | only in an HQ window |
@@ -165,3 +165,66 @@ with torch 2.5.1; the run above used 1.1.2 because that is what installs on this
 
 Found on the way: SpeechBrain's config reader (hyperpyyaml 1.2.3) fails with ruamel.yaml 0.19
 (`'Loader' object has no attribute 'max_depth'`); `requirements.qa.txt` now asks for `ruamel.yaml<0.19`.
+
+## v1.2 Part 1: checked on 26 Nov 2026 (Demucs, Silero VAD, IndicF5's lineage)
+
+Every page below was fetched on 26 Nov 2026 (licence files and READMEs as raw files; repository and model records
+through the sites' public APIs). Quotes are exact. "Not fetched" means the page did not come back and nothing is
+written about it from memory. This corrects the summary table above and `SUMMARY.md`, which had IndicF5 as
+"MIT ... yes" and "clear".
+
+### Demucs (separation; `demucs` 4.1.0 on the laptop, `htdemucs` weights)
+
+| Checked | Result | Where |
+|---|---|---|
+| Original repository | archived; "this repository is not maintained anymore. I've created a fork at github.com/adefossez/demucs" | https://github.com/facebookresearch/demucs (README; repository record: `archived: true`, last push 24 Apr 2024) |
+| Its licence file | "MIT License", "Copyright (c) Meta Platforms, Inc. and affiliates." | https://github.com/facebookresearch/demucs/blob/main/LICENSE |
+| Its README, "License" | "Demucs is released under the MIT license as found in the LICENSE file." | same repository |
+| The fork | "This is the officially maintained Demucs now that I (Alexandre Défossez) have left Meta"; "I'm not actively working on Demucs anymore" | https://github.com/adefossez/demucs (README; a fork of the above, last push 26 Oct 2026) |
+| The fork's licence file | the same file, byte for byte (MIT) | https://github.com/adefossez/demucs/blob/main/LICENSE |
+| The fork's README, "License" | "Demucs code is released under the MIT license as found in the LICENSE file. The license of the weights is not clear: MusDB contains some data that were only usable for research purpose. I sadly cannot help granting a license, both coming from Meta custom data, or from the original MusDB data. The 6 source variant of htdemucs was trained only on Meta internal dataset, which likely means CC-NC-BY license is applicable, as it was the case for all models released by FAIR." | same repository |
+| The installed package | `demucs` 4.1.0, classifier "License :: OSI Approved :: MIT License" | package metadata on the laptop |
+
+**Verdict:** the code is MIT. **The weights are not settled**: the maintained repository says so itself. We use the
+four-source `htdemucs` with `--two-stems=vocals` (not the six-source variant the README singles out). Whether a
+commercial product may run those weights is a legal question; it is in `docs/handbook/OPEN_QUESTIONS.md`
+question 13. The task that asked for this check expected "MIT"; that is true of the code only.
+
+### Silero VAD (speech detection; `silero-vad` 6.2.3 on the laptop)
+
+| Checked | Result | Where |
+|---|---|---|
+| Licence file | "MIT License", "Copyright (c) 2020-present Silero Team" | https://github.com/snakers4/silero-vad/blob/master/LICENSE |
+| Repository record | licence MIT, not archived, last push 26 Nov 2026 | https://github.com/snakers4/silero-vad |
+| README | "Published under permissive license (MIT) Silero VAD has zero strings attached - no telemetry, no keys, no registration, no built-in expiration, no keys or vendor lock." | same repository |
+| Oddity | the README's licence badge shows "MIT"; the badge's alternative text reads "License: CC BY-NC 4.0" | README, first line |
+| The installed package | `silero-vad` 6.2.3, classifier "License :: OSI Approved :: MIT License" | package metadata on the laptop |
+
+**Verdict:** MIT, for the repository that holds both the code and the model files. The badge's alternative text
+disagrees with the badge, the licence file and the README's own sentence; it reads as a leftover.
+
+### IndicF5 (the copied voice, in use): status **legal confirmation needed**
+
+| Checked | Result | Where |
+|---|---|---|
+| Licence on its own card | `license: mit`; gated (`auto`); revision `fb652a96e508091045890dae5bb99fe511facbcf`, last changed 6 Oct 2026; datasets listed: `ai4bharat/indicvoices_r`, `ai4bharat/Rasa` | https://huggingface.co/ai4bharat/IndicF5 (the model's public record, `api/models/ai4bharat/IndicF5`) |
+| Its page, read through a page reader | licence shown as "License: mit"; terms of use: "By using this model, you agree to only clone voices for which you have explicit permission." "Unauthorized voice cloning is strictly prohibited." "Any misuse of this model is the responsibility of the user."; "trained on 1417 hours of high-quality speech from Rasa, IndicTTS, LIMMITS, and IndicVoices-R"; "We would like to extend our gratitude to the authors of F5-TTS"; no sentence about commercial use, none about Emilia | https://huggingface.co/ai4bharat/IndicF5 |
+| Its card as a raw file | **not fetched** (HTTP 401: the files are gated) | https://huggingface.co/ai4bharat/IndicF5/raw/main/README.md |
+| Its code repository | no licence file on `main` (HTTP 404) and none in the repository record; README: the same sentence on training data, and thanks to the authors of F5-TTS "for their invaluable contributions and inspiration to this work" | https://github.com/AI4Bharat/IndicF5 |
+| A model fine-tuned from it | `license: cc-by-nc-4.0`, `base_model: ai4bharat/IndicF5`; card, "Licence": "This model inherits non-commercial terms from its lineage: it is fine-tuned from `ai4bharat/IndicF5`, which builds on **F5-TTS** (trained on the **Emilia** dataset, CC-BY-NC-4.0) and **IIT-Madras Indic TTS** data (non-commercial). The non-commercial restriction therefore carries through to this model." The same card, "Attribution": "Base model: `ai4bharat/IndicF5` (MIT)" | https://huggingface.co/dheeyantra/dhee-indic-f5 (card as a raw file and the model's record, revision `b169ad1af92d659f9b85ac393510f8960e4a0690`, last changed 23 Jul 2026) |
+| F5-TTS, the base named in that claim | card: `license: cc-by-nc-4.0`, dataset `amphion/Emilia-Dataset`. Code repository README: "Our code is released under MIT License. The pre-trained models are licensed under the CC-BY-NC license due to the training data Emilia, which is an in-the-wild dataset." Licence file of the code: MIT, "Copyright (c) 2024 Yushen CHEN" | https://huggingface.co/SWivid/F5-TTS ; https://github.com/SWivid/F5-TTS |
+
+**What is established:** IndicF5's own card says MIT. F5-TTS's pre-trained weights are CC-BY-NC by their authors'
+own statement. A third party that fine-tuned IndicF5 says IndicF5 carries that restriction, and one from
+IIT-Madras data, and releases its own model as non-commercial for that reason.
+
+**What is not established:** whether IndicF5's weights began from F5-TTS's pre-trained weights (neither AI4Bharat
+page says; its model repository holds F5-TTS's code, which is MIT and proves nothing about weights); what terms the
+IndicTTS (IIT-Madras) and LIMMITS data carry (their pages were not fetched); whether an MIT tag by the model's
+authors overrides any of this. The third party's sentence is a claim, not a ruling, and it sells a commercial
+licence for its own model.
+
+**Status: legal confirmation needed.** Written confirmation of commercial use from AI4Bharat, or a legal review
+(`NEEDS_APPROVAL.md` item 28; `docs/handbook/OPEN_QUESTIONS.md` question 21). Until then IndicF5 must not be
+described as cleared for commercial use. The same holds for the planned batching server on 9041, which loads the
+same weights.

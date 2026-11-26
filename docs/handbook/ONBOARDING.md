@@ -65,7 +65,9 @@ Studio use the hosted fallbacks).
 ## 3. Conventions
 
 - **Flags default off.** Every new behaviour goes behind a `V1_*` flag in v1's `backend/.env`; tests force flags
-  off; with every flag off v1 behaves as v0 ([ADR-0020](adr/0020-flags-default-off.md)).
+  off; with every flag off v1 behaves as v0 ([ADR-0020](adr/0020-flags-default-off.md)). Since 26 Nov 2026 three
+  things are on without a flag being set: `V1_HQ_ADAPTIVE` (HQ jobs only), the review of every HQ job, and the
+  viewer hold's way back (kill switch `LIVE_SYNC_EASE`); tests still force `V1_HQ_ADAPTIVE` off.
 - **Never touch v0.** No start, stop, restart or reconfigure of 3000, 8010, 9001-9003, 9010, 9020, 9030, 9040. v1
   only calls the shared GPU servers. Never read or write v0's data (`backend/data`, `backend/data-mock`, its
   JSON, its voice folders) ([ADR-0018](adr/0018-v1-beside-v0.md)).
@@ -93,7 +95,8 @@ cd backend
 ```
 
 Offline, fake providers, no credits. At the end of v1.1: **311 pass, 1 skipped** (the Postgres store test, no
-database) (`docs/v1/V1_1_SUMMARY.md`, 25 Nov 2026). Real provider checks: `python -m scripts.smoke` (costs
+database) (`docs/v1/V1_1_SUMMARY.md`, 25 Nov 2026). After v1.2 Part 1: **336 pass, 1 skipped** (26 Nov 2026,
+`docs/v1/PROGRESS.md`). Real provider checks: `python -m scripts.smoke` (costs
 credits).
 
 ## 5. Eval

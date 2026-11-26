@@ -60,7 +60,8 @@ class FakeStages:
         self.spoken: list[tuple[str, float]] = []
         self.chats: list[str] = []
         self.llm_obj = WordLLM()
-        outer = self
+        self.rubric: list[int] = []     # lines handed to the rubric review, per call (an HQ job is always reviewed)
+        rubric = self.rubric
 
         class R:
             s = settings
@@ -68,14 +69,21 @@ class FakeStages:
             def timeout(self, stage):
                 return 5.0
 
+            def available(self, name):
+                return False            # no hosted model here: the review goes to the routing file's `review` list
+
             def provider(self, kind, name):
                 class P:
                     async def transcribe(self, path, lang, **kw):
                         from app.providers.base import STTResult
                         return STTResult(text=f"doosri sunwai {Path(path).stem}")
+
+                    async def _chat(self, system, user, **kw):   # the reviewer: every line passes
+                        items = json.loads(user)
+                        rubric.append(len(items))
+                        return json.dumps([{"ok": True} for _ in items])
                 return P()
         self.r = R()
-        del outer
 
     def names(self, stage):
         return list(self.lists.get(stage, []))
@@ -100,6 +108,11 @@ class FakeStages:
         if "cannot read digits" in system:
             return json.dumps([x.replace("5", "paanch") for x in items])
         raise AssertionError("unexpected prompt: " + system[:60])
+
+    async def _run(self, stage, names, call, timeout=None):
+        out = await call(names[0])
+        self.used[stage] = names[0]
+        return out
 
     async def speak(self, text, lang, voice, *, speed=1.0):
         self.spoken.append((text, speed))
@@ -260,10 +273,13 @@ async def test_hq_job_end_to_end_flags_and_swap(rig):
     job = await r.store.get("jobs", job["id"])
     assert job["status"] == "done", job.get("error")
     st = made[0]
-    assert [c.split(":")[0] for c in st.chats] == ["translate", "translate", "translate", "review", "translate"]   # merge, clean, translate, review, numbers as words
+    # merge, clean, translate, numbers as words; the review is the rubric one (HQ never runs without it), not a chat
+    assert [c.split(":")[0] for c in st.chats] == ["translate", "translate", "translate", "translate"]
+    assert st.rubric == [3] and st.used["review"] == "gemma"
     segs = await r.spoken_segments(job["id"])
     assert all(s.get("hearings") == {"whisper_gpu": f"doosri sunwai src_{s['idx']:03}"} for s in segs)
-    assert segs[0]["src_text"].startswith("doosri sunwai") and segs[0]["src_text_raw"].startswith("namaste line")
+    # The merge wrote other words than were first heard: with the review's guard the first hearing is put back.
+    assert segs[0]["src_text"].startswith("namaste line") and segs[0]["src_text_raw"].startswith("namaste line")
     trs = [(await r.store.select("translations", segment_id=s["id"], lang="ta-IN"))[0] for s in segs]
     assert [t["flagged"] for t in trs] == [False, False, False]
     assert len(trs[1]["alts"]) == 3 and trs[1]["picked"] == 2 and trs[1]["qa"]["backcheck"] == 0.95

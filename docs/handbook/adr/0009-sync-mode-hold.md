@@ -45,6 +45,7 @@ no shared clock (`../../../SPEC.md` section 16, 14 Nov afternoon).
 - The viewer watches 6 s or more behind the stream.
 - The hold never comes back down: on the 67-minute stream it grew from 6 s to 11 s during link stalls (21 Nov,
   SPEC section 21). Lowering it needs a viewer-page change and a browser test (open).
+  **Since 26 Nov 2026** the hold eases back ([ADR-0035](0035-hold-ease-back.md)); the browser test is still open.
 - Only works with the console's own tab as the sound source; mic and other-tab sessions are unchanged.
 - Not measured on 14 Nov: a live YouTube broadcast, a phone, a person at a microphone.
 

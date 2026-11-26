@@ -1301,3 +1301,167 @@ into the shared venv.
   and `... kit.py start tts --dry-run` (refuses on the laptop's own small card, with the numbers).
 - **Roll back:** nothing runs. The QA server's old behaviour for an unlisted speaker model:
   `QA_SPK_ALLOW_NONCOMMERCIAL=1`.
+
+## v1.2 Part 1: the founder's six decisions (26 Nov 2026)
+
+What was asked: six decisions to apply exactly. `V1_MODE`, the removal of flags and `overrides.yaml` are Part 2 and
+were not started. The backend on 8110 and the website on 3100 were not restarted: they run the old code until
+they are, and the website needs a rebuild to show the recordings list and the viewer page's change.
+
+### 1. `V1_HQ_ADAPTIVE` is on
+
+- The four places now say **on** with one reason: against five takes of every line 61% less voice time (206 s
+  against 524 s over three videos) with the same take kept on 76 of 76 lines; against v1's earlier rule (up to 4
+  takes until one passes) the same number of takes (143), so it costs nothing. `V1_1_SUMMARY.md` section 3,
+  `RUNBOOK.md` section 3 (flag table and recommended table), `SUMMARY.md` (flag table and recommended list),
+  `backend/.env.example` (the value line and the ready block). The handbook's runbook, `OPEN_QUESTIONS.md`
+  question 20 (closed), EXP-027 and `NEEDS_APPROVAL.md` item 27 point 1 follow.
+- **The code's default is on too** (`v1_hq_adaptive` in `backend/app/config.py`): `.env.example`'s value line
+  states the default, so the two had to agree. It is the first v1 flag whose default is on; it acts on HQ jobs
+  only, so with `V1_STUDIO_HQ` off nothing changes. `tests/conftest.py` and the comparison-backend scripts still
+  force it off, so earlier measurements and tests mean what they meant. Nothing was measured for this item.
+
+### 2. HQ never runs without the review
+
+- **Where HQ is decided:** `app/v1/hq/runner.py`, `is_hq` (the server's `V1_STUDIO_HQ` and the job's
+  `quality=hq`). Inside that path the flag `V1_HQ_REVIEW` was read in three places: the transcript guard after the
+  merge and clean steps, the cache key of the translation, and the choice between the rubric review and the plain
+  one. All three now ask `app/v1/hq/review.py`, `required(settings)`, which is true whenever `V1_STUDIO_HQ` is on.
+  So an HQ job is always reviewed and guarded, whatever the flag says; the flag has no effect on an HQ job any
+  more. `GET /api/v1/flags` reports `V1_HQ_REVIEW` as in force whenever HQ is on.
+- **Tests:** `test_hq_on_and_the_review_flag_off_the_review_still_runs` (a whole HQ job with the flag off: every
+  line reaches the rubric reviewer, its edit is the line that is dubbed and is on record, the damaged transcript is
+  put back, the plain review is not called; a standard job on the same server is not reviewed) and
+  `test_review_is_required_whenever_hq_is_on`. Two older tests described HQ with the plain review and were
+  changed to the rule, with the fake stages they share: the end-to-end job (its merged transcript is now put back by the guard) and
+  "new flags off is as before", renamed "... but for the review".
+- Not measured: nothing new. The numbers behind the decision are WS3's (25 of 38 lines damaged without the review
+  in two of three videos, 0 with it).
+- To watch: the review is a hosted-model call per language and job (WS3: 24 of 76 lines edited). When the hosted
+  model is not configured the review goes to the routing file's `review` list, and when no answer can be used the
+  lines stay as they were and the job says so in its warnings: "always reviewed" means always asked.
+
+### 3. Live recordings: opt-in, 30 days, deletable
+
+- Opt-in is unchanged (`V1_LIVE_RECORD` and the session's own tick; both tested in WS4).
+- **New, `app/v1/record.py`:** `sweep` deletes every recording that ended more than `V1_RECORD_KEEP_DAYS` days ago
+  (default 30, `0` = never by itself); age from `ended_at`, else `started_at`, else the newest file. It runs when
+  the backend starts and in the half-hourly round that already deletes uploads (`app/main.py`), with the flag on or
+  off, and never touches a session that is being recorded. `GET /api/v1/recordings` (session, dates, languages,
+  size, the day it goes; no text, no sound) and `DELETE /api/v1/recordings/<session>` (404 unknown, 409 while it is
+  still recording; a name, never a path).
+- **Website:** `/live` handles recording (the tick), so the list is there: "Recordings kept on this server", one
+  row a recording with a Delete button, shown whenever one exists; the tick's text now says how long a recording
+  stays. Type-checked (`npx tsc --noEmit`), not looked at in a browser.
+- **Deleting a voice profile, as the code is today:** `DELETE /api/voices/<id>` removes the sample file and the
+  embedding and marks the profile deleted; a streamer's delete does the same and also removes the sample kept for our own voice engine.
+  Neither looks at recordings, and neither could: a recording's `session.json` holds the session, languages, rate,
+  engine and dates, no voice or streamer id. No rule was given for this, so none was built; a test writes the
+  present behaviour down (`test_deleting_a_voice_profile_leaves_recordings_alone`). It stays open in
+  `NEEDS_APPROVAL.md` item 25 and `OPEN_QUESTIONS.md` question 7.
+- **Tests:** `tests/test_v1_record_keep.py` (12). ADR-0034.
+- Also true: there are no accounts, so anyone who reaches the console can delete a recording; a video rendered
+  into `data-v1\pitch\` is not a recording and is not deleted by the rule.
+
+### 4. The hold comes back down
+
+**Both ends were read first.** Server: `_note_late` grows `_sync_delay` and nothing ever lowered it. Viewer
+(`web/app/watch/[id]/page.tsx`): the page pauses when its video is more than 0.8 s ahead of where it should be and
+seeks when it is more than 3 s behind; in between it does nothing, and a dubbed phrase is timed against the
+viewer's own video. So a smaller hold from the server alone would have left a watching viewer where they were
+(in step with their picture, further behind live), as the older documents said. Both ends were changed.
+
+**(a) Reproduced** (EXP-030; comparison backends 8120 and 8121, the WS0 relay, dense reel, Tamil, GPU engine, voice
+learned from the stream; one session at a time, nobody live on 8010 or 8110):
+- First try, the relay's hard stall (three stalls of 8 s, 1 run): the hold did **not** move (6.0 s throughout).
+  13 phrases were skipped as too late, and a skipped phrase does not count towards growth; fewer than three of
+  any six spoken phrases were late. A dead link loses phrases; it does not grow the hold.
+- So the relay got a slow mode (every piece of data 700 ms later each way, connections kept): slow from second 60
+  to 130. With the way back off, 2 runs: hold 6.0 s, five steps up during the slow spell, **11.0 s at the end of
+  both runs** (180 s and 281 s after the link was back). That is the stream of 21 Nov.
+
+**(b) Fixed.** `app/v1/hold.py` (`Ease`), called from `_note_late`: a step of 250 ms down when the hold is above
+the session's starting value, nothing was late for 20 s (late = ready less than 750 ms before its moment, or
+skipped, or the hold grew), three phrases were in time since and one since the last step, and the last step is 5 s
+old. Never under the starting value, never without phrases, never for a streamer's YouTube offset. The viewer
+page: after a `sync` message with a smaller hold it asks its player for 1.1x until it is within 0.05 s of its
+place; its clock and the timing of queued phrases use the speed the player reports. Kill switch
+`LIVE_SYNC_EASE=false` (default on): the server never lowers the hold and the page never speeds up.
+
+**(c) Measured again, the same slow spell, way back on, 2 runs:**
+
+| | Off (2 runs) | On (2 runs) |
+|---|---|---|
+| Highest hold | 11.0, 11.0 s | 10.75, 11.0 s |
+| First step down after the link was back | never | 22.3, 23.5 s |
+| Steps down, largest | 0 | 19 and 20, 250 ms |
+| Hold when the run ended | 11.0 s (180 s after), 11.0 s (281 s after) | 6.25 s (171 s after; the material ended), 6.0 s (from 217 s after, kept 66 s) |
+| Grew again after starting down | - | no, in neither |
+| After the link was back: within 0.25 s | 67.1%, 70.1% (82, 127 phrases) | 65.5%, 57.9% (84, 133 phrases) |
+| After the link was back: within 1 s | 97.6%, 95.3% | 96.4%, 95.5% |
+| After the link was back: latest start | 1.05, 1.61 s | 2.57, 2.50 s |
+
+Within 1 s is the same. Within 0.25 s is lower with the way back on in both pairs and the latest start later; at
+two runs each that is not proven, but it is what a shorter hold should cost, and the on-figures are where these
+sessions were at 6 s before the slow spell (53.8-61.5%). The way down paused three times for about 30 s in each
+run, each time a phrase lacked 750 ms in hand.
+
+**(d) Tests:** `tests/test_v1_hold.py` (11): the rule alone (nothing at the normal value; the wait, the step size,
+the pace, the floor; a late phrase starts the wait again; a phrase without enough in hand counts as late; no
+phrases, no step; one phrase in several languages counts once) and a session's hold (grows in a stall and eases
+back to the starting value in steps, what viewers are told; does not ease while phrases are late and grows again;
+kill switch off = only grows; a streamer's offset is never eased).
+
+**Not verified, said plainly:**
+- **No browser.** `web/` has no browser test set up (no Playwright in its packages), and the website could not be
+  rebuilt (that would replace the build port 3100 serves). The viewer page's change is type-checked only. Whether a
+  YouTube embed, and above all a live one, obeys `setPlaybackRate(1.1)` is not known. If it does not, a viewer who
+  is already watching stays in step with their own picture and stays further behind live; new viewers join at the
+  lower hold.
+- Not measured: `V1_BREAKER` + `V1_LIVE_DEGRADE` on, more than one language, a real tunnel, a speaker who pauses.
+- Comparison backends started after this work have the way back on unless `LIVE_SYNC_EASE=false` is passed: a
+  "flags off" baseline's hold can now come down where it used to stay up.
+
+**Found on the way:** in the hard-stall run (every flag but the router off) no phrase was produced after second 194
+of 312 fed, and no error was reported: the last three phrases had captions and no sound. The four slow-mode runs
+on the same two backends ran to the end. Hard stalls without the breaker and the ladder are the case WS0 built
+those for; this was not looked into further.
+
+### 5. Licences
+
+Fetched on 26 Nov 2026 as raw files and public records; quotes and links in `MODELS.md`, "checked on 26 Nov 2026",
+and `docs/handbook/MODELS.md`.
+- **Silero VAD:** MIT (licence file; README "Published under permissive license (MIT)"). The README's badge shows
+  MIT while its alternative text reads "License: CC BY-NC 4.0": a leftover, recorded.
+- **Demucs:** the original repository is archived and points to its author's fork, "the officially maintained
+  Demucs". Both licence files are the same MIT text. **But the fork's README says: "The license of the weights is
+  not clear: MusDB contains some data that were only usable for research purpose."** So "Demucs is MIT" is true of
+  the code only. Recorded as unsettled (`OPEN_QUESTIONS.md` question 13); the task expected a plain MIT.
+- **IndicF5: legal confirmation needed.** Its record says `license: mit`; `dheeyantra/dhee-indic-f5` (fine-tuned
+  from it, CC-BY-NC-4.0) says it "inherits non-commercial terms from its lineage" (F5-TTS trained on Emilia,
+  CC-BY-NC-4.0; IIT-Madras data); F5-TTS's authors say their pre-trained models are CC-BY-NC. AI4Bharat's code
+  repository has no licence file. Not fetched: IndicF5's card as a raw file (401, gated; the page itself was read
+  through a page reader). Not known: whether IndicF5's weights began from F5-TTS's.
+- `NEEDS_APPROVAL.md` item 28, "Get written confirmation of commercial use from AI4Bharat / legal review", after
+  item 27; in its number table, in `V1_1_SUMMARY.md` section 4, in `SUMMARY.md` and the handbook's roadmap.
+  `SUMMARY.md` no longer lists IndicF5 as "clear".
+
+### 6. PITCH_FACTS
+
+"Safe to say" row 1 is the 67-minute stream: 97% within 1 s, 1281 of 1327 spoken lines in the copied voice, first
+audio p50 2.5 s / p95 5.1 s, with within 0.25 s 81% and within 2 s 98% beside it, as SPEC section 21 and EXP-016
+give them. Conditions: one real stream, a YouTube quiz class, 67 minutes, 1363 phrases, Punjabi, one speaker, v0,
+all-GPU mode, backend on the laptop, engines through the tunnel. Caveats kept and one added (the hold grew to 11 s
+on that stream). Old rows 1 and 2 are rows 2 and 3 ("as row 1" became "as row 2"); rows 4-12 unchanged.
+
+### Hand-back
+
+- **Tests:** 336 pass, 1 skipped (was 311 + 1). New files `tests/test_v1_hold.py` (11) and `tests/test_v1_record_keep.py` (12); 2 new and 2
+  changed in the HQ files.
+- **Docs:** ADR-0034 (recordings), ADR-0035 (hold), EXP-030, two RESULTS rows, CHANGELOG, the handbook pages named
+  above.
+- **Comparison backends:** 8120 and 8121 were started from PowerShell and stopped; the relay on 8191-8193 was
+  stopped. The five old ones on 8111-8115 were not touched.
+- **Roll back:** `V1_HQ_ADAPTIVE=false`; `LIVE_SYNC_EASE=false`; `V1_RECORD_KEEP_DAYS=0` (never by itself). The
+  review of HQ jobs has no switch by decision: do not offer HQ (`V1_STUDIO_HQ=false`).
+

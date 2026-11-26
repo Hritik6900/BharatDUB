@@ -2,7 +2,9 @@
 
 - **Status:** accepted
 - **Date:** 2026-11-23
-- **Superseded by:** —
+- **Superseded by:** — (three exceptions since 26 Nov 2026, v1.2 Part 1: `V1_HQ_ADAPTIVE` defaults to on, an HQ job is
+  always reviewed whatever `V1_HQ_REVIEW` says, and the hold's way back is on behind the kill switch `LIVE_SYNC_EASE`:
+  [ADR-0035](0035-hold-ease-back.md))
 
 ## Context
 

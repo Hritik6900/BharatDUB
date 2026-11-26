@@ -41,7 +41,7 @@ Decided in [ADR-0005](adr/0005-consent-gates-cloning.md), [ADR-0012](adr/0012-st
 | Voice samples and engine cuts | `<DATA_DIR>/voices/`; profiles in the store | until deleted: one click on `/voices` (`DELETE /api/voices/{id}`) | SPEC section 15 |
 | Voices held by the GPU engines | in the engine processes | until the engine is restarted (82 voices on one engine on 23 Nov) | `docs/v1/DISCOVERY.md` risk 9 |
 | Live audio | **never stored** | - | SPEC section 10 |
-| Live dub, opt-in exception | `<DATA_DIR>/recordings/<session>/` only with `V1_LIVE_RECORD=true` **and** `record: true` on that session (a tick that says what is kept) | **never deleted by itself**; deleting a voice does not delete recordings in it | `../v1/RUNBOOK.md` section 3; NEEDS_APPROVAL item 25 |
+| Live dub, opt-in exception | `<DATA_DIR>/recordings/<session>/` only with `V1_LIVE_RECORD=true` **and** `record: true` on that session (a tick that says what is kept) | deleted by itself `V1_RECORD_KEEP_DAYS` (30) days after it ended (checked at backend start and every half hour); any one deletable at once (`/live`, `DELETE /api/v1/recordings/<session>`); deleting a voice does not delete recordings in it | [ADR-0034](adr/0034-recording-retention.md); `../v1/RUNBOOK.md` section 3; NEEDS_APPROVAL item 25 |
 | Studio HQ review edits (words) | `<DATA_DIR>/hq_review/<job>.jsonl` | not stated (unconfirmed) | `../v1/RUNBOOK.md` |
 | Cache (transcripts, translations, voice lines) | `<DATA_DIR>/cache/<stage>/` | not stated (unconfirmed) | SPEC section 18 |
 
@@ -92,12 +92,13 @@ Details per model: [MODELS.md](MODELS.md), [`../v1/MODELS.md`](../v1/MODELS.md).
 | speechbrain ECAPA-TDNN | Apache-2.0; trained on VoxCeleb, whose page states no licence | in use for QA; legal question listed for the founder |
 | Indic Transcribe | self-hosting yes; a hosted service others call needs the authors' written sign-off; separate licence above 500 M monthly users or 250 M dollars revenue | gated on the founder's decision ([ADR-0026](adr/0026-gated-models.md)) |
 | pyannote community-1 | CC-BY-4.0, attribution; terms share contact details | gated on accepting terms |
-| IndicF5 | MIT tag, gated; terms: copy only voices you have permission for; v0's notes: commercial use "unanswered" | in use; confirm before a commercial launch (unconfirmed) |
+| IndicF5 | MIT tag on its card, gated; terms: copy only voices you have permission for. A model fine-tuned from it (`dheeyantra/dhee-indic-f5`) says its lineage is non-commercial (F5-TTS trained on Emilia, CC-BY-NC-4.0; IIT-Madras data) (read 26 Nov 2026, [MODELS.md](MODELS.md)) | in use; **legal confirmation needed** before a commercial launch (NEEDS_APPROVAL item 28) |
 | Gemma 4 (E4B, 12B, 31B) | Apache-2.0 (tag; text itself not read) | in use (E4B) |
 | Whisper (Apex, large-v3-turbo) | Apache-2.0 / MIT | in use / planned |
 | Maya 2 Native | Apache-2.0 | planned |
 | Indic-Mio | Apache-2.0 (engine header) | switch, off |
-| Demucs, Silero VAD | not recorded in our documents | check (unconfirmed) |
+| Silero VAD | MIT (licence file, read 26 Nov 2026) | in use |
+| Demucs | code MIT; the maintained repository says "The license of the weights is not clear" (read 26 Nov 2026) | in use; weights unsettled ([OPEN_QUESTIONS.md](OPEN_QUESTIONS.md) question 13) |
 | Hosted Gnani and Gemini | vendor terms, not reviewed in our documents | check before launch (unconfirmed) |
 
 ## 6. Gaps (SPEC section 20, still open on 25 Nov 2026)
@@ -109,4 +110,6 @@ Details per model: [MODELS.md](MODELS.md), [`../v1/MODELS.md`](../v1/MODELS.md).
 - **No HTTPS or domain** (NEEDS_APPROVAL item 13); the site is reached on localhost or through SSH forwards. A demo
   password exists only in the unrun Caddy profile.
 - **No monitoring or alerts.**
-- **Recordings are kept until someone deletes them** (NEEDS_APPROVAL item 25).
+- **Recordings:** deleted by themselves after 30 days and deletable one by one since 26 Nov 2026
+  ([ADR-0034](adr/0034-recording-retention.md)). Still a gap: anyone who reaches the console can delete one (no
+  accounts), and deleting a voice does not delete the recordings spoken in it (NEEDS_APPROVAL item 25).

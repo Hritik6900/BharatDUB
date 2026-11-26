@@ -19,7 +19,7 @@ from app.providers import get_gpu_voice, get_llm, get_stt, get_tts
 from app.providers.base import ProviderError, VoiceSpec
 from app.shared import audio_utils as au
 from app.shared.metrics import percentile
-from app.v1 import apilog, breaker, dense, record, trace, warm
+from app.v1 import apilog, breaker, dense, hold, record, trace, warm
 from app.v1.degrade import RUNGS, Ladder
 from app.v1.phrase import DynamicPhraser, ShortLineMerger
 
@@ -273,6 +273,9 @@ class LivePipeline:
         self._starts: dict[int, int] = {}  # seq -> when that phrase began (to know how long the one before may run)
         self._last_end = 0                 # when the phrase before this one ended (no phrase begins before that)
         self.sync_grown: list[tuple[int, int]] = []  # (session ms, new delay) each time the delay grew
+        # `LIVE_SYNC_EASE`: the hold comes back down, step by step, once phrases are in time again (app/v1/hold.py).
+        # Made when the hold is first set (its normal value is known then); None = the hold only ever grows.
+        self._ease: hold.Ease | None = None
         # v1.1 `V1_LIVE_RECORD` and the session's own ask (record=true): the dub is kept on disk for the pitch
         # renderer (app/v1/record.py). None = nothing is kept, as SPEC section 10 says.
         self._rec = record.Recorder(sess.id, sess.langs, self.s.live_sample_rate, engine=eng or "cloud",
@@ -348,6 +351,7 @@ class LivePipeline:
             trace.event("live_session_end", session=self.sess.id, phrases=self.sess.chunk_count,
                         engine=self.sess.row.get("engine") or "cloud", hold_ms=self._sync_delay,
                         hold_grown=len(self.sync_grown),
+                        hold_eased=len(self._ease.steps) if self._ease is not None else None,
                         merged=self._merger.merged if self._merger else None,
                         short_alone=self._merger.alone if self._merger else None)
 
@@ -493,6 +497,10 @@ class LivePipeline:
             # A copied voice from Gnani needs the longer start; our GPU engine is as quick as a stock voice.
             cloned = (self.voice is not None or self._enrol is not None) and not self.gpu.enabled
             self._sync_delay = self.s.live_sync_delay_clone_ms if cloned else self.s.live_sync_delay_ms
+            if self.s.live_sync_ease:
+                self._ease = hold.Ease(self._sync_delay, step_ms=self.s.live_sync_ease_step_ms,
+                                       every_ms=self.s.live_sync_ease_every_ms, calm_ms=self.s.live_sync_ease_after_ms,
+                                       spare_ms=self.s.live_sync_ease_spare_ms)
         self.sess.bus.broadcast({"type": "sync", "t_ms": now, "media_s": round(media_s, 3), "playing": playing,
                                  "delay_ms": self._sync_delay})
 
@@ -509,12 +517,30 @@ class LivePipeline:
         late = sorted(v for v in self._late_recent.values() if v > 400)
         if self.offset_delay():   # the offset is YouTube's delay, not ours to change
             return
+        now = self.sess.now_ms()
+        if self._ease is not None:
+            self._ease.note(late_ms, now, seq)
         if not self.s.live_sync_adapt or len(late) < 3 or self._sync_delay >= self.s.live_sync_delay_max_ms:
+            self._ease_hold(now)
             return
         step = min(self.s.live_sync_grow_step_ms, (late[len(late) // 2] // 500 + 1) * 500)
         self._sync_delay = min(self.s.live_sync_delay_max_ms, self._sync_delay + step)
         self._late_recent.clear()
-        self.sync_grown.append((self.sess.now_ms(), self._sync_delay))
+        self.sync_grown.append((now, self._sync_delay))
+        if self._ease is not None:
+            self._ease.trouble(now)
+
+    def _ease_hold(self, now: int) -> None:
+        """The way back: after the hold grew (a stall of the link, a slow spell) and phrases are in time again
+        for a while, it goes down a small step at a time to the value the session began with, never under it and
+        never while a phrase is late. Viewers get the new value with the next `sync` message."""
+        if self._ease is None or not self._sync_delay:
+            return
+        new = self._ease.next(self._sync_delay, now)
+        if new != self._sync_delay:
+            self._sync_delay = new
+            if self._trace:
+                trace.event("live_hold_eased", session=self.sess.id, hold_ms=new, at_ms=now)
 
     # ---------- a streamer's own mic: the dub waits for YouTube ----------
     def offset_delay(self) -> int:
@@ -560,6 +586,7 @@ class LivePipeline:
         if not delay or not late:
             return viewers
         return {**viewers, "sync_delay_ms": delay, "sync_n": len(late), "sync_grown": len(self.sync_grown),
+                **({"sync_eased": len(self._ease.steps)} if self._ease is not None and self._ease.steps else {}),
                 "sync_on_time_pct": round(100 * sum(v <= 250 for v in late) / len(late), 1),
                 "sync_late_p95_ms": int(percentile(late, 95) or 0)}
 
@@ -1158,6 +1185,8 @@ class LivePipeline:
         if unheard or too_late:
             for t in [timings, *[t for _, t in rest]]:
                 t[f"skipped:{lang}"] = "unheard" if unheard else "late"
+            if too_late and not unheard and self._ease is not None:   # a phrase too late to be spoken: the hold stays
+                self._ease.trouble(now)
             if self._rec is not None:
                 self._rec.skip(lang, chunk.seq, "unheard" if unheard else "late", t_speech_ms=chunk.t_speech_ms,
                                also=[c.seq for c, _ in rest] or None, **tag)

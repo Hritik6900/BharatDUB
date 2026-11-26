@@ -60,7 +60,8 @@ window) and no other session live. One GPU through one address is one stream.
 
 ## 3. Flags
 
-All in v1's `backend/.env`, all off by default; with every flag off v1 behaves as v0. Restart the backend after a
+All in v1's `backend/.env`, all off by default except `V1_HQ_ADAPTIVE` (on since 26 Nov 2026; it acts on HQ jobs
+only, so with `V1_STUDIO_HQ` off v1 still behaves as v0). Restart the backend after a
 change. What each one does, and what was measured, is in `PROGRESS.md` and `EVAL_REPORT.md`.
 
 | Flag | On | Roll back |
@@ -85,22 +86,31 @@ change. What each one does, and what was measured, is in `PROGRESS.md` and `EVAL
 | `V1_EN_SINGLE_VOICE` | v1.1: English in a GPU-engine session is spoken in one voice for the whole session (`V1_EN_VOICE`), never chosen line by line | off: the hosted copy when 2 s are spare, else a stock voice |
 | `V1_HQ_JUDGE` | v1.1 Studio HQ: a dubbed line is heard back by the best speech-to-text for its language (hosted first, then our GPU Whisper where it hears the language, which is Hindi only, then the QA server's Whisper once it runs), the next one when the first fails; the comparison treats the two ways of storing one letter as one spelling; every take, line and trace record says who judged it | off: the `score` list of the routing file and v1's comparison |
 | `V1_HQ_CALIBRATE` | `/studio/calibrate` and its routes: label takes blind, agreement with the judge, a recommended flag line (`CALIBRATION.md`) | off: the routes answer 404, the page says it is off |
-| `V1_HQ_ADAPTIVE` | one take of a line first; more, up to `V1_HQ_ADAPTIVE_MAX` (5), only while the best score is under `V1_HQ_ADAPTIVE_MIN` (0 = the flag line) | off: up to `V1_HQ_NBEST` (4) until a take passes |
+| `V1_HQ_ADAPTIVE` (default **on**) | one take of a line first; more, up to `V1_HQ_ADAPTIVE_MAX` (5), only while the best score is under `V1_HQ_ADAPTIVE_MIN` (0 = the flag line) | `false`: up to `V1_HQ_NBEST` (4) until a take passes |
 | `V1_HQ_NORMALISE` | numbers, decimals, dates, clock times, the rupee and dollar sign, %, units and short forms are written out by rule in Hindi, Bengali, Tamil and English before the voice sees the line; abbreviations in capitals letter by letter for our own voice | off: the model-written step alone, as v1 |
 | `V1_HQ_AUTO_GLOSSARY` | names, brands and repeated English terms found in a job's transcript are used as that job's glossary (never saved to the shared one); `GET /api/v1/jobs/<id>/glossary-candidates` | off |
-| `V1_HQ_REVIEW` | the hosted model reviews every translated line against the written rubric (meaning, numbers and names, spoken register, fits the slot) and may edit; a cleaned transcript line that changed script or lost its English terms is put back | off: v1's plain review |
-| `V1_LIVE_RECORD` | v1.1 pitch kit: a Live session **that was made with `record: true`** (the tick "Keep a recording of this session's dub" on `/live`, shown only while this flag is on) saves its dubbed sound, one track per language, and its phrase times and captions under `<DATA_DIR>/recordings/<session>/` | off: the tick is not shown, the ask is ignored, nothing is written. Delete the folders to remove what was kept |
+| `V1_HQ_REVIEW` | the hosted model reviews every translated line against the written rubric (meaning, numbers and names, spoken register, fits the slot) and may edit; a cleaned transcript line that changed script or lost its English terms is put back. **Since 26 Nov 2026 every HQ job is reviewed whatever this flag says** (`app/v1/hq/review.py`, `required`); `/api/v1/flags` shows it as on whenever `V1_STUDIO_HQ` is on | none for an HQ job: HQ never runs without the review. To stop reviewing, do not offer HQ (`V1_STUDIO_HQ=false`) |
+| `V1_LIVE_RECORD` | v1.1 pitch kit: a Live session **that was made with `record: true`** (the tick "Keep a recording of this session's dub" on `/live`, shown only while this flag is on) saves its dubbed sound, one track per language, and its phrase times and captions under `<DATA_DIR>/recordings/<session>/`. A recording is deleted by itself `V1_RECORD_KEEP_DAYS` (30) days after it ended; the list on `/live` and `DELETE /api/v1/recordings/<session>` delete one at once | off: the tick is not shown, the ask is ignored, nothing is written. What was kept earlier is still listed, still deletable and still deleted after its days |
 | `V1_LISTEN_TEST` | v1.1 pitch kit: `/listen-test` and its routes: blind A/B pairs from `<DATA_DIR>/listen/pairs`, answers in `<DATA_DIR>/listen/results.jsonl`, summary on `/metrics-ui` | off: the routes answer 404, the page says it is off, the summary is not shown |
 | `V1_STORE` | `postgres` (with `POSTGRES_DSN`) | `json` |
 
 Not a flag but a setting: `LIVE_FIT_MAX_TEMPO=1.2` caps the Live speed-up at 1.2x (v0: 1.3).
+
+Not a flag but a kill switch (v1.2 Part 1, on by default): `LIVE_SYNC_EASE=true`. After the viewers' hold grew (a
+slow link) it comes back down to its normal value, 250 ms at a time, once phrases are ready early again:
+`LIVE_SYNC_EASE_STEP_MS=250`, `LIVE_SYNC_EASE_EVERY_MS=5000`, `LIVE_SYNC_EASE_AFTER_MS=20000`,
+`LIVE_SYNC_EASE_SPARE_MS=500`. `LIVE_SYNC_EASE=false` and a restart: the hold only grows, as before. A session's
+`/metrics` shows `sync_eased` (steps down) beside `sync_grown`; the stream watcher prints every change as `HOLD a->b`.
+Measured: `docs/handbook/experiments/EXP-030-hold-ease-back.md`. The viewer page's part (it plays 1.1x until it has
+caught up) was not run in a browser, and needs the website rebuilt to be served at all.
 
 `V1_SPEC_TRANSLATE` and `V1_LLM_PREFIX_CACHE` no longer exist (removed in v1.1 WS6, `PROGRESS.md`). A line that
 still sets one of them in `backend/.env` is ignored: the backend starts as if it were not there.
 
 ### Recommended settings for v1's `backend/.env` (v1.1 WS6)
 
-The code's defaults stay off. This is what to write into v1's own env file; a ready block is at the end of the v1
+The code's defaults stay off (one exception since 26 Nov 2026: `V1_HQ_ADAPTIVE` is on by default). This is what
+to write into v1's own env file; a ready block is at the end of the v1
 part of `backend/.env.example`. Every number below is from `EVAL_REPORT.md`, `LIVE_DENSE_REPORT.md` or
 `PROGRESS.md`; nothing was measured for this list.
 
@@ -119,7 +129,7 @@ part of `backend/.env.example`. Every number below is from `EVAL_REPORT.md`, `LI
 
 | Flag | Recommended | The measured reason |
 |---|---|---|
-| `V1_HQ_REVIEW` | **on, with `V1_STUDIO_HQ`** | without it HQ's merge and clean steps damaged the transcript of two of three test videos: 25 of 38 lines no longer the line heard, 0 with it. 24 of 76 lines edited by the reviewer. Words heard back 94.5% against 95.9% without it (the figure cannot see a damaged transcript); its edits were not judged by ear |
+| `V1_HQ_REVIEW` | **always on with `V1_STUDIO_HQ`: enforced in code since 26 Nov 2026, nothing to set** | without it HQ's merge and clean steps damaged the transcript of two of three test videos: 25 of 38 lines no longer the line heard, 0 with it. 24 of 76 lines edited by the reviewer. Words heard back 94.5% against 95.9% without it (the figure cannot see a damaged transcript); its edits were not judged by ear |
 | `V1_HQ_JUDGE` | **on, with `V1_STUDIO_HQ`** | the counting rule no longer takes points off Bengali for a letter stored two ways: Bengali +5.6 to 6.3 points on the same output, Tamil unchanged, 25 flags become 15 |
 | `V1_BREAKER` and `V1_LIVE_DEGRADE` | **on, both together** (not on the list above: point 3) | all three GPU endpoints stalled for 50 s: flags off (1 run) 4 of 22 phrases translated and dubbed; on (3 runs) 23, 24, 23 of 23, 24, 23, in a stock voice, first audio median 3.1-3.5 s. Healthy calls stayed far under the limits (slowest voice line 1.36 s of 4 s, slowest translation 1.13 s of 3 s). The stall was made with a relay, not a real tunnel |
 | `V1_LIVE_BUDGET` | **on where Punjabi-like languages are the target; your call for Tamil** (point 4) | dense reel, Punjabi + Tamil, 5 runs: within 0.25 s 63.5% -> 80.6%, within 1 s 86.5% -> 92.3%, dub length over slot p90 1.42 -> 1.17, lines at 1.3x 46 -> 24 of 185; 15% fewer letters said; in Tamil 7 of 20 lines read had lost something that mattered |
@@ -131,11 +141,11 @@ part of `backend/.env.example`. Every number below is from `EVAL_REPORT.md`, `LI
 | `V1_LIVE_LATE_SHORTEN` | off | skips 4.7 -> 1.7 a run, measured only inside a bundle whose timing was worse (56.0% on time against 69.6%); its own effect was not separated |
 | `V1_LIVE_BACKCHECK` | off | not measurable: no scorer until the QA server runs (`NEEDS_APPROVAL.md` item 6); it does nothing without one |
 | `V1_TTS_SERVER`, `V1_TTS_MAYA` | off | as of v1.1 WS4 neither server was loaded; nothing measured |
-| `V1_HQ_ADAPTIVE` | off | against v1's own rule the same number of takes (143); it only saves against five fixed takes (206 s against 524 s of voice time) |
+| `V1_HQ_ADAPTIVE` | **on** (decided 26 Nov 2026; the code's default) | against five takes of every line 61% less voice time (206 s against 524 s over three videos) with the same take kept on 76 of 76 lines; against v1's earlier rule (up to 4 takes until one passes) the same number of takes (143), so it costs nothing |
 | `V1_HQ_NORMALISE` | off until a video with numbers has been heard | nothing to do on the three test videos (no digits); unit tests only |
 | `V1_HQ_AUTO_GLOSSARY` | off (your call; harmless) | 16 names and terms proposed over three videos; its effect on the dub was not separated from the review's |
 | `V1_HQ_CALIBRATE` | on when someone is going to label; it only adds a page | the page works on real takes; no labels yet, so no agreement figure |
-| `V1_LIVE_RECORD` | off | not a speed or quality change; on only for a session whose speaker agreed to a video being made (nothing deletes a recording by itself) |
+| `V1_LIVE_RECORD` | off | not a speed or quality change; on only for a session whose speaker agreed to a video being made. A recording is deleted by itself after `V1_RECORD_KEEP_DAYS` (30) days and can be deleted at any time |
 | `V1_LISTEN_TEST` | off until pairs exist in the data folder | no pairs and no ratings yet |
 | `V1_STORE` | `json` | `postgres` was never run against a database |
 
@@ -146,8 +156,9 @@ Not a flag: `LIVE_FIT_MAX_TEMPO` stays at its default (phrases at the limit 20 -
 
 1. **`V1_STUDIO_HQ` without `V1_HQ_REVIEW`.** The list switches HQ on and not the review. v1.1 WS3 found that HQ
    without it dubbed two of three test videos from a damaged transcript, and that the heard-back figure cannot
-   see it. So the ready block switches `V1_HQ_REVIEW` and `V1_HQ_JUDGE` on as well. If they are left off, do not
-   offer the HQ choice.
+   see it. **Settled on 26 Nov 2026: HQ never runs without the review.** The code enforces it (an HQ job is
+   reviewed and its transcript guarded whatever `V1_HQ_REVIEW` says; test
+   `test_hq_on_and_the_review_flag_off_the_review_still_runs`). The ready block still switches `V1_HQ_JUDGE` on.
 2. **`V1_LIVE_STOCK_DEFAULT` against the Live measurements.** Every v1.1 Live number (budget, controller, warm
    start, the breaker runs) was measured with the voice learned from the stream. With this flag on a `/live`
    session without a streamer profile never learns a voice, so those numbers describe Streamer Mode sessions and
@@ -208,7 +219,15 @@ replay harness: `--record`). Then `<DATA_DIR>/recordings/<session>/` (or `V1_REC
 player starts it) and `phrases.jsonl` (per phrase and language: `seq`, `t_speech_ms`, `media_s` = the video's time
 it was spoken at, `start_ms` / `track_ms`, `dur_ms`, `late_ms`, `hold_ms`, `first_audio_ms`, `voice` copied or
 stock, `tempo`, the caption `text`; or `skipped` and why). The stream's own sound is not kept. The caption text is
-in that folder only: not in the trace, not in `logs/`. Nothing deletes a recording by itself.
+in that folder only: not in the trace, not in `logs/`.
+**How long a recording stays** (v1.2 Part 1, ADR-0034): it is deleted by itself `V1_RECORD_KEEP_DAYS` days after it
+ended (default 30; `0` = never by itself). The backend checks when it starts and every half hour while it runs,
+whether or not `V1_LIVE_RECORD` is on at that time; a session that is being recorded is never touched.
+`GET /api/v1/recordings` lists what is kept (session, dates, languages, size, the day it goes; no text, no sound);
+`DELETE /api/v1/recordings/<session>` removes one at once (409 while that session is still recording), and `/live`
+shows the same list with a Delete button whenever a recording exists. There is no sign-in on the site, so anyone
+who reaches the console can delete a recording (as they can a voice). Deleting a voice profile does not delete
+recordings: a recording does not say whose voice it holds.
 **The side-by-side video** (original left, the same video with the dub right, captions, language, that
 recording's own first-audio and on-time numbers):
 

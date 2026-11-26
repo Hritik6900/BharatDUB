@@ -59,13 +59,13 @@ Numbers are from `EVAL_REPORT.md` (three runs per Live setup, one run per Studio
 | `V1_LIVE_NATIVE_SPEED` (v1.1) | acts on 6.6 lines a run, all Tamil; no number moved | **off** |
 | `V1_LIVE_WARMSTART` (v1.1) | first 10 phrases of a session, Punjabi + Tamil, 5 runs each way: first audio p95 4.27 s -> 3.80 s (lower in 4 of 5 pairs) with the final build, 3.86 s -> 4.79 s with the first build; "off" alone moved 0.41 s between the two batches; the median did not move; 4-6 of 20 lines in a stock voice either way. Nothing was cold on this setup. The matched stock voice was only measured on a female speaker (the voices v0 uses anyway) | **your call**: no proven gain in speed; its other parts (male stock voice for a male speaker, the softened change of voice) need ears |
 | `V1_HQ_JUDGE` (v1.1 WS3) | the counting rule no longer takes points off Bengali for a letter stored two ways: Bengali +5.6 to 6.3 points on the same HQ output, Tamil unchanged, 25 flags become 15; every line records its judge (the hosted one answered every hearing; the second judge exists for Hindi only and was never needed) | **on** whenever HQ is on |
-| `V1_HQ_REVIEW` (v1.1 WS3) | 24 of 76 lines edited by the hosted reviewer (wrong number, misspelt name, changed meaning among them); a cleaned transcript line that is no longer the line heard is put back: 0 such lines against 25 of 38 in the HQ jobs without it. Words heard back 94.5% against 95.9%: lower, and not because the dub is worse as far as the lines read show | **on** whenever HQ is on (it is the only thing that stops the transcript damage); ears needed on its edits |
-| `V1_HQ_ADAPTIVE` (v1.1 WS3) | against five takes of every line: 61% less voice time (206 s against 524 s over three videos), and on the same takes the same take kept on all 76 lines. Against v1's own rule: the same number of takes (143) | on or off makes little difference today; **on** if the flag line is ever raised |
+| `V1_HQ_REVIEW` (v1.1 WS3) | 24 of 76 lines edited by the hosted reviewer (wrong number, misspelt name, changed meaning among them); a cleaned transcript line that is no longer the line heard is put back: 0 such lines against 25 of 38 in the HQ jobs without it. Words heard back 94.5% against 95.9%: lower, and not because the dub is worse as far as the lines read show | **on** whenever HQ is on (it is the only thing that stops the transcript damage): since 26 Nov 2026 the code enforces it, an HQ job is reviewed whatever the flag says; ears needed on its edits |
+| `V1_HQ_ADAPTIVE` (v1.1 WS3) | against five takes of every line: 61% less voice time (206 s against 524 s over three videos), and on the same takes the same take kept on all 76 lines. Against v1's own rule: the same number of takes (143) | **on** (decided 26 Nov 2026, and the code's default since): it saves against five fixed takes and costs nothing against v1's earlier rule |
 | `V1_HQ_AUTO_GLOSSARY` (v1.1 WS3) | 16 names and terms proposed over three videos; effect on the dub not separated from the review's | **your call**; harmless |
 | `V1_HQ_NORMALISE` (v1.1 WS3) | nothing to do on the test videos (no digits); unit tests for Hindi, Bengali, Tamil, English | on for those four languages once a video with numbers has been heard |
 | `V1_HQ_CALIBRATE` (v1.1 WS3) | the page works on real takes; **no labels yet**, so no agreement figure and no recommended flag line | **on**, and thirty labels per language from someone who speaks it |
 | `V1_EN_SINGLE_VOICE` (v1.1) | English + Punjabi, 3 runs each: stock lines between copied ones 4.7 a session (10.1%) and 9 changes of voice with it off, none with it on. Every line in the hosted copy: within 1 s 86.6% -> 73.7% where the copy existed, first audio 0.73 s later than a stock line. So `auto` takes the one stock voice. The hosted stock voice refused 59% of its lines that night (the copy none) | **on** with `auto` if one voice matters more than the speaker's voice in English; `V1_EN_VOICE=copy` when the stock voice is failing or the copied voice matters more than timing |
-| `V1_LIVE_RECORD` (v1.1 WS4) | not a speed or quality change. One session recorded and rendered: 35 lines, the picture's numbers equal the trace's (91.4% within 0.25 s, 97.1% within 1 s, first audio 2.3 s). With it off, or without the session's own ask, nothing is written (tested) | **off**, and on only for a session whose speaker agreed to a video being made; nothing deletes a recording by itself |
+| `V1_LIVE_RECORD` (v1.1 WS4) | not a speed or quality change. One session recorded and rendered: 35 lines, the picture's numbers equal the trace's (91.4% within 0.25 s, 97.1% within 1 s, first audio 2.3 s). With it off, or without the session's own ask, nothing is written (tested) | **off**, and on only for a session whose speaker agreed to a video being made. Since 26 Nov 2026 a recording is deleted by itself after `V1_RECORD_KEEP_DAYS` (30) days and can be deleted at any time (`/live`, `DELETE /api/v1/recordings/<session>`) |
 | `V1_LISTEN_TEST` (v1.1 WS4) | no ratings yet: no pairs exist | **on** once WS5's pairs are in the data folder and listeners are asked |
 
 ### Recommended `.env` for v1 (v1.1 WS6)
@@ -76,11 +76,13 @@ and a ready block is in `backend/.env.example`. The code's defaults stay off.
 - **On, as asked:** `V1_TRACE`, `V1_ROUTER`, `V1_API_LOG`, `V1_STUDIO_HQ`, `V1_FIT_115`, `V1_LIVE_STOCK_DEFAULT`.
 - **On as well, because a report says the list is not safe without them:** `V1_HQ_REVIEW` and `V1_HQ_JUDGE`
   (HQ without the review dubbed two of three test videos from a damaged transcript: 25 of 38 lines against 0).
+  Since 26 Nov 2026 the review is enforced in code for every HQ job; only `V1_HQ_JUDGE` is left to set.
+- **On (decided 26 Nov 2026):** `V1_HQ_ADAPTIVE`: against five takes of every line 61% less voice time (206 s against 524 s over three videos) with the same take kept on 76 of 76 lines; against v1's earlier rule (up to 4 takes until one passes) the same number of takes (143), so it costs nothing. It is the code's default now.
 - **A report argues for them, they are not on the list, your call:** `V1_BREAKER` + `V1_LIVE_DEGRADE` (through a
   50 s stall 4 of 22 phrases dubbed with them off, all of 23-24 with them on); `V1_LIVE_BUDGET` for Punjabi-like
   languages (within 1 s 86.5% -> 92.3%), which is one switch for every language and costs Tamil content.
 - **Off:** `V1_LIVE_RATECTRL`, `V1_LIVE_NATIVE_SPEED`, `V1_LIVE_WARMSTART`, `V1_PHRASE_DYNAMIC`,
-  `V1_LIVE_LATE_SHORTEN`, `V1_LIVE_BACKCHECK`, `V1_TTS_SERVER`, `V1_TTS_MAYA`, `V1_HQ_ADAPTIVE`,
+  `V1_LIVE_LATE_SHORTEN`, `V1_LIVE_BACKCHECK`, `V1_TTS_SERVER`, `V1_TTS_MAYA`,
   `V1_HQ_NORMALISE`, `V1_HQ_AUTO_GLOSSARY`, `V1_LIVE_RECORD`, `V1_LISTEN_TEST` (until pairs exist),
   `V1_EN_SINGLE_VOICE` (on with `auto` only where English is a target), `V1_HQ_CALIBRATE` (on when someone labels).
 - **The list and the reports disagree in one more place:** with `V1_LIVE_STOCK_DEFAULT` on, a `/live` session
@@ -128,13 +130,16 @@ measured 1.8 s first audio there; `NEEDS_APPROVAL.md` item 3), not these flags.
 | 24 | Five comparison backends left running on 8111-8115 (v1.1 WS3) | three PowerShell lines; they could not be stopped from inside this work |
 | 25 | A pitch video of a real stream, and how long recordings are kept (v1.1 WS4) | the speaker's agreement, the flag on 8110, a decision on deletion |
 | 26 | Listeners for the blind listening test (v1.1 WS4) | WS5's pairs; people who speak the language |
+| 28 | Get written confirmation of commercial use from AI4Bharat / legal review (v1.2 Part 1; `NEEDS_APPROVAL.md` item 28) | a written answer from AI4Bharat, or a lawyer's read of IndicF5's lineage |
 
 ## 4. Decisions needed
 
 1. **Licences.** Indic Transcribe: hosting it as a service others call needs its authors' written sign-off; fine
    for samples. The speaker-similarity model behind earlier numbers (ECAPA2) is non-commercial; the QA server
    uses an Apache-2.0 one, whose scale has to be measured before a threshold is set. pyannote needs its terms
-   accepted and attribution. IndicF5 (MIT), Maya 2 (Apache-2.0), Gemma 4 (Apache-2.0), Whisper (MIT) are clear.
+   accepted and attribution. Maya 2 (Apache-2.0), Gemma 4 (Apache-2.0), Whisper (MIT) are clear. **IndicF5 is not
+   clear (26 Nov 2026): legal confirmation needed.** Its card says MIT, but a model fine-tuned from it says the
+   lineage is non-commercial (`MODELS.md`, "Checked on 26 Nov 2026"; `NEEDS_APPROVAL.md` item 28).
 2. **Maya 2: keep or drop.** Not loaded, so not heard. It has no speed control and needs the sample's exact
    words, like IndicF5; it adds English. Decide after an HQ window with it.
 3. **Quantised big model or the hosted one for Studio's review.** Not measured: the big model is not loaded. The

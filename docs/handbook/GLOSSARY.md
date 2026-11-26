@@ -33,7 +33,9 @@ video) (SPEC section 8). Live: the span of the source phrase (`slot_ms`, v1.1).
 ### hold
 In sync mode, how far each viewer's video is held behind the console's, so the dub can arrive before its moment.
 Starts at 6 s (8.5 s with a copied voice in the first version); grows by what the dub needs, at most 1 s a step
-since 21 Nov 2026 (`live_sync_grow_step_ms`), limit 15 s; it does not come back down (SPEC sections 16, 20, 21).
+since 21 Nov 2026 (`live_sync_grow_step_ms`), limit 15 s. Until 26 Nov 2026 it did not come back down (SPEC
+sections 16, 20, 21); since then it eases back to its starting value in steps of 250 ms once phrases have time in
+hand again (`LIVE_SYNC_EASE`, ADR-0035).
 Also called the sync delay (`delay_ms`).
 
 ### sync mode

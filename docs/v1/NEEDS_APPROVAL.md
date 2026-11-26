@@ -53,6 +53,9 @@ ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -N -o IdentitiesOnly=yes -o Se
 
 Other documents written before 25 Nov 2026 cite the old item numbers: the table at the end translates them.
 Items 16-18 take five minutes, need no VM and can be done at any time.
+Added after the checklist was ordered, at the end of this file: item 27 (documentation) and item 28
+(**Get written confirmation of commercial use from AI4Bharat / legal review**: it is about the voice model the
+product runs on today, so read it before any contract).
 
 ---
 
@@ -699,24 +702,32 @@ curl.exe -s http://127.0.0.1:9020/v1/models      # answers again after a minute 
 
 - **What:** the side-by-side video in `data-v1\pitch\` is the test reel played three times by the replay harness.
   A video for a pitch should be a real stream or a real video of the speaker's own, recorded from the console.
-- **Why deferred:** it needs the speaker's agreement to keep their dubbed voice, the flag switched on on the
-  backend people use (8110, restarted), and a decision this work could not take: recordings are never deleted by
-  themselves, and deleting a voice profile does not delete recordings spoken in it.
+- **Why deferred:** it needs the speaker's agreement to keep their dubbed voice, and the flag switched on on the
+  backend people use (8110, restarted).
+- **Decided and built on 26 Nov 2026 (v1.2 Part 1):** recording stays opt-in (the flag and the session's own
+  tick); a recording is deleted by itself 30 days after it ended (`V1_RECORD_KEEP_DAYS=30`; checked when the
+  backend starts and every half hour); any recording can be deleted at once from the list on `/live` or with
+  `DELETE /api/v1/recordings/<session>`. The backend on 8110 gets this when it is next restarted.
+- **Still yours to decide:** deleting a voice profile does not delete recordings spoken in it. It cannot today:
+  a recording does not say whose voice it holds. No rule was given, so none was built.
 - **Commands (PowerShell, v1 checkout):**
   ```powershell
   # backend\.env: V1_LIVE_RECORD=true (and V1_LIVE_BUDGET=true if wanted), then restart the v1 backend
   # /live: tick "Keep a recording of this session's dub on this server", feed the video from this page, stop
   powershell -File scripts\v1\render-pitch.ps1 -Recording data-v1\recordings\<session> -Video C:\path\the-video.mp4 `
       -Lang pa-IN -Stereo split -Out data-v1\pitch\<name>.mp4
-  # afterwards, if the recording should not stay:
-  Remove-Item -Recurse data-v1\recordings\<session>
+  # afterwards, if the recording should not stay: the Delete button in the list on /live, or
+  curl.exe -X DELETE http://127.0.0.1:8110/api/v1/recordings/<session>
+  # what is kept, and the day each one goes by itself:
+  curl.exe http://127.0.0.1:8110/api/v1/recordings
   ```
 - **GPU memory:** none beyond the session itself.
 - **Verify:** the script prints the numbers it wrote on the picture; play the file with headphones (left ear the
   original, right ear the dub).
-- **Rollback:** `V1_LIVE_RECORD=false`, restart; delete `data-v1\recordings\` and `data-v1\pitch\`.
-- **Decide:** how long a recording may stay (the uploads rule is 24 hours), and whether deleting a voice should
-  delete the recordings made with it.
+- **Rollback:** `V1_LIVE_RECORD=false`, restart; delete `data-v1\recordings\` and `data-v1\pitch\`. A video
+  rendered into `data-v1\pitch\` is not a recording and is not deleted by the 30-day rule: delete it by hand.
+- **Decide:** whether deleting a voice should delete the recordings made with it. (How long a recording may
+  stay is decided: 30 days; another number is `V1_RECORD_KEEP_DAYS` in `backend\.env`, `0` = never by itself.)
 
 ## 26. Listeners for the blind listening test (YOU) (was item 26)
 
@@ -765,8 +776,10 @@ curl.exe -s http://127.0.0.1:9020/v1/models      # answers again after a minute 
 | 22 | 6 | second judge | VM |
 | 23 | 21 | labels for calibration | YOU |
 | 24 | 18 | five leftover comparison backends | LAPTOP |
-| 25 | 25 | a pitch video of a real stream, how long recordings stay | YOU + LAPTOP |
+| 25 | 25 | a pitch video of a real stream, how long recordings stay (30 days, built 26 Nov 2026; the voice-profile half open) | YOU + LAPTOP |
 | 26 | 26 | listeners for the blind listening test | YOU |
+| new (25 Nov) | 27 | documentation: the handbook's "(unconfirmed)" items (`V1_HQ_ADAPTIVE` settled 26 Nov: on) | YOU |
+| new (26 Nov) | 28 | Get written confirmation of commercial use from AI4Bharat / legal review | YOU |
 
 New in v1.1 WS5, inside the items above: the deploy kit (items 4, 8-11), the backend-only start on the machine
 (item 2), the voice A/B kit (item 8), the translation A/B with its rule (item 9), the licence guard on the speaker
@@ -776,10 +789,49 @@ model (item 4).
 
 Written while building `docs/handbook/`; nothing in the code changes.
 
-1. **`V1_HQ_ADAPTIVE`, on or off.** `V1_1_SUMMARY.md` section 3 says on; `RUNBOOK.md` section 3, `SUMMARY.md`
-   and `backend/.env.example` say off. The handbook says off until you choose
-   (`docs/handbook/OPEN_QUESTIONS.md` question 20). Rollback: none needed, it is a line in the docs and the env file.
+1. **`V1_HQ_ADAPTIVE`, on or off. Settled on 26 Nov 2026: on.** (It was: `V1_1_SUMMARY.md` section 3 says on;
+   `RUNBOOK.md` section 3, `SUMMARY.md` and `backend/.env.example` say off.) The four now say on with the same
+   measured reason, the handbook too, and the code's default is on
+   (`docs/handbook/OPEN_QUESTIONS.md` question 20, closed). Rollback: `V1_HQ_ADAPTIVE=false` in `backend\.env`.
 2. **Items marked "(unconfirmed)" in the handbook.** Each is a date, a reason or a detail no source or commit
    confirms (for example why v1 runs on the laptop and not the VM, why an end-to-end speech model was never tried,
    which flags were on in the four v1 sessions of 24 Nov). `grep -rn "unconfirmed" docs/handbook` lists them;
    a line from you turns each into a fact.
+
+## 28. Get written confirmation of commercial use from AI4Bharat / legal review (YOU) (new, 26 Nov 2026)
+
+- **What:** IndicF5 (`ai4bharat/IndicF5`) is the copied voice of the product today (9001-9003) and of the planned
+  batching server (item 10). Its licence status is **legal confirmation needed**: two sources say two things.
+  - Its own Hugging Face card says **MIT** (`license: mit`; https://huggingface.co/ai4bharat/IndicF5, read
+    26 Nov 2026). The card says nothing about commercial use; its terms of use are about consent only. Its code
+    repository (https://github.com/AI4Bharat/IndicF5) has no licence file.
+  - A model fine-tuned from it, `dheeyantra/dhee-indic-f5` (https://huggingface.co/dheeyantra/dhee-indic-f5,
+    CC-BY-NC-4.0, read 26 Nov 2026), says: "This model inherits non-commercial terms from its lineage: it is
+    fine-tuned from `ai4bharat/IndicF5`, which builds on **F5-TTS** (trained on the **Emilia** dataset,
+    CC-BY-NC-4.0) and **IIT-Madras Indic TTS** data (non-commercial). The non-commercial restriction therefore
+    carries through to this model."
+  - F5-TTS's authors say of their own model: "The pre-trained models are licensed under the CC-BY-NC license due
+    to the training data Emilia" (https://github.com/SWivid/F5-TTS, read 26 Nov 2026).
+  Everything read, with what could not be fetched: `MODELS.md`, "checked on 26 Nov 2026".
+- **Why deferred:** it is not a thing code or a measurement can settle. Whether IndicF5's weights began from
+  F5-TTS's pre-trained weights is not stated on any AI4Bharat page, and whether an MIT tag by the model's authors
+  is enough for a paid product is a lawyer's question. The claim comes from a third party, which also sells a
+  commercial licence for its own model.
+- **What to do (no command):**
+  1. Write to AI4Bharat (the contact on https://ai4bharat.iitm.ac.in or the model page's discussion tab) and ask,
+     in writing: (a) may IndicF5's released weights be used in a commercial, paid dubbing product; (b) were the
+     weights initialised from F5-TTS's pre-trained (Emilia) weights; (c) what terms do the IndicTTS (IIT-Madras),
+     LIMMITS, Rasa and IndicVoices-R data put on a model trained on them. Keep the answer.
+  2. Or have a lawyer read `MODELS.md` ("checked on 26 Nov 2026") and the three pages above.
+  3. The same read should cover Demucs: its code is MIT, and the maintained repository says "The license of the
+     weights is not clear" (`MODELS.md`, same section).
+- **GPU memory:** none.
+- **Verify:** a written answer on file. Then `docs/handbook/MODELS.md` (the IndicF5 row), `MODELS.md` and
+  `docs/handbook/OPEN_QUESTIONS.md` question 21 are changed from "legal confirmation needed" to what the answer says.
+- **Rollback / if the answer is no:** the copied voice needs another model. Candidates already in the plan:
+  Maya 2 (item 8, Apache-2.0, not loaded, no speed control), the hosted copy (`vachana-vc-v1`, vendor terms;
+  measured too slow for dense Live speech: 5 of 21 phrases in the copied voice), Indic-Mio (Apache-2.0 by v0's
+  engine header, built as a switch; its lines are longer on a voice learned from a fast stream). None is a drop-in.
+- **Until then:** do not say IndicF5, or "all our models", is cleared for commercial use
+  (`docs/handbook/PITCH_FACTS.md`, "Do not claim").
+

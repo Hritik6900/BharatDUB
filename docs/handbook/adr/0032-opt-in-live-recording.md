@@ -43,6 +43,8 @@ and their words (`../../v1/PROGRESS.md` v1.1 WS4, "Decided").
 
 - A recording is never deleted by itself, and deleting a voice profile does not delete recordings made in it.
   How long recordings stay is undecided (`../../v1/NEEDS_APPROVAL.md` item 25).
+  **Decided on 26 Nov 2026:** 30 days, and any recording deletable at once
+  ([ADR-0034](0034-recording-retention.md)). The voice-profile half is still open.
 - Viewers on `/watch` are not told a session's dub is being kept (nothing of theirs is in it).
 - The listening page has no sign-in; one person can answer as several. Fine among invited listeners, not a poll.
 - The example is the test reel, not a real stream; render time was not measured.

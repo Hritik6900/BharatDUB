@@ -50,28 +50,32 @@ Details: `../v1/RUNBOOK.md` sections 1-2.
 
 ## Flags and the recommended v1 env
 
-All flags default off; with all off v1 behaves as v0. Restart the backend after a change. Every flag with its
+All flags default off except `V1_HQ_ADAPTIVE` (on since 26 Nov 2026, HQ jobs only); with `V1_STUDIO_HQ` and the rest off v1 behaves as v0. Restart the backend after a change. Every flag with its
 effect and measured reason: `../v1/RUNBOOK.md` section 3; a ready block is at the end of `backend/.env.example`.
 Summary from `docs/v1/V1_1_SUMMARY.md` section 3 (nothing new measured for this list):
 
 | Set | Flags | Reason (source) |
 |---|---|---|
 | **On** | `V1_TRACE`, `V1_ROUTER`, `V1_API_LOG`, `V1_STUDIO_HQ`, `V1_FIT_115`, `V1_LIVE_STOCK_DEFAULT` | the list that was asked for |
-| **On with HQ** | `V1_HQ_REVIEW`, `V1_HQ_JUDGE` | HQ without the review dubbed 2 of 3 test videos from a damaged transcript (25 of 38 lines vs 0), [INC-07](INCIDENTS.md#inc-07-hq-transcript-damage-found) |
+| **On with HQ** | `V1_HQ_JUDGE`; `V1_HQ_REVIEW` needs no setting: since 26 Nov 2026 the code reviews every HQ job whatever the flag says | HQ without the review dubbed 2 of 3 test videos from a damaged transcript (25 of 38 lines vs 0), [INC-07](INCIDENTS.md#inc-07-hq-transcript-damage-found) |
+| **On (founder, 26 Nov 2026)** | `V1_HQ_ADAPTIVE` (also the code's default) | against five takes of every line 61% less voice time (206 s against 524 s over three videos) with the same take kept on 76 of 76 lines; against v1's earlier rule (up to 4 takes until one passes) the same number of takes (143), so it costs nothing (**measured** 25 Nov, [EXP-027](experiments/EXP-027-hq-judge-rerun.md)) |
 | **Founder's call, recommended on** | `V1_BREAKER` + `V1_LIVE_DEGRADE` (together) | 50 s stall: 4 of 22 phrases dubbed with them off (1 run), all with them on (3 runs) (**measured**, relay, 24 Nov) |
 | **Founder's call** | `V1_LIVE_BUDGET` (one switch for all languages) | within 1 s 86.5% -> 92.3% (dense reel, 5 runs); Tamil lost meaning in 7 of 20 lines read |
 | **On once a voice is chosen** | `V1_EN_SINGLE_VOICE` with `V1_EN_VOICE` | NEEDS_APPROVAL item 22 |
 | **On when used** | `V1_HQ_CALIBRATE`, `V1_LISTEN_TEST` | pages only; no labels, no pairs yet |
-| **Off** | `V1_LIVE_RATECTRL`, `V1_LIVE_NATIVE_SPEED`, `V1_LIVE_WARMSTART`, `V1_PHRASE_DYNAMIC`, `V1_LIVE_LATE_SHORTEN`, `V1_LIVE_BACKCHECK`, `V1_TTS_SERVER`, `V1_TTS_MAYA`, `V1_HQ_ADAPTIVE`, `V1_HQ_NORMALISE`, `V1_HQ_AUTO_GLOSSARY`, `V1_LIVE_RECORD` | no proven gain, not measurable yet, or server not loaded |
+| **Off** | `V1_LIVE_RATECTRL`, `V1_LIVE_NATIVE_SPEED`, `V1_LIVE_WARMSTART`, `V1_PHRASE_DYNAMIC`, `V1_LIVE_LATE_SHORTEN`, `V1_LIVE_BACKCHECK`, `V1_TTS_SERVER`, `V1_TTS_MAYA`, `V1_HQ_NORMALISE`, `V1_HQ_AUTO_GLOSSARY`, `V1_LIVE_RECORD` | no proven gain, not measurable yet, or server not loaded |
 | Store | `V1_STORE=json` | Postgres never run |
 
 Watch out: with `V1_LIVE_STOCK_DEFAULT` on, a `/live` session without a streamer profile never learns a voice;
 every v1.1 Live number was measured with a learned voice. The only v1 stock-voice runs: first audio p50 5.1 s and
 58.3% within 1 s, against 2.34 s and 83.3% with the learned voice (V1_1_SUMMARY section 3, **measured**, 3 runs).
-Note: the sources disagree on `V1_HQ_ADAPTIVE`. [V1_1_SUMMARY](../v1/V1_1_SUMMARY.md) section 3 says "on"
-(61% less voice time against five fixed takes); [the v1 runbook](../v1/RUNBOOK.md) section 3, [the v1 summary](../v1/SUMMARY.md)
-and `backend/.env.example` say "off" (against v1's own rule it makes the same 143 takes). This handbook keeps
-"off" until the founder decides ([OPEN_QUESTIONS.md](OPEN_QUESTIONS.md), [NEEDS_APPROVAL item 27](../v1/NEEDS_APPROVAL.md)).
+`V1_HQ_ADAPTIVE` was the one flag the sources disagreed on (on in one, off in three). The founder decided on
+26 Nov 2026: **on**. [V1_1_SUMMARY](../v1/V1_1_SUMMARY.md) section 3, [the v1 runbook](../v1/RUNBOOK.md) section 3,
+[the v1 summary](../v1/SUMMARY.md) and `backend/.env.example` now say the same, with the same measured reason, and
+the code's default is on ([OPEN_QUESTIONS.md](OPEN_QUESTIONS.md) question 20, closed).
+
+Kept Live recordings (`V1_LIVE_RECORD`): deleted by themselves after `V1_RECORD_KEEP_DAYS` (30) days; list and
+delete on `/live` or `GET` / `DELETE /api/v1/recordings` ([ADR-0034](adr/0034-recording-retention.md)).
 
 ## Deploy a new model server on the GPU VM
 

@@ -15,17 +15,28 @@ What is kept, under `<DATA_DIR>/recordings/<session>/` (never in the repository,
                    dubbed sound), voice (copied | stock), tempo, the caption text the renderer burns in, or
                    `skipped` with the reason
 The original sound is not kept: the renderer takes it from the source video.
+
+How long it stays (ADR-0034): a recording is deleted by itself `V1_RECORD_KEEP_DAYS` days (30) after it ended
+(`sweep`, run when the backend starts and every half hour while it runs; 0 = never by itself), and anyone who can
+reach the console can delete one at any time (`DELETE /api/v1/recordings/<session>`, the list on `/live`).
+Listing, deleting and the sweep work whether or not the flag is on now: what was kept earlier must still go.
 """
 import json
 import logging
+import re
+import shutil
 import wave
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+from fastapi import APIRouter, HTTPException
 
 from app.config import Settings, get_settings
 
 log = logging.getLogger("v1.record")
+router = APIRouter()
+SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")     # a folder name of ours, never a path
 
 
 def folder(s: Settings | None = None) -> Path:
@@ -117,3 +128,108 @@ class Recorder:
             (self.dir / "session.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
         except (OSError, ValueError) as e:
             log.warning("recording %s: %s", self.session_id[:8], e)
+
+
+# ---------- what is kept, for how long, and deleting it ----------
+def _when(d: Path, meta: dict[str, Any]) -> datetime:
+    """When a recording ended: what its own file says, else when it began, else the newest file in it."""
+    for key in ("ended_at", "started_at"):
+        try:
+            got = datetime.fromisoformat(str(meta[key]))
+            return got if got.tzinfo else got.replace(tzinfo=timezone.utc)
+        except (KeyError, ValueError):
+            continue
+    newest = max((f.stat().st_mtime for f in d.iterdir() if f.is_file()), default=d.stat().st_mtime)
+    return datetime.fromtimestamp(newest, timezone.utc)
+
+
+def _describe(d: Path, keep_days: int) -> dict[str, Any]:
+    try:
+        meta = json.loads((d / "session.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        meta = {}
+    files = [f for f in d.iterdir() if f.is_file()]
+    ended = _when(d, meta)
+    return {"session": d.name, "started_at": meta.get("started_at"), "ended_at": meta.get("ended_at"),
+            "langs": meta.get("langs") or sorted(f.stem[4:] for f in files if f.name.startswith("dub_")),
+            "engine": meta.get("engine"), "phrases": meta.get("rows"), "files": len(files),
+            "bytes": sum(f.stat().st_size for f in files), "kept_since": ended.isoformat(timespec="seconds"),
+            "deleted_after": (ended + timedelta(days=keep_days)).isoformat(timespec="seconds") if keep_days > 0 else None}
+
+
+def listing(s: Settings | None = None) -> list[dict[str, Any]]:
+    """Every recording on this server, newest first. No caption text, no audio: names, sizes and dates."""
+    s = s or get_settings()
+    root = folder(s)
+    if not root.is_dir():
+        return []
+    rows = [_describe(d, int(s.v1_record_keep_days)) for d in root.iterdir() if d.is_dir() and SESSION_ID.match(d.name)]
+    return sorted(rows, key=lambda r: r["kept_since"], reverse=True)
+
+
+def delete(session_id: str, s: Settings | None = None) -> bool:
+    """Remove one recording (its whole folder). False = there is none by that name."""
+    if not SESSION_ID.match(session_id or ""):
+        return False
+    d = folder(s) / session_id
+    if not d.is_dir():
+        return False
+    shutil.rmtree(d)
+    return True
+
+
+def sweep(s: Settings | None = None, now: datetime | None = None, skip: set[str] | None = None) -> list[str]:
+    """Delete every recording that ended more than `v1_record_keep_days` days ago; returns the sessions removed.
+    0 days = nothing is deleted by itself. `skip`: sessions being recorded right now."""
+    s = s or get_settings()
+    days = int(s.v1_record_keep_days)
+    root = folder(s)
+    if days <= 0 or not root.is_dir():
+        return []
+    limit = (now or datetime.now(timezone.utc)) - timedelta(days=days)
+    gone = []
+    for d in root.iterdir():
+        if not d.is_dir() or not SESSION_ID.match(d.name) or d.name in (skip or ()):
+            continue
+        try:
+            meta = json.loads((d / "session.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            meta = {}
+        try:
+            if _when(d, meta) < limit:
+                shutil.rmtree(d)
+                gone.append(d.name)
+        except OSError as e:
+            log.warning("recording %s could not be deleted: %s", d.name[:8], e)
+    if gone:
+        log.info("recordings older than %d days deleted: %d", days, len(gone))
+    return gone
+
+
+def _open_now() -> set[str]:
+    """Sessions whose recording is being written at this moment."""
+    from app.live.session import sessions      # here, not at the top: live.session imports this module
+    return {sid for sid, sess in sessions._sessions.items()
+            if sess.pipeline is not None and getattr(sess.pipeline, "_rec", None) is not None and sess.pipeline.running}
+
+
+def sweep_now() -> list[str]:
+    return sweep(skip=_open_now())
+
+
+@router.get("/api/v1/recordings")
+async def list_recordings() -> dict[str, Any]:
+    s = get_settings()
+    return {"keep_days": int(s.v1_record_keep_days), "recording_allowed": bool(s.v1_live_record), "recordings": listing(s)}
+
+
+@router.delete("/api/v1/recordings/{session_id}")
+async def delete_recording(session_id: str) -> dict[str, bool]:
+    if not SESSION_ID.match(session_id):
+        raise HTTPException(404, "no such recording")
+    if session_id in _open_now():
+        raise HTTPException(409, "This session is still being recorded. Stop it first.")
+    if not delete(session_id):
+        raise HTTPException(404, "no such recording")
+    log.info("recording %s deleted on request", session_id[:8])
+    return {"deleted": True}

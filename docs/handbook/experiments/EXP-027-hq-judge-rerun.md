@@ -106,7 +106,7 @@ flags, with intact transcripts, 94.5% (one of three over 96%).
 ## Decision taken
 
 `V1_HQ_JUDGE` and `V1_HQ_REVIEW` on whenever HQ is on; HQ is not offered without the review (ADR-0030).
-`V1_HQ_ADAPTIVE`: on per V1_1_SUMMARY section 3, off per the v1 runbook and summary (it saves time only against five fixed takes; against v1's own rule both make 143 takes); open, see [OPEN_QUESTIONS.md](../OPEN_QUESTIONS.md). `V1_HQ_NORMALISE` and `V1_HQ_AUTO_GLOSSARY` off. Thirty labels a language on the calibration
+`V1_HQ_ADAPTIVE`: on (the founder's decision of 26 Nov 2026; until then the sources disagreed: it saves time only against five fixed takes, and against v1's own rule both make 143 takes; [OPEN_QUESTIONS.md](../OPEN_QUESTIONS.md) question 20, closed). Since the same day an HQ job is always reviewed, whatever `V1_HQ_REVIEW` says. `V1_HQ_NORMALISE` and `V1_HQ_AUTO_GLOSSARY` off. Thirty labels a language on the calibration
 page before the target or the flag line are trusted.
 
 ## Links

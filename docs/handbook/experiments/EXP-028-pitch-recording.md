@@ -62,7 +62,8 @@ All **measured**, 1 session. Source: [PROGRESS.md "v1.1 WS4"](../../v1/PROGRESS.
 ## Decision taken
 
 `V1_LIVE_RECORD` off by default and on only for a session whose speaker agreed to a video being made; recordings
-are never deleted by themselves; viewers are not told a dub is being kept (only the dub is kept, no viewer data).
+were never deleted by themselves when this was written (since 26 Nov 2026: after 30 days, and deletable one by
+one, ADR-0034); viewers are not told a dub is being kept (only the dub is kept, no viewer data).
 `V1_LISTEN_TEST` waits for pairs and listeners (ADR-0032).
 
 ## Links

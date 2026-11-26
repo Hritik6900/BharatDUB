@@ -137,7 +137,7 @@ async def phase_b(r: Any, ctx: Any, meta: dict[str, Any], st: Stages, langs: lis
                 cleaned = await hqtext.cleanup(st, lines, glossary)
                 hq["cleaned_lines"] = sum(1 for a, b in zip(lines, cleaned) if a != b)
                 lines = cleaned
-                if r.s.v1_hq_review:   # a cleaned line that is no longer the line that was heard is put back
+                if hqreview.required(r.s):   # a cleaned line that is no longer the line that was heard is put back
                     kept = [c if c == o or hqreview.keeps_source(o, c) else o for o, c in zip(raw, lines)]
                     hq["transcript_put_back"] = sum(1 for a, b in zip(lines, kept) if a != b)
                     lines = kept
@@ -162,11 +162,13 @@ async def phase_b(r: Any, ctx: Any, meta: dict[str, Any], st: Stages, langs: lis
             pace = float(r.s.gpu_voice_pace_ms or 450) if native else STOCK_PACE_MS
             src = [s["src_text"] for s, _ in todo]
             limits = [hqtext.word_limit(sl, s["end_s"] - s["start_s"], len(s["src_text"].split()), pace) for s, sl in todo]
-            extra = [f for f in ("v1_hq_review", "v1_hq_normalise", "v1_hq_auto_glossary") if getattr(r.s, f)]
+            extra = [f for f in ("v1_hq_normalise", "v1_hq_auto_glossary") if getattr(r.s, f)]
+            if hqreview.required(r.s):   # HQ on means the review is on (hq/review.py)
+                extra.insert(0, "v1_hq_review")
             first = [s.get("src_text_raw") or s["src_text"] for s, _ in todo]
             key = au.cache_key(hqtext.PROMPT_VERSION, src, limits, lang, sorted(glossary), native,
                                ",".join(st.names("translate")), ",".join(st.names("review")),
-                               *([extra, first] if extra else []))   # with the v1.1 flags off: the key it always had
+                               extra, first)
             out = cache.get_json("translate_hq", key)
             if out is None or len(out) != len(src):
                 out = await translate_lines(r, ctx, st, src, limits, lang, glossary, native, hq, first=first)
@@ -203,7 +205,7 @@ async def translate_lines(r: Any, ctx: Any, st: Stages, src: list[str], limits: 
                 pass
     stats = hq.setdefault(f"text:{lang}", {})
     try:
-        if s.v1_hq_review:     # the hosted model against the written rubric; every edit is logged (hq/review.py)
+        if hqreview.required(s):   # the hosted model against the written rubric; every edit is logged (hq/review.py)
             out, stats["review"] = await hqreview.review(st, src, out, limits, lang, glossary, native,
                                                          heard=first, job_id=ctx.job_id)
             stats["reviewed_changed"] = stats["review"]["edited"]
