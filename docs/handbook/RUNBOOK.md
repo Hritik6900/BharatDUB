@@ -62,7 +62,13 @@ default; `backend/app/v1/mode.py` is the one place that says what is in force; t
 | A refused line | asked again, then spoken by another voice; only when every voice fails is it marked `unspoken`, and logged |
 | Guards | script guard on every translated line; content shift on every Studio line and on a sample of Live lines |
 
-**None of the auto thresholds is measured yet** (v1.2 Part 3 does that).
+**Measured on 26 Nov 2026** ([EXP-031](experiments/EXP-031-auto-mode-dense-reel.md),
+[EXP-032](experiments/EXP-032-auto-mode-studio.md)): on dense Live speech auto mode as shipped is worse than manual
+mode with `V1_LIVE_BUDGET=true` (66.3% against 79.1% within 0.25 s, 82.4% against 90.0% within 1 s; 5 runs each).
+Largest cause: stock voices on `/live`; then the breakers on a link that hiccups; then the meaning check loosening
+nearly every session. With `live_stock_default: off`, `breaker: off` and `live_degrade: off` it measured 74.2% and
+88.5%, without protection in a real stall. The founder's choices: `../v1/NEEDS_APPROVAL.md` item 29. No threshold
+was changed. Studio HQ in auto mode: 95.6% of words heard back, 152 s a video.
 
 **To switch ONE behaviour off:** `backend/config/overrides.yaml` (every entry is commented out as shipped; read
 once at start; a bad file is logged and ignored). Remove the `# ` in front of the line, restart the backend.

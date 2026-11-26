@@ -97,7 +97,7 @@ cd backend
 ```
 
 Offline, fake providers, no credits. At the end of v1.1: **311 pass, 1 skipped** (the Postgres store test, no
-database) (`docs/v1/V1_1_SUMMARY.md`, 25 Nov 2026). After v1.2 Part 1: **336 pass, 1 skipped**; after v1.2 Part 2 (auto mode): **347 pass, 1 skipped** (26 Nov 2026,
+database) (`docs/v1/V1_1_SUMMARY.md`, 25 Nov 2026). After v1.2 Part 1: **336 pass, 1 skipped**; after v1.2 Part 2 (auto mode): **347 pass, 1 skipped**; after v1.2 Parts 3-4: **348 pass, 1 skipped** (26 Nov 2026,
 `docs/v1/PROGRESS.md`). The suite runs in manual mode with every flag off; `tests/test_v1_auto.py` switches auto mode on. Real provider checks: `python -m scripts.smoke` (costs
 credits).
 
@@ -107,6 +107,7 @@ credits).
 |---|---|---|
 | Whole v1 eval, one thing at a time | `scripts/v1/eval-all.sh <eval data folder> <out folder>` (Live v1 flags-off, Studio standard vs HQ, STT key words on the hard set) | `scripts/v1/eval-all.sh` |
 | Live replay of a recording across settings | `python -m eval.live_replay <file> --out <dir> --target a=http://127.0.0.1:8120 --target b=... --runs 5` | `../v1/RUNBOOK.md` section 3 |
+| Words heard back on a replay's lines (both counting rules) | `python -m eval.live_judge <run folder> ... --n 20 --out <file>` (needs `--keep-audio` on the replay) | [EXP-031](experiments/EXP-031-auto-mode-dense-reel.md) |
 | Live first 10 phrases | `python -m eval.live_first <dir>` | `docs/v1/PROGRESS.md` WS2 |
 | Studio table | `python -m eval.v1.studio_table <out> --ab <data>/ab` | `../v1/RUNBOOK.md` |
 | Rescore old Studio jobs without a voice call | `python -m eval.v1.rescore --data <DATA_DIR> --jobs <ids> --out <dir>` | same |

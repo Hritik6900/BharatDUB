@@ -11,8 +11,13 @@ or a build). Plan view: [ROADMAP.md](ROADMAP.md).
 ### 1. Which Live flags go on?
 - **Decided 26 Nov 2026 (v1.2 Part 2):** none is set by hand any more. Auto mode switches breaker, ladder and the
   budget on by itself, the budget only while the dub is behind or speech is dense, and loosens it per language
-  when a sample of lines loses meaning ([ADR-0036](adr/0036-auto-mode.md)). Open until v1.2 Part 3: whether that
-  is as good as the budget always on. What follows is the question as it stood.
+  when a sample of lines loses meaning ([ADR-0036](adr/0036-auto-mode.md)).
+- **Measured 26 Nov 2026 (v1.2 Part 3, [EXP-031](experiments/EXP-031-auto-mode-dense-reel.md)): it is not as good
+  as the budget always on.** Dense reel, 5 runs each: auto 66.3% within 0.25 s and 82.4% within 1 s against 79.1%
+  and 90.0%. The budget itself was on for 93-96% of lines, so the difference is not the "only when needed" rule:
+  it is stock voices on `/live`, the breakers on a link that hiccups, and the meaning check loosening nearly every
+  session. **Open again, for the founder:** `../v1/NEEDS_APPROVAL.md` item 29 (three choices, one line each).
+  What follows is the question as it stood.
 - **Why it matters:** the budget lifts within 1 s from 86.5% to 92.3% on dense speech, but in Tamil 7 of 20 lines
   read lost something that mattered, and it is one switch for every language. Breaker + ladder kept every phrase
   dubbed through a 50 s stall (4 of 22 without).

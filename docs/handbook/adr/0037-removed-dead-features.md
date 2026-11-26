@@ -1,6 +1,6 @@
 # ADR-0037: Four features without a proven gain are removed with their flags
 
-- **Status:** accepted (draft: removed in v1.2 Part 2; Part 4 adds what Part 3 measured)
+- **Status:** accepted (removed in v1.2 Part 2; what v1.2 Part 3 measured without them is below)
 - **Date:** 2026-11-26
 - **Superseded by:** —
 
@@ -56,6 +56,24 @@ old runs.
 To get one back: the commit before this change is `339589c`
 (`git show 339589c:backend/app/live/pipeline.py`, `app/v1/warm.py`, `app/v1/phrase.py`, `tests/test_v1_warm.py`).
 
+## Measured after the removal (v1.2 Part 3, 26 Nov 2026)
+
+Nothing was measured with the removed features (their code is gone); these are the numbers of what replaced them,
+from [EXP-031](../experiments/EXP-031-auto-mode-dense-reel.md), 5 runs a setting on the dense reel.
+
+- **Manual mode's `V1_LIVE_BUDGET` alone still gives v1.1's "budget" column:** 79.1% (73.2-81.8) within 0.25 s,
+  90.0% (87.4-94.0) within 1 s, dur_ratio p90 1.16, first audio p50 2675 ms, against 80.6%, 92.3%, 1.17 and
+  2627 ms on 24 Nov. The removal did not move the baseline.
+- **The controller inside the auto budget, at 1.3x:** auto mode with the learned voice and no breaker (the setting
+  nearest to v1.1's "budget + controller") had 74.2% (72.4-76.6) within 0.25 s, 88.5% (86.4-90.1) within 1 s and
+  dur_ratio p90 1.16, against 83.1%, 91.8% and 1.11 for "budget + controller" at 1.4x on 24 Nov. Not the same
+  thing (1.3x instead of 1.4x, the meaning check loosening the budget, another day), so not a like-for-like
+  comparison; it is the nearest there is.
+- **Lines at the 1.3x limit:** 27.6 a run with "budget on", 32.0-39.8 in the auto settings; none above 1.3x.
+- **A voice ready at the first word did not give an earlier first sound** (the one gain `V1_PHRASE_DYNAMIC` had
+  measured on stock voices): a session's first sound came 5.4 s (4.5-6.2) after its first phrase ended in pure auto
+  (stock voices) against 5.3 s (5.0-5.7) with the learned voice in manual mode.
+
 ## Consequences
 
 ### Good
@@ -79,7 +97,7 @@ To get one back: the commit before this change is `339589c`
 ## Evidence
 
 - Experiments: [EXP-020](../experiments/EXP-020-v1-live-flags.md), [EXP-024](../experiments/EXP-024-dense-speech-budget.md),
-  [EXP-025](../experiments/EXP-025-session-warm-start.md)
+  [EXP-025](../experiments/EXP-025-session-warm-start.md), [EXP-031](../experiments/EXP-031-auto-mode-dense-reel.md)
 - Commits: see `../history/` (v1.2 Part 2); the last commit with the removed code: `339589c`
 - Sources: [`PROGRESS.md`](../../v1/PROGRESS.md) "v1.2 Part 2", v1.1 WS1, WS2, WS6, Phase 5;
   [`RUNBOOK.md`](../../v1/RUNBOOK.md) section 3; [ADR-0029](0029-drop-spec-translate-prefix-cache.md)

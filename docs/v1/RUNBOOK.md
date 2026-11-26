@@ -62,6 +62,12 @@ window) and no other session live. One GPU through one address is one stream.
 
 ### 3.1 Auto mode (v1.2; the default)
 
+**Measured on 26 Nov 2026 (v1.2 Part 3): as shipped, auto mode is worse than manual mode with
+`V1_LIVE_BUDGET=true` on dense Live speech** (66.3% against 79.1% of lines within 0.25 s, 82.4% against 90.0%
+within 1 s, 34 against 3 skipped lines per 10 minutes; 5 runs each). The causes, the three lines that change it and
+what each costs are in `NEEDS_APPROVAL.md` item 29 and at the end of this section. Studio HQ in auto mode is where
+v1.1's HQ was (95.6% of words heard back) and about 19 s slower a video.
+
 `V1_MODE=auto` in v1's `backend/.env`, and the default when the line is missing. Nobody manages switches:
 `backend/app/v1/mode.py` is the one place that says what is in force (ADR-0036). The per-feature `V1_*` lines of
 the table in 3.3 are **not read** in auto mode. `GET /api/v1/flags` shows the mode, the overrides in force and what
@@ -70,18 +76,29 @@ is on (a diagnostic for us; no page for users lists a switch).
 | In auto mode | What happens | Not verified |
 |---|---|---|
 | Always on | the trace, the router, the API log, the breakers and the ladder, stock voices for a `/live` session without a streamer profile, Studio HQ on offer with its review, the 1.15x fit limit, adaptive takes, the normaliser, a job's own glossary, the HQ judge; a session that asks for it is recorded; `/studio/calibrate` and `/listen-test` answer | as each one's own entry in `PROGRESS.md` says |
-| Auto budget | the Live duration budget of v1.1 applies to a language only while its dub is behind (backlog, running mean, over 500 ms; off under 200 ms), its lines come out longer than their slots (running mean of dub length over slot over 1.15; off under 1.05), or speech is dense (speaking share over 70% / under 60%, or over 4.0 source words a second / under 3.2). Off again only after 4 calm lines and not before 15 s. Outside that the translator gets the full prompt (no word limit, no "be brief"). While on: the controller of v1.1 scales it, at most 0.9 of the slot while dense, short lines join the next, speed-up at most 1.3x | every threshold is a first value; nothing measured before v1.2 Part 3 |
-| Meaning check | every 3rd spoken line of a language while its budget is on (every 8th while off) is judged by a model against its source, after it was spoken. Over 25% lost on at least 6 judged budgeted lines: that language's budget gets 0.1 more of the slot (a step); at 3 steps it is translated in full. At or under 10%, with the dub behind, 120 s after the last step: one step back | a sample, a model's opinion; one hosted model call per batch of up to 4 lines |
+| Auto budget | the Live duration budget of v1.1 applies to a language only while its dub is behind (backlog, running mean, over 500 ms; off under 200 ms), its lines come out longer than their slots (running mean of dub length over slot over 1.15; off under 1.05), or speech is dense (speaking share over 70% / under 60%, or over 4.0 source words a second / under 3.2). Off again only after 4 calm lines and not before 15 s. Outside that the translator gets the full prompt (no word limit, no "be brief"). While on: the controller of v1.1 scales it, at most 0.9 of the slot while dense, short lines join the next, speed-up at most 1.3x | every threshold is a first value and unchanged. Measured on the dense reel only: on for 93-96% of lines, never off again in 17 sessions; normal speech not measured |
+| Meaning check | every 3rd spoken line of a language while its budget is on (every 8th while off) is judged by a model against its source, after it was spoken. Over 25% lost on at least 6 judged budgeted lines: that language's budget gets 0.1 more of the slot (a step); at 3 steps it is translated in full. At or under 10%, with the dub behind, 120 s after the last step: one step back | a sample, a model's opinion. Measured: about 50-58 lines judged in a 3.5-minute session of two languages, about one hosted model call a judged line; 15-23% judged lost; a language loosened in 16 of 17 sessions, the first time on 6-12 judged lines |
 | English voice | sessions with English: a probe line in the copied voice at the start, timed against the hold less 3.8 s; in time: the copy for the whole session, else the one stock voice; no copy at the start: the stock voice. Chosen once, stored on the session (`en_voice`), in `/metrics` as `en_voice_choice` | one probe decides; the first English lines wait for it (6 s at most) |
-| A refused line | a stock line refused before any sound is asked once more, then every other voice is asked in the order our engine's copy, the hosted copy, the stock voice, the language's other stock voice. Only when all fail: `unspoken` on the phrase, in the trace, the metrics and the log. Studio the same per line; the job finishes with the line marked | fake providers only |
-| Guards | script: every translated line (and the transcript when the source language is pinned), translated once more, then flagged. Content shift: Studio every line before the voice (translated once more, then flagged "needs your ear"); Live on the judged sample only, counted | the script guard sees letters, not words; the judge is a model |
+| A refused line | a stock line refused before any sound is asked once more, then every other voice is asked in the order our engine's copy, the hosted copy, the stock voice, the language's other stock voice. Only when all fail: `unspoken` on the phrase, in the trace, the metrics and the log. Studio the same per line; the job finishes with the line marked | seen on real services: 24 lines spoken by the stock voice after our engine's turn failed, 2 stock lines asked again, 1 line marked unspoken (not translated); no line without sound and without a mark in 24 sessions. Every voice failing: fake providers only |
+| Guards | script: every translated line (and the transcript when the source language is pinned), translated once more, then flagged. Content shift: Studio every line before the voice (translated once more, then flagged "needs your ear"); Live on the judged sample only, counted | the script guard sees letters, not words; the judge is a model. Measured: Live 77 of about 2830 lines failed the script guard (72 Tamil) and the second translation put 7 right; Studio 0 of 76 for both guards |
 
 **What changes for `/live`:** with stock voices always on for a session without a streamer profile, "the voice on
 this stream" is never learned and its consent tick has no effect (the rebuilt website no longer shows it). Every
 v1.1 Live timing was measured with the learned voice; the only stock-voice runs were much worse (3.3, point 2).
 To get the old behaviour: `live_stock_default: off` in the overrides file.
 
-**Settings of auto mode** (env names; first values, not measured): `V1_AUTO_BEHIND_ON_MS=500`,
+**After the measurement of 26 Nov 2026** (`docs/handbook/experiments/EXP-031-auto-mode-dense-reel.md`), what
+changes auto mode on `/live`, each a choice for the founder (`NEEDS_APPROVAL.md` item 29); mean (lowest-highest) of
+5 runs on the dense reel, Punjabi + Tamil:
+
+| Setting | Within 0.25 s | Within 1 s | Skips per 10 min | Copied voice |
+|---|---|---|---|---|
+| Auto as shipped (stock voices on `/live`) | 66.3% (57.4-75.1) | 82.4% (71.0-89.3) | 34.1 (0-113.8) | 0% |
+| ... with `live_stock_default: off` | 69.6% (55.7-80.8) | 83.9% (72.1-90.9) | 22.1 (3.0-86.6) | 83.1% (50.9-97.3) |
+| ... and `breaker: off`, `live_degrade: off` (no protection in a real stall) | 74.2% (72.4-76.6) | 88.5% (86.4-90.1) | 5.4 (0-11.9) | 97.0% |
+| Manual mode, `V1_LIVE_BUDGET=true` | 79.1% (73.2-81.8) | 90.0% (87.4-94.0) | 3.0 (0-6.1) | 95.1% |
+
+**Settings of auto mode** (env names; first values, none changed after the measurement): `V1_AUTO_BEHIND_ON_MS=500`,
 `V1_AUTO_BEHIND_OFF_MS=200`, `V1_AUTO_RATIO_ON=1.15`, `V1_AUTO_RATIO_OFF=1.05`, `V1_AUTO_WPS_ON=4.0`,
 `V1_AUTO_WPS_OFF=3.2`, `V1_AUTO_MIN_ON_MS=15000`, `V1_AUTO_CALM_LINES=4`, `V1_DENSE_MAX_TEMPO=1.3`,
 `V1_MEANING_SAMPLE_EVERY=3`, `V1_MEANING_IDLE_EVERY=8`, `V1_MEANING_WINDOW=12`, `V1_MEANING_MIN_SAMPLES=6`,

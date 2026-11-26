@@ -44,6 +44,7 @@ From `docs/v1/ARCHITECTURE.md` (targets), `docs/v1/EVAL_REPORT.md` and `docs/v1/
 | 14 | Prices for the cost per minute (no figure is shown until rates are set) | 23 |
 | 15 | A pitch video of a real stream (how long recordings stay: decided and built 26 Nov 2026, 30 days, [ADR-0034](adr/0034-recording-retention.md)); whether deleting a voice deletes its recordings | 25 |
 | 15a | Get written confirmation of commercial use from AI4Bharat / legal review (IndicF5) | 28 |
+| 15b | Auto mode on `/live`: stock voices or the learned voice, the breakers on a link that hiccups, the meaning check's first step ([EXP-031](experiments/EXP-031-auto-mode-dense-reel.md)) | 29 |
 
 ## Later (product gaps, SPEC section 20)
 

@@ -6,6 +6,8 @@ Reads (never writes) each backend's store file, v1's trace folder and the stream
   logs/sessions/<version>/<date>_<session>.jsonl   one line per Live phrase and language: every step and its ms
   logs/sessions/index.csv                          one row per session and language: the numbers of that run
   logs/jobs/index.csv                              one row per Studio job: seconds per stage
+                                                   (both indexes: the rows of a version that is named are written
+                                                   afresh, the rows of every other version are kept as they are)
   logs/trace/                                      v1's trace files (provider and fallback per phrase and line)
   logs/streams/                                    the stream watcher's files (events, rows every 20 s, summaries)
 
@@ -127,10 +129,21 @@ def session_index(version: str, s: dict, chunks: list[dict], rows: list[dict]) -
     return out
 
 
-def write_csv(path: Path, rows: list[dict]) -> None:
+def kept_rows(path: Path, named: set[str]) -> tuple[list[str], list[dict]]:
+    """The columns an index has, and its rows for versions that were NOT named this time. Without this a call
+    that names one comparison backend would rewrite the index with that backend alone and drop every other row."""
+    if not path.exists():
+        return [], []
+    with path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        rows = [r for r in reader if r.get("version") not in named]
+        return list(reader.fieldnames or []), rows
+
+
+def write_csv(path: Path, rows: list[dict], columns: list[str] | None = None) -> None:
     if not rows:
         return
-    fields = list(dict.fromkeys(k for r in rows for k in r))
+    fields = list(dict.fromkeys([*(columns or []), *(k for r in rows for k in r)]))
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fields)
@@ -187,8 +200,12 @@ def main() -> None:
                          **{f"{k.strip('_')}_s": t.get(k) for k in STUDIO_STAGES},
                          "warnings": len(t.get("_warnings") or [])})
         print(f"{version}: {n} live sessions, {len(table(db, 'jobs'))} studio jobs")
-    write_csv(out / "sessions" / "index.csv", index)
-    write_csv(out / "jobs" / "index.csv", jobs)
+    named = {item.split("=", 1)[0] for item in a.stores}
+    for name, rows in (("sessions", index), ("jobs", jobs)):
+        columns, old = kept_rows(out / name / "index.csv", named)
+        if old:
+            print(f"{name}/index.csv: {len(old)} row(s) of versions not named this time are kept")
+        write_csv(out / name / "index.csv", old + rows, columns)
     for item in a.more_trace:
         name, folder = item.split("=", 1)
         print(f"trace of {name}: {copy_folder(Path(folder), out / 'trace' / name, ('*.jsonl',))} file(s)")

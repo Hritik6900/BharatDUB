@@ -134,6 +134,7 @@ measured 1.8 s first audio there; `NEEDS_APPROVAL.md` item 3), not these flags.
 | 24 | Five comparison backends left running on 8111-8115 (v1.1 WS3) | three PowerShell lines; they could not be stopped from inside this work |
 | 25 | A pitch video of a real stream, and how long recordings are kept (v1.1 WS4) | the speaker's agreement, the flag on 8110, a decision on deletion |
 | 26 | Listeners for the blind listening test (v1.1 WS4) | WS5's pairs; people who speak the language |
+| 29 | Auto mode on `/live`: stock voices or the learned voice, the breakers on a link that hiccups, the meaning check's first step (v1.2 Part 3; `NEEDS_APPROVAL.md` item 29) | a decision each; one line in `backend\config\overrides.yaml` or `backend\.env` and a restart |
 | 28 | Get written confirmation of commercial use from AI4Bharat / legal review (v1.2 Part 1; `NEEDS_APPROVAL.md` item 28) | a written answer from AI4Bharat, or a lawyer's read of IndicF5's lineage |
 
 ## 4. Decisions needed

@@ -108,3 +108,15 @@ looser or tighter, with the rate), `live_en_voice` (the session's one English vo
 `live_guard_script`, `studio_guard` (a job's guard counts per language) and `studio_unspoken`. `sessions/index.csv`
 has, for sessions of auto mode only: `budget_applied_pct`, `script_guard_failed`, `script_guard_flagged`,
 `judged_sample`, `spoken_by_another_voice`, `unspoken`.
+
+`sessions/p3-*/`, `trace/p3-*/` and the `p3-*` rows of the two index tables are the comparison backends of the v1.2
+Part 3 measurement (26 Nov 2026, `docs/handbook/experiments/EXP-031-auto-mode-dense-reel.md` and
+`EXP-032-auto-mode-studio.md`): `p3-budget` (manual mode, `V1_LIVE_BUDGET=true`; 7 sessions), `p3-auto` (auto mode
+as shipped: stock voices on `/live`; 7 sessions, of which the fourth and fifth had a stall of the laptop's
+connection, and the 3 Studio HQ jobs), `p3-auto-learned` (auto with `live_stock_default: off`; 5 sessions),
+`p3-auto-learned-nobrk` (that and `breaker: off`, `live_degrade: off`; 5 sessions). Every session: the dense reel
+8 times, Punjabi + Tamil, hold fixed at 6 s.
+
+`scripts/v1/collect-logs.py` writes afresh the index rows of the versions named on its command line and keeps the
+rows of every other version (before 26 Nov 2026 it kept only the named ones, so every store had to be named each
+time).

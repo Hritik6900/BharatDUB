@@ -374,3 +374,35 @@ def test_collected_logs_have_the_new_fields_only_where_they_were_measured():
     assert "reasked" not in b                                                         # not measured: not written
     rows = cl.session_index("v1", {"id": "abcdef123456", "created_at": "2026-11-24T10:00:00"}, [old, new], [a, b])
     assert rows[0]["dur_ratio_p50"] == 1.056 and rows[0]["backlog_p95_ms"] == 0
+
+
+def test_collecting_one_store_keeps_the_index_rows_of_the_others(tmp_path, monkeypatch):
+    """Naming one comparison backend must not drop every other version's rows from the index tables."""
+    import csv
+    import json
+    import sys
+    spec = importlib.util.spec_from_file_location(
+        "collect_logs_keep", Path(__file__).resolve().parents[2] / "scripts" / "v1" / "collect-logs.py")
+    cl = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cl)
+    out = tmp_path / "logs"
+    (out / "sessions").mkdir(parents=True)
+    (out / "jobs").mkdir()
+    (out / "sessions" / "index.csv").write_text(
+        "version,date,session,lang,spoken,heard_p50_ms\nv0,2026-11-13,aaaa1111,bn-IN,24,\nnew,2026-11-01,old0old0,ta-IN,1,5\n",
+        encoding="utf-8")
+    (out / "jobs" / "index.csv").write_text("version,date,job,status\nws3-hq,2026-11-25,jjjj0000,done\n", encoding="utf-8")
+    chunk = {"session_id": "abcdef123456", "seq": 1, "t_speech_ms": 0, "src_text": "ek do teen", "timings": {
+        "t_speech_end": 900, "t_stt_final": 1500, "t_translated:ta-IN": 2000, "t_first_audio:ta-IN": 3000}}
+    store = tmp_path / "db.json"
+    store.write_text(json.dumps({"live_sessions": [{"id": "abcdef123456", "created_at": "2026-11-26T10:00:00"}],
+                                 "live_chunks": [chunk], "jobs": []}), encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["collect-logs.py", f"new={store}", "--out", str(out),
+                                      "--trace", str(tmp_path / "none"), "--streams", str(tmp_path / "none")])
+    cl.main()
+    with (out / "sessions" / "index.csv").open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+        assert reader.fieldnames[:6] == ["version", "date", "session", "lang", "spoken", "heard_p50_ms"]   # columns keep their order
+    assert [(r["version"], r["session"]) for r in rows] == [("v0", "aaaa1111"), ("new", "abcdef12")]   # the named version afresh
+    assert (out / "jobs" / "index.csv").read_text(encoding="utf-8").count("ws3-hq") == 1              # no job named: kept

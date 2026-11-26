@@ -1,6 +1,6 @@
 # ADR-0036: Auto mode: the mode decides, nobody manages switches
 
-- **Status:** accepted (draft: built and tested in v1.2 Part 2; the measurement of Part 3 is still to be written in)
+- **Status:** accepted (measured in v1.2 Part 3: as shipped it is worse than v1.1's best Live setting on the dense reel; three decisions wait for the founder)
 - **Date:** 2026-11-26
 - **Superseded by:** —
 
@@ -33,7 +33,7 @@ Three earlier findings shaped the parts:
 | Settings rewritten at load (auto overwrites the flag fields) | no call sites change | not chosen: a reader of `settings.v1_x` could not tell a decision from a leftover; one function is the rule asked for |
 | Overrides as env names | `V1_OFF_TRACE=1` and so on | not chosen: the task names one file, and a file can be read, commented and diffed |
 | Budget: always on (v1.1's best timing) | every phrase budgeted | not chosen: normal speech would lose content for nothing |
-| **Budget: on only while behind or dense, per language, with two thresholds; loosened by a meaning check** | below | **chosen**; not measured before Part 3 |
+| **Budget: on only while behind or dense, per language, with two thresholds; loosened by a meaning check** | below | **chosen**; measured in Part 3: on the dense reel it is on for 93-96% of lines |
 | Meaning check on every line, before it is spoken | blocking | rejected: it would add a model call to every phrase's path |
 | **Meaning check on a sample, after the line was spoken** | below | **chosen** |
 | English voice: a fixed rule (v1.1) | `auto` = stock | replaced: the copy is tried at the start and timed |
@@ -94,6 +94,48 @@ one once more, flags it if it fails again; Live counts it on the same sample the
 nothing again. Each has its own columns in `eval/live_replay.py`, `eval/v1/studio_table.py` and
 `logs/sessions/index.csv`.
 
+## Measured (v1.2 Part 3, 26 Nov 2026)
+
+Live, the dense reel 8 times, Punjabi + Tamil, hold fixed at 6 s, 5 runs a setting taken in turn
+([EXP-031](../experiments/EXP-031-auto-mode-dense-reel.md)); mean (lowest-highest):
+
+| | Manual, `V1_LIVE_BUDGET=true` (v1.1's best) | Auto, as shipped | Auto, `live_stock_default: off` | Auto, that and `breaker: off`, `live_degrade: off` |
+|---|---|---|---|---|
+| Within 0.25 s | 79.1% (73.2-81.8) | 66.3% (57.4-75.1) | 69.6% (55.7-80.8) | 74.2% (72.4-76.6) |
+| Within 1 s | 90.0% (87.4-94.0) | 82.4% (71.0-89.3) | 83.9% (72.1-90.9) | 88.5% (86.4-90.1) |
+| dur_ratio p90 | 1.16 | 1.20 | 1.15 | 1.16 |
+| Skips per 10 min | 3.0 (0-6.1) | 34.1 (0-113.8) | 22.1 (3.0-86.6) | 5.4 (0-11.9) |
+| First audio p50 | 2675 ms | 2980 ms | 2965 ms | 2767 ms |
+| Lines in the copied voice | 95.1% | 0% | 83.1% (50.9-97.3) | 97.0% |
+
+**Auto mode as shipped is worse than v1.1's best setting on this material.** Three causes, each shown in EXP-031:
+stock voices on `/live` queue on the hosted account's one request (the largest); the breakers take the copied
+voice away for about 34 s when one health answer takes over 2 s or one line over 4 s (13 times in 3 of 5 runs, the
+engine itself never over 0.62 s); the meaning check loosens a language in 16 of 17 sessions, often on 6 judged lines, and a loosened
+language runs longer. With the first two switched off, auto is within 5 points of "budget on" within 0.25 s and
+overlaps it within 1 s.
+
+- **The auto budget came on in every session and never went off** (93-96% of lines under it): the reel is dense
+  throughout. Its other half, the full translation on normal speech, was not exercised.
+- **The meaning check:** 14.8-23.3% of sampled budgeted lines judged as lost (about 50-58 judged a run); 1.6-3.2
+  loosening steps a run, 0.2-0.4 steps back. Read by eye on 20 lines a language (a non-native reader, as in
+  EXP-024), auto did not lose less than "budget on": Tamil 6-10 of 20 against 7, Punjabi 3-9 against 4.
+- **A refused line:** no line was without sound and without a mark in 24 sessions; one line was marked unspoken
+  (not translated, during a stall of the laptop's connection); 24 lines were spoken by the stock voice after our
+  engine's turn failed (22 of them with the breakers on).
+- **Script guard:** 77 of about 2830 Live lines failed (72 Tamil), and the second translation put 7 right; the
+  rest were spoken and flagged. Studio: 0 of 76.
+- **Words heard back** (40 lines a cell): Punjabi 86.4-88.9% and Tamil 83.5-87.1% in the auto settings against
+  91.3% and 86.3% with "budget on"; inside what two runs differ by.
+
+Studio HQ in auto mode, the three test videos, one job each ([EXP-032](../experiments/EXP-032-auto-mode-studio.md)):
+95.6% of words heard back (94.6-96.5) against 95.9% and 94.5% for v1.1's two HQ settings on another day; 152 s a
+video against 129 s and 133 s; 20 of 76 lines flagged, all by the heard-back judge; both guards checked 76 lines
+and found nothing; no damaged transcript line.
+
+Not measured: English (the probe and the one voice), a streamer profile, the hosted engine, normal-paced speech,
+auto mode with a hold that may grow.
+
 ## Consequences
 
 ### Good
@@ -101,20 +143,33 @@ nothing again. Each has its own columns in `eval/live_replay.py`, `eval/v1/studi
 - One place to read what the product does (`app/v1/mode.py`), one file to switch one behaviour off, and a mode that
   still behaves as before for baselines and tests.
 - A line is never without sound without a record; the reason is on the phrase.
-- Tests (`backend/tests/test_v1_auto.py`, 39): the resolver and the overrides file (good, bad, missing, unknown
+- Tests (`backend/tests/test_v1_auto.py`, 41): the resolver and the overrides file (good, bad, missing, unknown
   names), the gate's hysteresis, the meaning rate, the budget on and off in a session, a slow judge that holds
   nothing up, the English choice made once, the fallback order with refusing fake providers, both guards, the old
   env names ignored.
 
 ### Bad
 
-- **Nothing here is measured yet.** Every threshold of the auto budget, the meaning check and the English probe is
-  a first value. Part 3 measures auto against v1.1's "budget on".
+- **Measured, and worse than v1.1's best Live setting** (section "Measured"): 66.3% against 79.1% within 0.25 s,
+  82.4% against 90.0% within 1 s, 34 against 3 skips per 10 minutes. Every threshold of the auto budget, the
+  meaning check and the English probe is still its first value: none was changed after the measurement.
+- **The breakers and the ladder were built for a link that is gone; on a link that hiccups they cost more than
+  they save.** One health answer over 2 s or one line over 4 s means about 34 s without the copied voice
+  (EXP-031). They had never been measured without a stall before v1.2.
+- **The meaning check's first step fires on little evidence** (2 lost of 6 judged lines, against a judge that
+  calls about 1 line in 6 lost before any loosening), so nearly every session is loosened.
+- **The script guard's second translation rarely helps** (7 of 77 Live lines): a Hindi word left in Devanagari in
+  a Tamil line is reported, spoken as it is and flagged.
+- **Studio HQ takes about 19 s longer a video** than v1.1's HQ with all flags (EXP-032), 6 s of it the
+  content-shift judge, which is the model that had just reviewed the same lines and found nothing.
 - **`LIVE_STOCK_DEFAULT` always on changes `/live`:** a session without a streamer profile never learns the voice
   on the stream; its consent tick has no effect. Every v1.1 Live number was measured with the learned voice, and the
   only stock-voice runs (two languages, three runs, v1 flags off) had first audio p50 5.1 s and 58.3% within 1 s
   against 2.34 s and 83.3% with the learned voice (`../../v1/RUNBOOK.md` section 3, point 2). Stock voices share the
-  hosted account's one request at a time. The budget was never measured with stock voices.
+  hosted account's one request at a time. **Measured in Part 3: this is the largest reason auto is worse.** A line
+  in a stock voice started within 1 s 48-83% of the time, a line in the copied voice 87-91%; pure auto ranged
+  from 38 skipped lines in a run to 1 with the hosted voice's speed that hour. The way back is one line,
+  `live_stock_default: off` (`../../v1/NEEDS_APPROVAL.md` item 29).
 - The meaning judge is a model, judging a sample: it can be wrong both ways, and in a hosted-engine session it is of
   the same family as the translator. It costs one hosted model call per batch of up to four judged lines.
 - A language whose budget is loosened runs longer than its slot again: the timing the budget bought is given back
@@ -128,10 +183,11 @@ nothing again. Each has its own columns in `eval/live_replay.py`, `eval/v1/studi
 
 ## Evidence
 
-- Experiments: to come with Part 3 (auto against "budget on", dense reel, 5 runs each; three Studio videos).
+- Experiments: [EXP-031](../experiments/EXP-031-auto-mode-dense-reel.md) (auto against "budget on", dense reel),
+  [EXP-032](../experiments/EXP-032-auto-mode-studio.md) (three Studio videos).
   Background: [EXP-024](../experiments/EXP-024-dense-speech-budget.md), [EXP-026](../experiments/EXP-026-english-voice-mix.md)
-- Commits: see `../history/` (v1.2 Part 2)
-- Sources: [`PROGRESS.md`](../../v1/PROGRESS.md) "v1.2 Part 2"; [`RUNBOOK.md`](../../v1/RUNBOOK.md) section 3;
-  [ADR-0020](0020-flags-default-off.md), [ADR-0027](0027-breakers-degrade-ladder.md),
+- Commits: see `../history/` (v1.2 Part 2, Parts 3-4)
+- Sources: [`PROGRESS.md`](../../v1/PROGRESS.md) "v1.2 Part 2" and "v1.2 Parts 3-4"; [`RUNBOOK.md`](../../v1/RUNBOOK.md) section 3;
+  [`NEEDS_APPROVAL.md`](../../v1/NEEDS_APPROVAL.md) item 29; [ADR-0020](0020-flags-default-off.md), [ADR-0027](0027-breakers-degrade-ladder.md),
   [ADR-0028](0028-dub-duration-budget.md), [ADR-0031](0031-english-single-voice.md),
   [ADR-0037](0037-removed-dead-features.md)

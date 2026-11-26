@@ -6,6 +6,10 @@ For each run folder and language, `--n` dubbed lines spread evenly over the run 
 the hosted speech-to-text, one at a time, and the share of each line's words that it hears back is the score (the
 same count the pipeline uses for a voice sample: the same word, or the same first four letters). A line spoken in
 one call with the lines after it is scored on its own words only. This costs one hosted request per line.
+
+Each line is counted twice from the one hearing: `score` by that rule (what the v1.1 Live reports used) and
+`score_nfc` by Studio's corrected rule (`app.v1.qa.heard_share`, rule nfc-2: one spelling of every letter, and a
+word whose letters are there with the spaces set aside counts). `mean_pct` and `mean_nfc_pct` per language.
 """
 import argparse
 import asyncio
@@ -19,6 +23,7 @@ BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 from app.live.pipeline import words_heard  # noqa: E402
 from app.providers import get_stt  # noqa: E402
+from app.v1.qa import HEARD_RULE_NFC, heard_share  # noqa: E402
 
 
 def pick(items: list[Any], n: int) -> list[Any]:
@@ -41,12 +46,16 @@ async def judge(run: Path, n: int, stt: Any) -> dict[str, Any]:
             except Exception as e:  # noqa: BLE001 - no verdict for this line
                 print(f"  {run.name} {lang} {ln['seq']}: no verdict ({str(e)[:80]})", flush=True)
                 continue
-            scores.append({"seq": ln["seq"], "words": len(ln["text"].split()), "score": round(words_heard(ln["text"], heard), 3)})
+            scores.append({"seq": ln["seq"], "words": len(ln["text"].split()), "score": round(words_heard(ln["text"], heard), 3),
+                           "score_nfc": round(heard_share(ln["text"], heard, HEARD_RULE_NFC), 3)})
         vals = [s["score"] for s in scores]
+        nfc = [s["score_nfc"] for s in scores]
         out[lang] = {"lines": len(vals), "mean_pct": round(100 * statistics.mean(vals), 1) if vals else None,
-                     "under_half": sum(v < 0.5 for v in vals), "scores": scores}
+                     "mean_nfc_pct": round(100 * statistics.mean(nfc), 1) if nfc else None,
+                     "under_half": sum(v < 0.5 for v in vals), "under_half_nfc": sum(v < 0.5 for v in nfc), "scores": scores}
         print(f"{run.name} {lang}: {out[lang]['mean_pct']}% of words heard back over {len(vals)} lines "
-              f"({out[lang]['under_half']} under half)", flush=True)
+              f"({out[lang]['under_half']} under half); corrected rule {out[lang]['mean_nfc_pct']}% "
+              f"({out[lang]['under_half_nfc']} under half)", flush=True)
     return out
 
 

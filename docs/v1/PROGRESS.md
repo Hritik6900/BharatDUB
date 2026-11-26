@@ -1641,3 +1641,145 @@ One comparison backend, port 8120, `-Mode auto`, no overrides, GPU engine, dense
   features: `339589c`.
 - **Comparison backends:** 8120 was started twice from PowerShell and stopped; nothing answers there. The five old
   ones on 8111-8115 were not touched.
+
+## v1.2 Parts 3-4: auto mode measured, documents closed (26 Nov 2026)
+
+What was asked: prove auto mode against the best earlier flag setting on the dense reel and on the three Studio
+videos, say where it is worse and why, then finish the documents. **No default and no threshold was changed.** The
+backend on 8110 and the website on 3100 were not restarted: they run the old code until they are
+(`V1_1_SUMMARY.md` section 6.7 has the commands). Full accounts: `docs/handbook/experiments/EXP-031` (Live) and
+`EXP-032` (Studio); the tables for a quick read: `V1_1_SUMMARY.md` section 6.
+
+### How it was measured
+
+- Four comparison backends from PowerShell (`scripts\v1\ab-server.ps1`), every one with `LIVE_SYNC_ADAPT=false`
+  (hold fixed at 6 s, as in v1.1 WS1): 8121 `p3-budget` (manual, `V1_LIVE_BUDGET=true`), 8120 `p3-auto` (auto, no
+  overrides), 8122 `p3-auto-learned` (auto, `live_stock_default=off`), 8123 `p3-auto-learned-nobrk` (that and
+  `breaker=off`, `live_degrade=off`). The fourth was not in the plan: after round 1 the third setting was as bad as
+  the second, and the cause could not be told from the auto budget without it.
+- `eval.live_replay`, dense reel 8 times, Punjabi + Tamil, GPU engine, 5 runs a setting, taken in turn. The harness
+  awaits each session before it starts the next (checked in its code and in the session times) and asks 8010, 8110
+  and the targets for live sessions before every run: nobody was live at any start. 13:27-14:46 UTC, 20 runs, 0
+  failed. Then the three Studio jobs on 8120 (14:46-14:54), then two repeats (below), then the hearings.
+- **Stalls.** The laptop's connection stalled in auto runs 4 and 5 (the hosted speech-to-text silent for 12.3 s and
+  15.9 s, every GPU endpoint down for 26.8 s and 20.4 s). Both were marked and repeated as runs 6 and 7, each beside
+  one more "budget on" run. No other run has a gap in the transcript over 4 s. The tunnel and the engines answered
+  at every check; nothing was restarted.
+- The hosted stock voice was timed outside any session between rounds (10 long lines a language, 13:27-14:45) and
+  at the end (20 short lines).
+
+### A. Live: the numbers
+
+Mean (lowest-highest) of 5 runs as run:
+
+| | Budget on (manual) | Auto | Auto, learned voice | Auto, learned voice, no breaker |
+|---|---|---|---|---|
+| Within 0.25 s | 79.1% (73.2-81.8) | 66.3% (57.4-75.1) | 69.6% (55.7-80.8) | 74.2% (72.4-76.6) |
+| Within 1 s | 90.0% (87.4-94.0) | 82.4% (71.0-89.3) | 83.9% (72.1-90.9) | 88.5% (86.4-90.1) |
+| dur_ratio p90 | 1.16 (1.13-1.19) | 1.20 (1.17-1.22) | 1.15 (1.04-1.26) | 1.16 (1.09-1.24) |
+| Skips per 10 min | 3.0 (0-6.1) | 34.1 (0-113.8) | 22.1 (3.0-86.6) | 5.4 (0-11.9) |
+| First audio p50 / p95 (ms) | 2675 / 4939 | 2980 / 5688 | 2965 / 5378 | 2767 / 4690 |
+| Copied voice | 95.1% | 0% | 83.1% (50.9-97.3) | 97.0% |
+| Unspoken (marked) / silent without a mark | not marked / 0 | 1 line in 5 runs / 0 | 0 / 0 | 0 / 0 |
+| Script guard failed / flagged, a run | not run | 7.2 / 5.8 | 5.0 / 5.0 | 3.2 / 3.2 |
+| Meaning sample: lost of judged, a run | not run | 11.4 of 49.6 (23.3%) | 10.4 of 55.0 (19.0%) | 8.6 of 58.0 (14.8%) |
+| Budget loosened / tightened, steps a run | - | 3.2 / 0.2 | 2.4 / 0.4 | 1.6 / 0.4 |
+| Lines under the budget | all | 93.0% | 94.1% | 96.2% |
+
+Auto with the two stalled runs replaced: 66.8% (57.4-81.9) / 82.1% (71.0-92.3), skips 25.1 per 10 min. "Budget on"
+is where v1.1 measured it (80.6% / 92.3% on 24 Nov), so the baseline holds.
+
+- **The auto budget was on for 93-96% of the lines and never went off** once on (17 sessions): this reel is dense
+  from start to end. The half of the rule that gives normal speech the full translation did not run.
+- **Words heard back** (20 lines a language from runs 3 and 4, 40 a cell, as v1.1; corrected rule): Punjabi 91.3%
+  budget on, 86.4% auto, 88.9% learned voice, 87.0% no breaker; Tamil 86.3%, 83.5%, 83.8%, 87.1%. By v1.1's count:
+  86.2 / 85.3, 82.7 / 79.7, 84.0 / 83.3, 83.1 / 83.1. The two runs of a cell differ by up to 10.5 points: no
+  difference is shown.
+- **Meaning on 20 lines a language** (run 3, phrases 37-56; read by the author of this report, not a native
+  speaker, the reader and rule of v1.1's "7 of 20"): lost or wrong, Punjabi / Tamil: budget on 4 / 7, auto 9 / 6,
+  learned voice 4 / 10, no breaker 3 / 10. The session's model judge on the same lines: 1 / 5, 5 / 8, 3 / 8, 0 / 3.
+  Auto does not lose less than "budget on" in these lines; where a language had reached the second loosening step
+  the lines read complete.
+
+### C. Where auto is worse, and why
+
+1. **Stock voices on `/live` (`LIVE_STOCK_DEFAULT`, on the always-on list): the largest cause.** Every line of a
+   session without a streamer profile waits for the hosted account's one request. A line in a stock voice started
+   within 1 s 48-83% of the time in every setting, a line in the copied voice 87-91%. From translation to first
+   sound: stock p90 2.1 s, p95 3.6 s, 37 of 876 lines over 4 s; copied p90 1.2-1.5 s. The hosted voice's speed
+   changed through the afternoon (one long line: 1.1 to 7.3 s), and with it pure auto: 38 skipped lines in run 1,
+   1 in run 7. The override line: `live_stock_default: off`.
+2. **The breakers and the ladder on a link that hiccups.** With the learned voice back, the voice engines'
+   circuits opened 13 times in 3 of 5 runs (11 on one health answer over 2 s, 2 on one line over 4 s), about 34 s
+   each; the ladder spent 119 s of 1056 s on the stock voice, which then queued as in point 1. The engine's own
+   time was never over 0.62 s in those sessions. Without breakers the same afternoon cost 3-4 lines of 900 a wait
+   over 4 s. WS0 measured the breakers in a 50 s stall; this is their first measurement without one.
+3. **The meaning check loosens nearly every session.** 16 of 17 auto sessions, the first step on exactly 6 judged
+   lines in 14 of 28 cases (2 lost lines are enough), while the judge calls 15-19% of budgeted lines lost before
+   any step. A loosened language has more lines over their slots (Punjabi 40-45% against 16%). This is the 5
+   points within 0.25 s that remain between the fourth column and "budget on".
+4. Studio HQ: 152 s a video against 129-133 s on 25 Nov (the content-shift judge about 6 s, more takes about 11 s).
+
+Not worse: Studio words heard back; lines without a record (none); the fourth column within 1 s.
+
+**What was proposed and not done** (`NEEDS_APPROVAL.md` item 29): the override line for point 1; for point 2 either
+the two override lines (no protection in a real stall) or slower settings (`V1_LINK_PROBE_TIMEOUT_S=4`,
+`V1_BREAKER_VOICE_TIMEOUT_S=6`, `V1_BREAKER_OPEN_S=10`), or better a code change (two slow health answers in a
+row); for point 3 `V1_MEANING_MIN_SAMPLES=12`. None of the proposed values was measured.
+
+### B. Studio HQ in auto mode
+
+One job a video on 8120 (auto, no overrides, empty data folder), Tamil + Bengali, GPU engine, voice from the video
+with consent. The v1.1 rows are 25 Nov's jobs: another day.
+
+| | HQ (25 Nov) | HQ + all flags (25 Nov) | HQ, auto mode |
+|---|---|---|---|
+| Words heard back | 95.9% (93.3-98.1) | 94.5% (93.2-96.5) | 95.6% (94.6-96.5); A / B / C 96.5 / 94.6 / 95.5 |
+| Total time, A / B / C | 133 / 117 / 136 s | 140 / 129 / 130 s | 146 / 152 / 160 s |
+| Voice stage, A / B / C | 73 / 67 / 79 s | 77 / 73 / 75 s | 74 / 93 / 92 s |
+| Takes / flagged, of 76 | 143 / 15 | 156 / 21 | 178 / 20 |
+| Damaged transcript lines | 0 / 13 / 12 | 0 / 0 / 0 | 0 / 0 / 0 |
+
+Guards: script 76 checked, 0 failed; content shift 76 checked, 0 failed, 0 translated again, 0 flagged, 0 not
+checked; nothing shortened; 0 unspoken. The 20 flagged lines are all the heard-back judge's (best of five takes at
+67-89%). The review edited 21 of 76 lines. The content-shift judge is the model that had just reviewed those
+lines: its "nothing found" is weak evidence. Target 96%: not reached.
+
+### D. Bugs
+
+- **Fixed:** `scripts/v1/collect-logs.py` wrote the two index tables from the stores named on its command line
+  alone and dropped every other row (an earlier note said so; checked: true). It now keeps the rows and the column
+  order of versions that were not named. Test `test_collecting_one_store_keeps_the_index_rows_of_the_others`.
+  The four `p3-*` stores were then collected: 366 session rows and 37 job rows kept, 48 and 3 added.
+- **Changed, a tool:** `eval.live_judge` counts each hearing by both rules (v1.1's and the corrected one).
+- **Not a code bug, reported:** the script guard's second translation put right 7 of 77 failing Live lines; a Hindi
+  word left in Devanagari inside a Tamil line is spoken as it is and flagged.
+- **Seen, not looked into:** in the first stalled run one Tamil line was not translated at all (marked
+  `untranslated`); the hosted fallback translated the 12 phrases after it.
+
+### Part 4: documents
+
+ADR-0036 (a "Measured" section, status, consequences) and ADR-0037 (what was measured after the removal); EXP-031
+and EXP-032; `RESULTS.md` (13 Live rows, 4 Studio rows, 3 trend rows); `PITCH_FACTS.md` (rows 3, 8 and 9 say what
+auto mode measured, five "Do not claim" lines; the 67-minute stream stays row 1; no new "safe" claim: nothing in
+this measurement is better than what was already there); `CHANGELOG.md`; `V1_1_SUMMARY.md` section 6;
+`RUNBOOK.md` section 3.1 and the handbook's runbook, onboarding and open question 1; `NEEDS_APPROVAL.md` item 29
+(in its number table, `SUMMARY.md` and the handbook's roadmap); `logs/README.md` and the two index tables.
+
+### Not verified
+
+- Auto mode on normal-paced speech (the budget going off), with English (the probe, the one voice), with a streamer
+  profile, on the hosted engine, with a hold that may grow.
+- Any of the values proposed in item 29.
+- A case where every voice fails, on real services; a Studio line a guard fails.
+- The meaning judge and the meaning read against a speaker of Punjabi or Tamil.
+- The website's changes of Parts 1-2 in a browser; the viewer page's catch-up at 1.1x.
+- Auto mode with the backend on the GPU machine (no tunnel between backend and engines: the link whose hiccups are cause 2).
+
+### Hand-back
+
+- **Tests:** 348 pass, 1 skipped (was 347 + 1), exit code 0. New: the collector test.
+- **Comparison backends:** 8120-8123 were started from PowerShell and stopped; 8120-8129 do not answer. The five
+  old ones on 8111-8115 were not touched. `scripts/v1/v0-check.sh`: every line ok, exit 0.
+- **Run data** (not in git): `data-v1/eval/v12/p3/` (24 run folders, `agg.json`, `heard.json`, `judge20.json`,
+  `why.txt`, `stock.log`), `data-v1/eval/v12/studio/`, `data-v1/ab/p3-*/`.

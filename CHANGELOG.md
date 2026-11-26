@@ -57,6 +57,14 @@ file says. Recommended settings: `docs/v1/RUNBOOK.md`, "Recommended settings".
 
 ### Changed
 
+- **v1.2 Parts 3-4, measured, no behaviour changed:** auto mode against manual mode with `V1_LIVE_BUDGET=true` on
+  the dense reel (5 runs each, taken in turn): 66.3% against 79.1% of lines within 0.25 s, 82.4% against 90.0%
+  within 1 s, 34 against 3 skipped lines per 10 minutes. Causes: stock voices on `/live`, the breakers on a link
+  that hiccups, the meaning check loosening nearly every session (EXP-031). Studio HQ in auto mode: 95.6% of words
+  heard back, 146-160 s a video, both guards 0 of 76 (EXP-032). ADR-0036 and ADR-0037 carry the numbers; the three
+  choices this leaves are `docs/v1/NEEDS_APPROVAL.md` item 29. No default and no threshold was changed.
+- **v1.2 Parts 3-4:** `python -m eval.live_judge` counts each hearing by both rules: the one the v1.1 Live reports
+  used and Studio's corrected rule (`nfc-2`); `mean_nfc_pct` beside `mean_pct`.
 - **v1.2 Part 2:** in auto mode a `/live` session without a streamer profile is dubbed in stock voices and never
   learns the voice on the stream; the consent tick for it has no effect and the rebuilt `/live` page no longer
   shows it. (`live_stock_default: off` in the overrides file brings the tick back.)
@@ -85,6 +93,11 @@ file says. Recommended settings: `docs/v1/RUNBOOK.md`, "Recommended settings".
 - The ready block of recommended flags at the end of `backend/.env.example` (auto mode needs none).
 
 ### Fixed
+
+- **v1.2 Parts 3-4:** `scripts/v1/collect-logs.py` rewrote `logs/sessions/index.csv` and `logs/jobs/index.csv`
+  from the stores named on its command line alone, dropping every other version's rows. It now writes the named
+  versions afresh and keeps the rows (and the column order) of all others; test
+  `test_collecting_one_store_keeps_the_index_rows_of_the_others`.
 
 - **v1.2 Part 2, a refused line was silent and left no record.** A hosted stock line refused before any sound is
   asked once more; then every other voice the line can have is asked in one order (our engine's copy, the hosted

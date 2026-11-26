@@ -42,6 +42,19 @@ because ours is not published; not a real cost.
 | Words heard back, Live, GPU engine | Punjabi 87.7%, Tamil 84.4% (off); 80.1% / 82.9% (budget + controller) | — | 2026-11-24 | 40 lines a cell from 2 runs; counting rule before the 25 Nov correction, not re-scored | [EXP-024](experiments/EXP-024-dense-speech-budget.md) | measured |
 | Words heard back, Live, hosted vs all-GPU | hosted 77-81% / 78-79%; tunnel 82% / 73%; GPU machine 80% / 72% (Tamil / Bengali) | — | 2026-11-21 | dense reel 6 loops, `scripts/live_quality.py`, old rule | `SPEC.md` s.21 | measured |
 | Session start: first audio p95 of the first 10 phrases | 3.80 s (3.40-4.34) warm start vs 4.27 s (3.67-5.05) off | — | 2026-11-25 | dense reel twice, Punjabi + Tamil, 5 runs each way; "off" alone moved 0.41 s between batches: **not a proven gain** | [EXP-025](experiments/EXP-025-session-warm-start.md) | measured |
+| **Auto mode (v1.2) against manual `V1_LIVE_BUDGET`: within 0.25 s / 1 s** | auto as shipped 66.3% (57.4-75.1) / 82.4% (71.0-89.3); manual budget 79.1% (73.2-81.8) / 90.0% (87.4-94.0) | 1 s: 90% (**auto: not reached**; manual budget: 90.0% at the mean, 2 of 5 runs at 90% or more) | 2026-11-26 | dense reel 8 loops, Punjabi + Tamil, GPU engine, hold fixed at 6 s, laptop + tunnel, 5 runs a setting taken in turn; auto = stock voices on `/live` (no streamer profile) | [EXP-031](experiments/EXP-031-auto-mode-dense-reel.md) | measured |
+| Auto mode with the voice learned from the stream (`live_stock_default: off`): within 0.25 s / 1 s | 69.6% (55.7-80.8) / 83.9% (72.1-90.9); with `breaker: off` and `live_degrade: off` too: 74.2% (72.4-76.6) / 88.5% (86.4-90.1) | 1 s: 90%: not reached | 2026-11-26 | as above | [EXP-031](experiments/EXP-031-auto-mode-dense-reel.md) | measured |
+| Auto mode: skips per 10 min | auto 34.1 (0-113.8); learned voice 22.1 (3.0-86.6); learned voice, no breaker 5.4 (0-11.9); manual budget 3.0 (0-6.1) | 1: **not reached** in any setting | 2026-11-26 | as above; pure auto: 38 skipped lines in one run, 0 in another, by the hosted voice's speed that hour | [EXP-031](experiments/EXP-031-auto-mode-dense-reel.md) | measured |
+| Auto mode: first audio p50 / p95 | auto 2980 ms (2834-3466) / 5688 ms; learned voice 2965 / 5378 ms; learned voice, no breaker 2767 / 4690 ms; manual budget 2675 ms (2532-2778) / 4939 ms | p50 1.8 s: not reached | 2026-11-26 | as above | [EXP-031](experiments/EXP-031-auto-mode-dense-reel.md) | measured |
+| Auto mode: dur_ratio p90 | auto 1.20 (1.17-1.22); learned voice 1.15 (1.04-1.26); learned voice, no breaker 1.16 (1.09-1.24); manual budget 1.16 (1.13-1.19) | 1.0: **not reached** | 2026-11-26 | as above | [EXP-031](experiments/EXP-031-auto-mode-dense-reel.md) | measured |
+| Auto mode: copied-voice share | auto 0% (stock voices); learned voice 83.1% (50.9-97.3); learned voice, no breaker 97.0%; manual budget 95.1% | — | 2026-11-26 | as above; the breakers opened 13 times in 3 of 5 runs on a link that hiccuped, about 34 s each | [EXP-031](experiments/EXP-031-auto-mode-dense-reel.md) | measured |
+| A line in a stock voice against a line in the copied voice: started within 1 s | stock 48.3-82.9% (19 to 812 lines a setting); copied 87.2-91.4% (756 to 883 lines) | — | 2026-11-26 | as above, lines of the 5 runs of each setting | [EXP-031](experiments/EXP-031-auto-mode-dense-reel.md) | measured |
+| Auto budget: share of lines under the budget | 93.0-96.2% (came on once a language, never off again in 17 sessions) | — | 2026-11-26 | as above; the reel is dense throughout, normal speech not measured | [EXP-031](experiments/EXP-031-auto-mode-dense-reel.md) | measured |
+| Meaning sample (model judge, budgeted lines): judged as lost | auto 23.3% (14.3-26.7); learned voice 19.0% (15.0-25.9); learned voice, no breaker 14.8% (6.8-20.0); about 50-58 lines judged a run | 25% is the loosening threshold | 2026-11-26 | as above; a sample, a model's opinion; a language loosened in 16 of 17 sessions | [EXP-031](experiments/EXP-031-auto-mode-dense-reel.md) | measured |
+| Meaning read by eye, lines of 20 that lost something or say something wrong | Punjabi: manual budget 4, auto 9, learned voice 4, no breaker 3; Tamil: 7, 6, 10, 10 | — | 2026-11-26 | 20 consecutive lines of run 3 each, a non-native reader (as EXP-024's 7 of 20) | [EXP-031](experiments/EXP-031-auto-mode-dense-reel.md) | measured |
+| Script guard, Live: lines that failed / put right by the second translation | 77 of about 2830 (72 Tamil) / 7 | — | 2026-11-26 | the 15 auto sessions of runs 1-5 | [EXP-031](experiments/EXP-031-auto-mode-dense-reel.md) | measured |
+| Lines without sound in auto mode | 0 without a mark in 24 sessions; 1 marked unspoken (not translated, during a stall of the laptop's connection) | never silent without a record | 2026-11-26 | as above | [EXP-031](experiments/EXP-031-auto-mode-dense-reel.md) | measured |
+| Words heard back, Live, corrected rule | Punjabi 91.3% manual budget, 86.4% auto (stock voices), 88.9% learned voice, 87.0% no breaker; Tamil 86.3%, 83.5%, 83.8%, 87.1% | — | 2026-11-26 | 40 lines a cell from runs 3 and 4; the two runs of a cell differ by up to 10.5 points | [EXP-031](experiments/EXP-031-auto-mode-dense-reel.md) | measured |
 | Link stall (50 s, all GPU endpoints): phrases dubbed during it | 4 of 22 (flags off, 1 run); all of 23-24, stock voice (breaker + ladder, 3 runs) | — | 2026-11-24 | local relay standing in for a stalled tunnel, dense reel, Tamil | [EXP-023](experiments/EXP-023-link-stalls-breaker.md) | measured |
 | Hold after a slow link (70 s, every exchange 0.7 s later each way): hold when the run ended | 11.0 s and 11.0 s with the way back off (180 s and 281 s after the link was back); 6.25 s (171 s after) and 6.0 s (reached 217 s after) with it on; first step down 22.3 s and 23.5 s after the link was back, steps of 250 ms | back to 6 s | 2026-11-26 | local relay, dense reel 12 and 16 loops, Tamil, GPU engine, voice learned from the stream, 2 runs each; viewer page not run in a browser | [EXP-030](experiments/EXP-030-hold-ease-back.md) | measured |
 | Hold after a slow link: within 0.25 s / 1 s for the phrases after the link was back | off 67.1% and 70.1% / 97.6% and 95.3%; on 65.5% and 57.9% / 96.4% and 95.5% | — | 2026-11-26 | as above; 82-133 phrases a run | [EXP-030](experiments/EXP-030-hold-ease-back.md) | measured |
@@ -65,6 +78,10 @@ because ours is not published; not a real cost.
 | Words heard back, HQ + all text flags (intact transcripts) | 94.5% (93.2-96.5) | 96%: not reached | 2026-11-25 | as above | [EXP-027](experiments/EXP-027-hq-judge-rerun.md) | measured |
 | Words heard back, 23 Nov output, old rule -> corrected rule | standard 89.2% -> 91.1%; HQ 92.5% -> 95.5% | 96% | 2026-11-23 (re-scored 2026-11-25) | same jobs, re-scored from stored hearings | [EXP-021](experiments/EXP-021-studio-hq-vs-standard.md), [EXP-027](experiments/EXP-027-hq-judge-rerun.md) | measured |
 | Turnaround, 50 s video into 2 languages | standard 81 / 54 / 66 s; HQ 133 / 117 / 136 s; HQ + flags 140 / 129 / 130 s | — | 2026-11-25 | 3 videos, nothing cached, GPU engine, laptop + tunnel | [EXP-027](experiments/EXP-027-hq-judge-rerun.md) | measured |
+| Words heard back, HQ in auto mode (v1.2) | 95.6% (94.6-96.5) | 96%: **not reached** (1 video of 3 over 96%) | 2026-11-26 | 3 test videos, Tamil + Bengali, GPU engine, 1 job each, nothing cached; transcripts intact (0 damaged lines) | [EXP-032](experiments/EXP-032-auto-mode-studio.md) | measured |
+| Turnaround, 50 s video into 2 languages, HQ in auto mode | 146 / 152 / 160 s (voice stage 74 / 93 / 92 s) | — | 2026-11-26 | as above; v1.1 HQ + flags on 25 Nov: 140 / 129 / 130 s (not interleaved) | [EXP-032](experiments/EXP-032-auto-mode-studio.md) | measured |
+| Studio guards in auto mode: script / content shift | 76 lines checked each, 0 failed, 0 flagged, 0 not checked; 0 unspoken | — | 2026-11-26 | as above; the content-shift judge is the model that had reviewed the same lines | [EXP-032](experiments/EXP-032-auto-mode-studio.md) | measured |
+| HQ lines flagged in auto mode | 20 of 76, all by the heard-back judge (best of five takes at 67-89%) | — | 2026-11-26 | as above; v1.1: 15 (HQ), 21 (HQ + flags) | [EXP-032](experiments/EXP-032-auto-mode-studio.md) | measured |
 | Turnaround, dense 24.9 s reel | hosted 88 s; all-GPU 43-68 s | — | 2026-11-21 | Tamil + Bengali (all-GPU: 2 or 3 languages), recorded voice | `SPEC.md` s.21 | measured |
 | Turnaround, dense 24.9 s reel into 4 languages | 84.9 s | — | 2026-11-13 | hosted, nothing cached, 1 job | pitch PDF (15 Nov) p.1; `logs/jobs/index.csv` | measured |
 | HQ voice stage: adaptive vs 5 fixed takes | 206 s vs 524 s (61% less), same take kept on 76 of 76 lines | — | 2026-11-25 | 3 videos | [EXP-027](experiments/EXP-027-hq-judge-rerun.md) | measured |
@@ -127,6 +144,7 @@ Not all points are the same measure or material; read the conditions.
 | 2026-11-24 | 2408 ms (2308-2496) | flags off, 8 loops, Punjabi + Tamil, 5 runs | [EXP-024](experiments/EXP-024-dense-speech-budget.md) |
 | 2026-11-24 | 1949 ms | real session, 16.4 min, Punjabi | [EXP-022](experiments/EXP-022-real-streams-24nov.md) |
 | 2026-11-25 | 2.3 s | 1 recorded session, Punjabi, budget on, 3 loops | [EXP-028](experiments/EXP-028-pitch-recording.md) |
+| 2026-11-26 | manual budget 2675 ms (2532-2778); auto mode 2980 ms (2834-3466) | 8 loops, Punjabi + Tamil, 5 runs each; auto = stock voices | [EXP-031](experiments/EXP-031-auto-mode-dense-reel.md) |
 
 ### Live within 1 s of the video moment
 
@@ -141,6 +159,7 @@ Not all points are the same measure or material; read the conditions.
 | 2026-11-24 | 86.5% off; 92.3% budget | 8 loops, 5 runs each | [EXP-024](experiments/EXP-024-dense-speech-budget.md) |
 | 2026-11-24 | 97.7% | real session, 16.4 min, Punjabi | [EXP-022](experiments/EXP-022-real-streams-24nov.md) |
 | 2026-11-25 | 97.1% | 1 recorded session, budget on | [EXP-028](experiments/EXP-028-pitch-recording.md) |
+| 2026-11-26 | manual budget 90.0%; auto mode 82.4%; auto with the learned voice 83.9%; and no breaker 88.5% | 8 loops, 5 runs each, taken in turn | [EXP-031](experiments/EXP-031-auto-mode-dense-reel.md) |
 
 ### Voice step per phrase (copied voice, translation to first audio)
 
@@ -159,12 +178,14 @@ Not all points are the same measure or material; read the conditions.
 | 2026-11-23 | 92.5% (standard 89.2%) | 3 videos, old rule as reported | [EXP-021](experiments/EXP-021-studio-hq-vs-standard.md) |
 | 2026-11-23 | 95.5% (standard 91.1%) | same output, corrected rule (re-scored 25 Nov) | [EXP-027](experiments/EXP-027-hq-judge-rerun.md) |
 | 2026-11-25 | 95.9% (standard 90.6%); all flags 94.5% | rerun, corrected rule | [EXP-027](experiments/EXP-027-hq-judge-rerun.md) |
+| 2026-11-26 | 95.6% (94.6-96.5) | HQ in auto mode, 1 job a video, corrected rule | [EXP-032](experiments/EXP-032-auto-mode-studio.md) |
 
 ## From the logs
 
 The three blocks below are computed from the CSVs in the repository. Dates in `logs/` are UTC: work done in the
 early morning of 23 and 25 Nov (India time) shows as 22 and 24 Nov. Versions `ws1-*`, `ws2-*`, `ws3-*`, `ws4-*`
-are comparison backends of the v1.1 workstreams, not product versions.
+are comparison backends of the v1.1 workstreams and `p3-*` those of the v1.2 measurement of 26 Nov 2026
+(EXP-031, EXP-032), not product versions.
 
 ### Live sessions by version and date
 
@@ -194,6 +215,10 @@ Generated by scripts/docs/gen_docs.py; do not edit by hand.
 | ws2-warm | 2026-11-24 | 5 | 10 | 260 | 2625 | 97.9 |
 | ws2-warm2 | 2026-11-24 | 5 | 10 | 246 | 2724 | 95.8 |
 | ws4-pitch | 2026-11-24 | 1 | 1 | 36 | 2387 | 97.1 |
+| p3-auto | 2026-11-26 | 7 | 14 | 1255 | 2896 | 86.6 |
+| p3-auto-learned | 2026-11-26 | 5 | 10 | 921 | 2871 | 86.2 |
+| p3-auto-learned-nobrk | 2026-11-26 | 5 | 10 | 929 | 2741 | 87.7 |
+| p3-budget | 2026-11-26 | 7 | 14 | 1298 | 2625 | 90.8 |
 <!-- generated:end results-live-sessions -->
 
 Sessions = distinct sessions; session-languages = rows of `logs/sessions/index.csv`; phrases = sum of `spoken`;
@@ -218,6 +243,7 @@ Generated by scripts/docs/gen_docs.py; do not edit by hand.
 | ws3-new | 2026-11-24 | 3 | 129.7 |
 | ws3-new-first | 2026-11-24 | 3 | 143.2 |
 | ws3-std | 2026-11-24 | 3 | 65.8 |
+| p3-auto | 2026-11-26 | 3 | 151.8 |
 <!-- generated:end results-studio-jobs -->
 
 Source: `logs/jobs/index.csv`. Jobs differ in length and languages; the median mixes them.

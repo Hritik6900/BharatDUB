@@ -53,9 +53,10 @@ ssh -i C:\Users\hriti\Downloads\test4-ocr_ssh_key -N -o IdentitiesOnly=yes -o Se
 
 Other documents written before 25 Nov 2026 cite the old item numbers: the table at the end translates them.
 Items 16-18 take five minutes, need no VM and can be done at any time.
-Added after the checklist was ordered, at the end of this file: item 27 (documentation) and item 28
+Added after the checklist was ordered, at the end of this file: item 27 (documentation), item 28
 (**Get written confirmation of commercial use from AI4Bharat / legal review**: it is about the voice model the
-product runs on today, so read it before any contract).
+product runs on today, so read it before any contract) and item 29 (**auto mode on `/live`: three decisions from
+the v1.2 measurement**; one line in a file each, no VM: read it before the next stream on v1).
 
 ---
 
@@ -783,6 +784,7 @@ curl.exe -s http://127.0.0.1:9020/v1/models      # answers again after a minute 
 | 26 | 26 | listeners for the blind listening test | YOU |
 | new (25 Nov) | 27 | documentation: the handbook's "(unconfirmed)" items (`V1_HQ_ADAPTIVE` settled 26 Nov: on) | YOU |
 | new (26 Nov) | 28 | Get written confirmation of commercial use from AI4Bharat / legal review | YOU |
+| new (26 Nov) | 29 | auto mode on `/live`: stock voices, the breakers on a link that hiccups, the meaning check's first step | YOU + LAPTOP |
 
 New in v1.1 WS5, inside the items above: the deploy kit (items 4, 8-11), the backend-only start on the machine
 (item 2), the voice A/B kit (item 8), the translation A/B with its rule (item 9), the licence guard on the speaker
@@ -838,3 +840,75 @@ Written while building `docs/handbook/`; nothing in the code changes.
 - **Until then:** do not say IndicF5, or "all our models", is cleared for commercial use
   (`docs/handbook/PITCH_FACTS.md`, "Do not claim").
 
+## 29. Auto mode on `/live`: three decisions from the v1.2 measurement (YOU + LAPTOP) (new, 26 Nov 2026)
+
+- **What:** auto mode was measured against v1.1's best setting on the dense reel
+  (`docs/handbook/experiments/EXP-031-auto-mode-dense-reel.md`; 5 runs a setting, taken in turn, Punjabi + Tamil,
+  hold fixed at 6 s). As it ships, auto is worse: 66.3% (57.4-75.1) of lines within 0.25 s and 82.4% (71.0-89.3)
+  within 1 s, against 79.1% (73.2-81.8) and 90.0% (87.4-94.0) for manual mode with `V1_LIVE_BUDGET=true`; 34
+  skipped lines per 10 minutes against 3. Three causes were told apart, and each is a choice only you can make.
+  Nothing below was changed by the build: the defaults are your list.
+- **Why deferred:** the first is your own decision of 26 Nov (stock voices always on); the second trades
+  protection in a real stall for steadiness on a link that only hiccups; the third trades timing for meaning.
+
+**1. Stock voices on `/live` (the largest cause).** A `/live` session without a streamer profile speaks in hosted
+stock voices in auto mode and never learns the voice on the stream. The hosted account takes one request at a
+time, so two languages queue: 0% copied voice, and from 38 skipped lines in a run to 1, by how fast the hosted
+voice is in that hour. A streamer's own session (`/streamer`, recorded voice) is not affected.
+  - To get the voice learned from the stream back (with its consent tick), in
+    `backend\config\overrides.yaml` remove the `# ` in front of this line and restart the backend:
+    ```
+    live_stock_default: off
+    ```
+    The website reads the setting from the backend: the choice "the voice on this stream" and its consent tick
+    show again by themselves.
+  - Measured with that line: 69.6% (55.7-80.8) within 0.25 s, 83.9% (72.1-90.9) within 1 s, copied voice 83.1%
+    (50.9-97.3). Still under "budget on", because of point 2.
+  - Rollback: put the `# ` back, restart.
+
+**2. The breakers and the ladder on a link that hiccups.** One health answer slower than 2 s, or one line slower
+than 4 s, opens a voice engine's circuit for about 34 s; when all three are open the session speaks in the stock
+voice until they close. That happened 13 times in 3 of 5 runs, while the engine's own time was never over 0.62 s:
+it was the link. Without breakers the same hiccups cost 3-4 late lines in 900.
+  - Option A, keep them (the default): safe in a real stall (EXP-023: every phrase dubbed through a 50 s stall,
+    4 of 22 without), unsteady on this link.
+  - Option B, switch both off, two more lines in `backend\config\overrides.yaml`:
+    ```
+    breaker: off
+    live_degrade: off
+    ```
+    Measured with these and the line of point 1: 74.2% (72.4-76.6) within 0.25 s, 88.5% (86.4-90.1) within 1 s,
+    5.4 skips per 10 minutes, copied voice 97.0%: close to "budget on", and **no protection when the link really
+    goes** (the 24 Nov stalls of 2 min, 44 min and 3 h).
+  - Option C, make them slower to act, in `backend\.env` (settings, read in auto mode too). **Not measured:**
+    ```
+    V1_LINK_PROBE_TIMEOUT_S=4
+    V1_BREAKER_VOICE_TIMEOUT_S=6
+    V1_BREAKER_OPEN_S=10
+    ```
+    A better rule would be "two slow health answers in a row before a voice engine's circuit opens"; that is a
+    code change and was not made.
+  - The real cure is item 2 (the backend beside the engines: no tunnel between them) and item 17 (the tunnel
+    watchdog).
+
+**3. The meaning check's first step.** A language's budget was loosened in 16 of 17 auto sessions, the first time
+on exactly 6 judged lines in half of the cases (2 lost lines are then enough), while the judge calls about 1 line in 6 "lost" before any
+loosening. A loosened language has more lines longer than their slots (Punjabi 40-45% against 16%, Tamil 29-46%
+against 25%); the judge then finds fewer lost lines (5-10% at the second step, on few lines).
+  - Keep it (default), or ask for more evidence before the first step, in `backend\.env`. **Not measured:**
+    ```
+    V1_MEANING_MIN_SAMPLES=12
+    ```
+  - Or switch the loosening off: `meaning_check: off` in the overrides file (lines are still judged and counted).
+  - To settle whether the loosened lines are really better: a Tamil and a Punjabi speaker reading the same 20
+    lines (item 21 has the same need for Studio).
+
+- **GPU memory:** none.
+- **Verify:** after a restart `curl.exe -s http://127.0.0.1:8110/api/v1/flags` shows the overrides in force
+  (`"overrides": {...}`); a `/live` session's `/metrics` shows `"rung": "copied"` once the voice is learned. To measure a choice the way EXP-031 did:
+  `powershell -File scripts\v1\ab-server.ps1 -Port 8122 -Name try -Mode auto -Overrides "live_stock_default=off"`
+  and the replay command of `RUNBOOK.md` section 3.5 (check that nobody is live first; stop the backend after).
+- **Rollback:** comment the lines out again (or remove them from `backend\.env`), restart.
+- **Also from the same measurement, no decision needed:** the script guard reports a Hindi word left in Devanagari
+  inside a Tamil line (3 to 8 lines a session on this reel) but its second translation put only 3 of 72 right; the
+  line is spoken as it is and flagged. A fix (write the word in Tamil letters by rule) is not built.
