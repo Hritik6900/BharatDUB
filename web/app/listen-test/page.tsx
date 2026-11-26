@@ -120,7 +120,7 @@ export default function ListenTestPage() {
         />
         {off && (
           <div className="mt-8">
-            <Notice tone="warn">This page is switched off. Set V1_LISTEN_TEST=true in the backend&apos;s settings and restart it.</Notice>
+            <Notice tone="warn">This page is not available on this server.</Notice>
           </div>
         )}
         {err && <div className="mt-8"><Notice tone="error" role="alert">{err}</Notice></div>}

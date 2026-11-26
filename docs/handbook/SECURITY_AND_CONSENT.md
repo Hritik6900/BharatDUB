@@ -21,8 +21,8 @@ exceptions, no debug bypass. The backend refuses with HTTP 403 otherwise (SPEC s
 - `live_clone_needs_streamer`: **off since 15 Nov 2026, by the founder's choice** (`10bd8e1` / `89b68e4`). Off, `/live`
   may copy the voice on the stream behind its consent tick. On, only a streamer profile (consent read aloud) may
   clone and the `/live` form is stock only. Default in `backend/app/config.py`: `False`.
-- v1 flag `V1_LIVE_STOCK_DEFAULT` (recommended on): a `/live` session without a streamer profile speaks in stock
-  voices even with the tick set.
+- v1, always so in auto mode (v1.2; in manual mode the flag `V1_LIVE_STOCK_DEFAULT`): a `/live` session without a
+  streamer profile speaks in stock voices even with the tick set, and never copies the voice on the stream.
 - A profile made from a stream or a video is a normal profile with `consent_at` ("Voice from live <time>",
   "Voice from <file>"), reusable and deletable on `/voices`.
 - v0's consent records are not copied into v1: voices are recorded again in v1 with consent

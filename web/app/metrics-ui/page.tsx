@@ -62,7 +62,7 @@ interface Summary {
   };
 }
 
-// The blind listening test (/listen-test). Null while the page is switched off (V1_LISTEN_TEST).
+// The blind listening test (/listen-test). Null while that page is not available on the server.
 interface ListenSummary {
   answers: number;
   listeners: number;
@@ -228,7 +228,7 @@ export default function MetricsPage() {
           {d && <span className="text-sm text-muted">{d.records} trace records</span>}
         </div>
         {err && <div className="mt-6"><Notice tone="error" role="alert">{err}</Notice></div>}
-        {d && !d.trace_on && <div className="mt-6"><Notice tone="warn">The trace is switched off (V1_TRACE), so nothing new is being recorded.</Notice></div>}
+        {d && !d.trace_on && <div className="mt-6"><Notice tone="warn">Nothing new is being recorded on this server at the moment.</Notice></div>}
         {d && (
           <div className="rise">
             <h2 className="eyebrow mt-10">Live</h2>

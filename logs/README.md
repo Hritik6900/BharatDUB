@@ -1,16 +1,19 @@
 # logs
 
 The records of every test run on this machine: what was called, how long each step took, how each run ended.
+**Since v1.2 the `.jsonl` files are not in git** (`logs/**/*.jsonl` is ignored): they stay on the machine that made
+them, and what is tracked and pushed is this file, the two index tables (`sessions/index.csv`, `jobs/index.csv`)
+and the stream watcher's files in `streams/`. The files that were pushed before are still in the history.
 Measurements only. Nothing that was said is kept here: no source text, no translation, no audio, no voice
 sample, no key, no voice or token id.
 
 | Folder | What | Written by | Versions |
 |---|---|---|---|
-| `api/<date>/<test>.jsonl` | one line per outbound request to a provider: which call, host and path, status, ms, attempt, bytes out and in | the v1 backend while it runs, with `V1_API_LOG=true` | v1 |
-| `sessions/<version>/<date>_<session>.jsonl` | one line per Live phrase and language: ms for hearing, translation, voice, first audio, how late, speed-up, copied or stock voice, our GPU or hosted, skipped and why | `scripts/v1/collect-logs.py` | v0, v1 |
+| `api/<date>/<test>.jsonl` | one line per outbound request to a provider: which call, host and path, status, ms, attempt, bytes out and in | the v1 backend while it runs (always in auto mode; `V1_API_LOG=true` in manual mode); not in git | v1 |
+| `sessions/<version>/<date>_<session>.jsonl` | one line per Live phrase and language: ms for hearing, translation, voice, first audio, how late, speed-up, copied or stock voice, our GPU or hosted, skipped and why | `scripts/v1/collect-logs.py`; not in git | v0, v1 |
 | `sessions/index.csv` | one row per Live session and language: the numbers of that run | `scripts/v1/collect-logs.py` | v0, v1 |
 | `jobs/index.csv` | one row per Studio job: seconds per stage | `scripts/v1/collect-logs.py` | v0, v1 |
-| `trace/trace-<date>.jsonl` | v1's trace: per Live phrase and Studio line, which provider did each step and whether a fallback answered | the v1 backend (`V1_TRACE=true`), copied here by the collect script | v1 |
+| `trace/trace-<date>.jsonl` | v1's trace: per Live phrase and Studio line, which provider did each step and whether a fallback answered | the v1 backend (always in auto mode; `V1_TRACE=true` in manual mode), copied here by the collect script; not in git | v1 |
 | `streams/` | the stream watcher's files: `events.log`, a row every 20 s per stream, a summary when a stream ends | `scripts/v1/stream-watch.ps1`, copied here by the collect script | v0, v1 |
 
 `<test>` in `api/` is `live_<session>` or `job_<job>` (first 8 characters of the id), or `other` for a call made
@@ -23,7 +26,7 @@ be read side by side.
 # from the v1 checkout; reads both stores, writes only into logs/
 backend\.venv\Scripts\python.exe scripts\v1\collect-logs.py `
     "v0=$env:USERPROFILE\Desktop\BharatDUB\backend\data\local_db.json" "v1=data-v1\local_db.json"
-git add logs; git commit -m "logs: tests up to <date>"; git push origin v1
+git add logs; git commit -m "logs: tests up to <date>"; git push origin v1    # adds the index tables and streams/ only
 ```
 
 `api/` fills by itself while v1 runs. v0 has no per-request log: its code is not changed, so for v0 the finest
@@ -62,6 +65,10 @@ are not in `api/`; their timing per phrase is in `sessions/` and `trace/`.
 | `backlog_ms` | v1.1: how far the dub queue was behind the video when this phrase's turn came |
 | `tgt_words`, `tgt_chars` | v1.1: length of the translated line in words and in letters (no text) |
 | `budget_ms`, `budget_scale`, `reasked` | v1.1 with `V1_LIVE_BUDGET`: the duration the translator was given, the controller's scale, 1 = a shorter line was asked for, 2 = and used |
+| `budget_auto`, `loose_steps` | v1.2 auto mode: 1 = the budget applied to this line, 0 = it was translated in full; how many steps the meaning check has loosened this language's budget by |
+| `judged` | v1.2: the line was put in the sample that is judged against its source afterwards (the verdict is a `live_meaning` record of the trace; no text in either) |
+| `guard_script`, `src_script_ok` | v1.2 script guard, every line: 1 = the line was in the wrong script and was translated again, 2 = still wrong, flagged; `src_script_ok` 0 = the transcript was not in the session's source script |
+| `voice_fallback`, `unspoken` | v1.2: the voices that were asked, in order, when the first one made nothing (the last one spoke); `unspoken` = why a line has no sound at all (`no_voice`: every voice failed; `untranslated`; `error: ...`) |
 
 `sessions/ws2-*/` and `trace/ws2-*/` are the comparison backends of the v1.1 WS2 measurement (`docs/v1/PROGRESS.md`):
 `ws2-off` and `ws2-warm`, `ws2-warm2` (session start: off, the first build, the final build), `ws2-en-off`,
@@ -93,3 +100,11 @@ With `V1_BREAKER` and `V1_LIVE_DEGRADE` on (v1.1), `streams/events.log` also has
 `CIRCUIT CLOSED <endpoint> after <n> s`, `CIRCUIT LINK STALL`, `CIRCUIT LINK BACK` and
 `RUNG [backend session] a -> b (why)`; the trace has `circuit` and `live_degrade` events, and each stored Live
 phrase has `rung:<lang>` (0 copied voice, 1 stock voice, 2 no voice, 3 not translated).
+
+v1.2 (auto mode): the trace also has `live_auto_budget` (a language's budget went on or off: why, the backlog and
+dub length behind it), `live_meaning` (one judged line: lost, shift, the rate, no text), `live_budget_adjust` (a step
+looser or tighter, with the rate), `live_en_voice` (the session's one English voice and the measurement behind it),
+`live_voice_fallback` (a line another voice spoke, or that none spoke, with what each voice answered),
+`live_guard_script`, `studio_guard` (a job's guard counts per language) and `studio_unspoken`. `sessions/index.csv`
+has, for sessions of auto mode only: `budget_applied_pct`, `script_guard_failed`, `script_guard_flagged`,
+`judged_sample`, `spoken_by_another_voice`, `unspoken`.

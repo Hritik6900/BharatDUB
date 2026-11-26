@@ -9,6 +9,10 @@ or a build). Plan view: [ROADMAP.md](ROADMAP.md).
 ## Product and decisions
 
 ### 1. Which Live flags go on?
+- **Decided 26 Nov 2026 (v1.2 Part 2):** none is set by hand any more. Auto mode switches breaker, ladder and the
+  budget on by itself, the budget only while the dub is behind or speech is dense, and loosens it per language
+  when a sample of lines loses meaning ([ADR-0036](adr/0036-auto-mode.md)). Open until v1.2 Part 3: whether that
+  is as good as the budget always on. What follows is the question as it stood.
 - **Why it matters:** the budget lifts within 1 s from 86.5% to 92.3% on dense speech, but in Tamil 7 of 20 lines
   read lost something that mattered, and it is one switch for every language. Breaker + ladder kept every phrase
   dubbed through a 50 s stall (4 of 22 without).
@@ -46,8 +50,11 @@ or a build). Plan view: [ROADMAP.md](ROADMAP.md).
 ### 6. Should `V1_LIVE_STOCK_DEFAULT` be on?
 - **Why it matters:** on, a `/live` session without a streamer profile never learns a voice; the only v1 stock-voice
   runs had first audio p50 5.1 s and 58.3% within 1 s against 2.34 s and 83.3% with the learned voice. The budget was
-  never measured with stock voices; `V1_PHRASE_DYNAMIC` gained only when a voice is ready at the start.
-- **What would answer it:** a stock-voice run with the budget and with `V1_PHRASE_DYNAMIC`.
+  never measured with stock voices. (The dynamic first phrase, which gained only when a voice is ready at the
+  start, was removed in v1.2.)
+- **Decided 26 Nov 2026 (v1.2 Part 2): always on in auto mode.** The consequence stands and is not measured:
+  `/live` without a streamer profile is stock voices only.
+- **What would answer it:** a stock-voice run in auto mode beside one with `live_stock_default: off`.
 - **Owner:** founder (rule), engineering (run). **Blocked on:** none.
 
 ### 7. How long are recordings kept, and does deleting a voice delete them?

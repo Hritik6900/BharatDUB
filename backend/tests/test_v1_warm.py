@@ -1,13 +1,13 @@
-"""v1.1 session start (`V1_LIVE_WARMSTART`) and the one English voice (`V1_EN_SINGLE_VOICE`)."""
+"""The one English voice of a session in manual mode (`V1_EN_SINGLE_VOICE`, `V1_EN_VOICE`). Auto mode: test_v1_auto.py.
+The session-start tests of v1.1 went with `V1_LIVE_WARMSTART` in v1.2."""
 import asyncio
 import base64
 
 import numpy as np
-import pytest
 
 from app.config import VOICE_BY_LANG, Settings, get_settings
 from app.db import LocalStore
-from app.live.pipeline import LivePipeline, prefetch_stored_voice
+from app.live.pipeline import LivePipeline
 from app.live.session import LiveSession
 from app.providers.base import ProviderError
 from app.providers.mock import MockLLM, MockTTS
@@ -17,80 +17,20 @@ from app.v1.flags import flags
 TA, PA, EN = "ta-IN", "pa-IN", "en-IN"
 CONSENT = "2026-11-24T00:00:00+00:00"
 EMB = {"embedding": "e", "shape": [1, 768], "dtype": "torch.bfloat16"}
-NEW_KEYS = ("open", "handover")
-
-
-def voiced(f0: float, seconds: float = 2.0, amp: float = 6000.0) -> bytes:
-    """A voice-like sound: a fundamental with falling harmonics, 16 kHz PCM16."""
-    t = np.arange(int(16000 * seconds)) / 16000
-    x = sum(np.sin(2 * np.pi * f0 * k * t) / k for k in range(1, 6))
-    return (x / np.max(np.abs(x)) * amp).astype("<i2").tobytes()
-
-
-def frames(pcm: bytes) -> list[bytes]:
-    return [pcm[i:i + 1024] for i in range(0, len(pcm) - 1023, 1024)]
+NEW_KEYS = ("open", "handover", "voice_fb", "unspoken", "script", "auto", "judged")
 
 
 # ---------- the parts alone ----------
-def test_pitch_of_a_low_and_a_high_voice_and_none_for_noise_or_silence():
-    low, high = np.frombuffer(voiced(118), dtype="<i2")[:1024], np.frombuffer(voiced(214), dtype="<i2")[:1024]
-    assert abs(warm.f0_hz(low) - 118) < 4 and abs(warm.f0_hz(high) - 214) < 8
-    rng = np.random.default_rng(1)
-    assert warm.f0_hz((rng.standard_normal(1024) * 3000).astype("<i2")) is None      # loud, no pitch
-    assert warm.f0_hz((np.frombuffer(voiced(118), dtype="<i2")[:1024] * 0.01).astype("<i2")) is None   # a pause
-
-
-def test_tracker_says_nothing_before_a_second_of_voice_then_male_or_female_and_stops_listening():
-    tr = warm.PitchTracker()
-    for f in frames(voiced(118, 0.5)):
-        tr.add(f)
-    assert tr.gender() is None and tr.median_hz() is None        # 7 windows: too little
-    for f in frames(voiced(118, 1.0)):
-        tr.add(f)
-    assert tr.gender() == "male" and abs(tr.median_hz() - 118) < 4
-    hi = warm.PitchTracker()
-    for f in frames(voiced(214, 2.0) + b"\x00" * 32000):          # the silence adds nothing
-        hi.add(f)
-    assert hi.gender() == "female" and len(hi.f0s) in (31, 32)
-    for f in frames(voiced(214, 12.0)):
-        hi.add(f)
-    assert hi.done and len(hi.f0s) == warm.MAX_WINDOWS
-
-
-def test_stock_voice_nearest_to_the_speaker_and_what_is_said_where_a_language_has_one_gender():
-    assert warm.pick_stock("bn-IN", "male") == {"voice": "Dhruva", "matched": True, "note": ""}
-    assert warm.pick_stock("bn-IN", "female") == {"voice": "Kirra", "matched": True, "note": ""}
-    for lang in (TA, "te-IN"):                                    # female voices only
-        got = warm.pick_stock(lang, "male")
-        assert got["voice"] == VOICE_BY_LANG[lang] and not got["matched"] and "female stock voices only" in got["note"]
-    got = warm.pick_stock(PA, None)
-    assert got["voice"] == VOICE_BY_LANG[PA] and not got["matched"] and "not known" in got["note"]
-
-
-def test_fade_level_and_the_step_towards_another_level():
-    pcm = (np.ones(2400) * 8000).astype("<i2").tobytes()          # 0.1 s at 24 kHz
-    out = np.frombuffer(warm.fade(pcm, 24000, 50, out=True), dtype="<i2")
-    assert out[0] == 8000 and out[1199] == 8000 and abs(int(out[-1])) < 20 and 5000 < out[1800] < 6200   # equal power
-    head = np.frombuffer(warm.fade(pcm, 24000, 50, out=False), dtype="<i2")
-    assert abs(int(head[0])) < 20 and head[-1] == 8000
-    assert warm.fade(b"\x01\x00", 24000, 50, out=True) == b"\x01\x00"
-    assert warm.level(pcm) == 8000 and warm.level(b"\x00\x00" * 500) == 0.0
-    half = np.frombuffer(warm.toward(pcm, 8000, 2000, 0.5), dtype="<i2")
-    assert 3900 < half[0] < 4100                                  # half the way in dB: 8000 -> 4000 on the way to 2000
-    assert np.frombuffer(warm.toward(pcm, 8000, 100, 1.0), dtype="<i2")[0] > 3900    # never more than 6 dB
-    assert warm.toward(pcm, 8000, 0, 0.5) == pcm and warm.toward(pcm, 0, 2000, 0.5) == pcm
-    assert np.max(np.frombuffer(warm.toward((np.ones(100) * 30000).astype("<i2").tobytes(), 3000, 6000, 1.0), dtype="<i2")) <= 32000
-
-
 def test_english_voice_for_a_session_is_copy_or_stock_and_auto_is_the_measured_choice_stock():
     assert warm.en_mode("copy") == "copy" and warm.en_mode("stock") == "stock"
     assert warm.en_mode("auto") == "stock" and warm.en_mode("anything") == "stock"
 
 
-def test_both_flags_exist_and_are_off_by_default():
+def test_the_flag_exists_and_is_off_by_default_and_the_session_start_flag_is_gone():
     fresh = Settings(_env_file=None)
-    assert fresh.v1_live_warmstart is False and fresh.v1_en_single_voice is False and fresh.v1_en_voice == "auto"
-    assert flags()["V1_LIVE_WARMSTART"] is False and flags()["V1_EN_SINGLE_VOICE"] is False
+    assert fresh.v1_en_single_voice is False and fresh.v1_en_voice == "auto"
+    assert not hasattr(fresh, "v1_live_warmstart") and "V1_LIVE_WARMSTART" not in flags()
+    assert flags()["V1_EN_SINGLE_VOICE"] is False
 
 
 # ---------- in the pipeline ----------
@@ -195,22 +135,19 @@ async def profile_with_copy(store: LocalStore) -> str:
 
 
 async def test_flags_off_the_start_and_the_voices_are_v0s(monkeypatch, tmp_path):
-    """Nothing listens for pitch, v0's warm-up runs (first language only, no hosted line when our engine is coming),
-    the stock voice is the language's usual one, English is chosen line by line, nothing new is stored or sent."""
+    """v0's warm-up runs (first language only, no hosted line when our engine is coming), the stock voice is the
+    language's usual one, English is chosen line by line, nothing new is stored or sent."""
     p, sess, llm, tts, gpu, store = setup(monkeypatch, tmp_path, [TA, PA], {"voice_from_stream": {"consent_at": CONSENT}},
                                           live_warmup=True)
-    assert p._pitch is None and p._en_mode is None and p.warm_stats() == {}
+    assert p._en_mode is None and p.warm_stats() == {} and p._meaning is None and not p._fallback
     qs = {lg: sess.bus.subscribe(lg) for lg in (TA, PA)}
     await p.start()
-    for f in frames(voiced(118)):
-        p.feed(f)                                                  # a male speaker changes nothing
     await asyncio.sleep(0.4)
     assert [(text, lang) for text, lang, _ in llm.asked] == [("नमस्ते", TA)] and tts.said == [] and gpu.healths == 0
     await say(p, qs)
     assert {(lang, name) for lang, name, _ in tts.said} == {(TA, VOICE_BY_LANG[TA]), (PA, VOICE_BY_LANG[PA])}
     await p.stop()
     assert not [k for row in (await stored(store)).values() for k in row if k.split(":")[0] in NEW_KEYS]
-    assert sess.prefetch is None
 
 
 async def test_flags_off_english_in_a_gpu_session_is_still_chosen_line_by_line(monkeypatch, tmp_path):
@@ -222,197 +159,6 @@ async def test_flags_off_english_in_a_gpu_session_is_still_chosen_line_by_line(m
     await say(p, qs, ago_ms=5000)           # 1 s before it is due: a stock voice (v0's rule, the mix the flag removes)
     await say(p, qs)                        # 6 s before it is due: the copy
     assert [name for _, name, _ in tts.said] == [VOICE_BY_LANG[EN], "clone"]
-    await p.stop()
-
-
-async def test_warm_start_asks_every_language_and_every_engine_before_the_first_phrase(monkeypatch, tmp_path):
-    p, sess, llm, tts, gpu, store = setup(monkeypatch, tmp_path, [TA, PA, EN], {"voice_from_stream": {"consent_at": CONSENT}},
-                                          v1_live_warmstart=True, live_warmup=True)
-    await p.start()
-    for _ in range(100):
-        if "total" in p.warm_ms:
-            break
-        await asyncio.sleep(0.02)
-    assert sorted((lang, kw.get("native", False)) for _, lang, kw in llm.asked) == [(EN, False), (PA, True), (TA, True)]
-    # No voice is on our engines yet: they are asked how they are (their connections open), no line is made there,
-    # and the hosted voice says one short line per language, the ones our engine takes over later included.
-    assert gpu.healths == 1 and gpu.lines == []
-    assert [(lang, name) for lang, name, _ in tts.said] == [(TA, VOICE_BY_LANG[TA]), (PA, VOICE_BY_LANG[PA]), (EN, VOICE_BY_LANG[EN])]
-    calls = p.warm_stats()["warm"]["calls_ms"]
-    assert set(calls) == {"translate:ta-IN", "translate:pa-IN", "translate:en-IN", "engines", "voice:ta-IN", "voice:pa-IN",
-                          "voice:en-IN", "total"} and all(isinstance(v, int) for v in calls.values())
-    assert p._stock_pick == {}                                    # a warm-up line never fixes the session's voice
-    await p.stop()
-
-
-async def test_warm_start_with_a_stored_voice_speaks_one_short_line_per_language_on_every_engine(monkeypatch, tmp_path):
-    p, sess, llm, tts, gpu, store = setup(monkeypatch, tmp_path, [TA, PA], v1_live_warmstart=True)
-    p.gpu_ready, p._gpu_sid, p._gpu_stored = True, "voice-1", True
-    await p.start()
-    for _ in range(100):
-        if "total" in p.warm_ms:
-            break
-        await asyncio.sleep(0.02)
-    assert len(gpu.lines) == 3 and {lang for lang, _ in gpu.lines} == {TA, PA}     # three processes, both languages
-    assert all(len(text.split()) == 2 for _, text in gpu.lines) and tts.said == []  # the hosted voice has nothing to say here
-    assert isinstance(p.warm_ms["engine_lines"], int)
-    await p.stop()
-
-
-async def test_a_failing_warm_up_call_is_noted_and_stops_nothing(monkeypatch, tmp_path):
-    p, sess, llm, tts, gpu, store = setup(monkeypatch, tmp_path, [PA], {"voice_from_stream": {"consent_at": CONSENT}},
-                                          v1_live_warmstart=True)
-    tts.dead = {VOICE_BY_LANG[PA]}
-
-    async def down():
-        raise ProviderError("gpu: ConnectError", retryable=True)
-    gpu.health = down
-    await p.start()
-    for _ in range(100):
-        if "total" in p.warm_ms:
-            break
-        await asyncio.sleep(0.02)
-    assert p.warm_ms["voice:pa-IN"] == "failed: ProviderError" and p.warm_ms["engines"] == "failed: ProviderError"
-    assert p.running and isinstance(p.warm_ms["translate:pa-IN"], int)
-    await p.stop()
-
-
-async def test_stock_voice_follows_the_speakers_pitch_is_kept_and_says_so_where_there_is_no_such_voice(monkeypatch, tmp_path):
-    p, sess, llm, tts, gpu, store = setup(monkeypatch, tmp_path, [TA, "bn-IN"], v1_live_warmstart=True)
-    gpu.enabled = False                                          # a stock session: no copied voice at all
-    qs = {lg: sess.bus.subscribe(lg) for lg in (TA, "bn-IN")}
-    await p.start()
-    for _ in range(100):
-        if "total" in p.warm_ms:
-            break
-        await asyncio.sleep(0.02)
-    tts.said.clear()
-    for f in frames(voiced(118)):
-        p.feed(f)
-    await say(p, qs)
-    assert {(lang, name) for lang, name, _ in tts.said} == {(TA, "Asmita"), ("bn-IN", "Dhruva")}
-    w = p.warm_stats()["warm"]
-    assert w["speaker"] == "male" and abs(w["f0_hz"] - 118) < 4
-    assert w["stock_voice"]["bn-IN"]["matched"] is True and w["stock_voice"][TA]["matched"] is False
-    assert "female stock voices only" in w["stock_voice"][TA]["note"] and w["opening_stock_lines"] == {}
-    p._pitch = warm.PitchTracker()                               # even if the pitch were heard differently later
-    for f in frames(voiced(214)):
-        p.feed(f)
-    tts.said.clear()
-    await say(p, qs)
-    assert {(lang, name) for lang, name, _ in tts.said} == {(TA, "Asmita"), ("bn-IN", "Dhruva")}   # the voice is kept
-    await p.stop()
-    assert not [k for row in (await stored(store)).values() for k in row if k.split(":")[0] in NEW_KEYS]
-
-
-async def test_a_matched_voice_that_makes_nothing_gives_way_to_the_usual_one(monkeypatch, tmp_path):
-    p, sess, llm, tts, gpu, store = setup(monkeypatch, tmp_path, [PA], v1_live_warmstart=True)
-    gpu.enabled = False
-    tts.dead = {"Zayan"}
-    q = {PA: sess.bus.subscribe(PA)}
-    await p.start()
-    for f in frames(voiced(118)):
-        p.feed(f)
-    first = await say(p, q)
-    assert len(pcm_of(first[PA])) == 0 and tts.said[-1][1] == "Zayan"
-    second = await say(p, q)
-    assert len(pcm_of(second[PA])) > 0 and tts.said[-1][1] == VOICE_BY_LANG[PA]
-    assert "did not answer" in p.warm_stats()["warm"]["stock_voice"][PA]["note"]
-    await p.stop()
-
-
-async def test_the_change_from_the_opening_stock_voice_to_the_copied_one_is_softened(monkeypatch, tmp_path):
-    p, sess, llm, tts, gpu, store = setup(monkeypatch, tmp_path, [PA], {"voice_from_stream": {"consent_at": CONSENT}},
-                                          v1_live_warmstart=True, live_trim_silence=False)
-    q = {PA: sess.bus.subscribe(PA)}
-    await p.start()
-    p.set_media(0.0, True)
-    opening = pcm_of((await say(p, q, ago_ms=4500))[PA])          # due in 1.5 s, no voice yet: a stock voice
-    assert tts.said[-1][0] == PA and len(opening) and np.max(np.abs(opening[-24:])) < 400     # ends in a fade
-    assert np.max(np.abs(opening[: len(opening) // 2])) > 3000
-    stock_level = p._stock_level[PA]
-    p.gpu_ready, p._gpu_sid = True, "v"                           # the copied voice has arrived
-    lines = [pcm_of((await say(p, q))[PA]) for _ in range(3)]
-    assert len(gpu.lines) == 3
-    assert np.max(np.abs(lines[0][:24])) < 400                    # the first copied line begins with a fade
-    levels = [float(np.median(np.abs(x[len(x) // 2:]))) for x in lines]
-    assert stock_level < levels[0] < levels[1] < levels[2] and abs(levels[2] - 12000) < 100   # in two steps from the stock voice's level
-    assert np.max(np.abs(lines[1][:24])) > 3000 and np.max(np.abs(lines[2][:24])) > 11000     # later lines are whole
-    await p.stop()
-    t = await stored(store)
-    assert [t[k].get("open:pa-IN") for k in sorted(t)] == [1, None, None, None]
-    assert [t[k].get("handover:pa-IN") for k in sorted(t)] == [None, 1, 2, None]
-    w = p.warm_stats()["warm"]
-    assert w["opening_stock_lines"] == {PA: 1} and w["softened_lines"] == {PA: 2}
-
-
-async def test_an_opening_line_waits_for_the_copied_voice_only_while_a_sample_is_on_its_way(monkeypatch, tmp_path):
-    async def first_line(flag: bool, busy: bool) -> tuple[int, str]:
-        p, sess, llm, tts, gpu, store = setup(monkeypatch, tmp_path, [PA], {"voice_from_stream": {"consent_at": CONSENT}},
-                                              v1_live_warmstart=flag)
-        q = {PA: sess.bus.subscribe(PA)}
-        await p.start()
-        p.set_media(0.0, True)
-        await asyncio.sleep(0.3)             # the warm-up's own hosted line is out of the way
-        tts.said.clear()
-        p._gpu_busy = busy
-        t0 = sess.now_ms()
-        await say(p, q, ago_ms=1800)         # due in 4.2 s; a line for our engine would have to start in 2 s
-        took = sess.now_ms() - t0
-        await p.stop()
-        return took, tts.said[0][1]
-
-    took, voice = await first_line(False, False)
-    assert took >= 1950 and voice == VOICE_BY_LANG[PA]      # v0: waits for a voice that is not even being made
-    took, voice = await first_line(True, False)
-    assert took < 1500 and voice == VOICE_BY_LANG[PA]        # warm start: the stock voice speaks at once
-    took, voice = await first_line(True, True)
-    assert took >= 1950 and voice == VOICE_BY_LANG[PA]      # a sample is on its way: the line still waits for it
-
-
-async def test_a_streamers_stored_voice_is_sent_when_the_session_is_made_and_not_again_at_its_start(monkeypatch, tmp_path):
-    from app.shared import voices
-    monkeypatch.setattr(voices, "voices_dir", lambda: tmp_path)
-    (tmp_path / "ref.wav").write_bytes(b"RIFF")
-
-    async def text_of(p, path, lang, stt=None):
-        return p["ref_text"]
-    monkeypatch.setattr("app.streamer.voice_ref.sample_text", text_of)
-
-    async def run(flag: bool) -> tuple[RecGpu, LiveSession, LivePipeline]:
-        p, sess, llm, tts, gpu, store = setup(monkeypatch, tmp_path, [PA], {"streamer_id": "st1", "voice_mode": "clone"},
-                                              v1_live_warmstart=flag)
-        prof = await store.insert("voice_profiles", {"display_name": "me", "consent_at": CONSENT, "ref_path": "ref.wav",
-                                                     "ref_text": "yeh meri awaaz hai dosto", "embedding": None})
-        sess.row["voice_profile_id"] = prof["id"]
-        monkeypatch.setattr("app.live.pipeline.get_gpu_voice", lambda *a: gpu)
-        monkeypatch.setattr("app.live.pipeline.get_stt", lambda *a: SilentSTT())
-        prefetch_stored_voice(sess)
-        await asyncio.sleep(0.05)
-        return gpu, sess, p
-
-    gpu, sess, p = await run(False)
-    assert sess.prefetch is None and gpu.refs == []                # flag off: nothing before the start
-    await p.start()
-    assert len(gpu.refs) == 1 and p.gpu_ready and p._gpu_stored
-    await p.stop()
-
-    gpu, sess, p = await run(True)
-    assert len(gpu.refs) == 1 and sess.prefetch is not None        # on its way before any sound
-    await p.start()
-    assert len(gpu.refs) == 1 and p.gpu_ready and p._gpu_stored and "stored_voice_ahead" in p.warm_ms
-    await p.stop()
-
-    p, sess, llm, tts, gpu, store = setup(monkeypatch, tmp_path, [PA], {"streamer_id": "st1", "voice_mode": "clone"},
-                                          v1_live_warmstart=True)
-    prof = await store.insert("voice_profiles", {"display_name": "x", "consent_at": None, "ref_path": "ref.wav",
-                                                 "ref_text": "yeh meri awaaz hai dosto", "embedding": None})
-    sess.row["voice_profile_id"] = prof["id"]
-    monkeypatch.setattr("app.live.pipeline.get_gpu_voice", lambda *a: gpu)
-    monkeypatch.setattr("app.live.pipeline.get_stt", lambda *a: SilentSTT())
-    prefetch_stored_voice(sess)
-    await p.start()
-    assert gpu.refs == [] and not p.gpu_ready                      # no consent on record: nothing is sent, ahead or not
     await p.stop()
 
 
@@ -434,7 +180,9 @@ def en_voices(tts: RecTTS) -> list[str]:
 
 async def test_one_english_voice_the_copy_for_every_line_also_one_with_no_time_to_spare(monkeypatch, tmp_path):
     p, sess, tts, qs = await english(monkeypatch, tmp_path, "copy", True)
-    assert p._en_mode == "copy" and p.warm_stats() == {"en_voice": "copy", "en_lines_asked_again": 0, "en_lines_then_spoken": 0}
+    w = p.warm_stats()
+    assert p._en_mode == "copy" and (w["en_voice"], w["en_lines_asked_again"], w["en_lines_then_spoken"]) == ("copy", 0, 0)
+    assert w["en_voice_choice"]["why"] == "setting V1_EN_VOICE=copy" and sess.row["en_voice"]["voice"] == "copy"
     await say(p, qs, ago_ms=5000)           # 1 s before it is due: v0 would take a stock voice here
     await say(p, qs, ago_ms=4500)
     await say(p, qs)
@@ -524,7 +272,8 @@ async def test_an_english_line_the_hosted_voice_refuses_is_asked_once_more_in_th
     assert len(pcm_of(first[EN])) > 0 and en_voices(tts) == ["refused", VOICE_BY_LANG[EN]]
     second = await say(p, qs)                   # refused twice: this line has no audio, and nothing else is tried
     assert len(pcm_of(second[EN])) == 0 and en_voices(tts)[2:] == ["refused", "refused"]
-    assert p.warm_stats() == {"en_voice": "stock", "en_lines_asked_again": 2, "en_lines_then_spoken": 1}
+    w = p.warm_stats()
+    assert (w["en_voice"], w["en_lines_asked_again"], w["en_lines_then_spoken"]) == ("stock", 2, 1)
     await p.stop()
     t = await stored(store := LocalStore(tmp_path / "db.json"))
     assert [t[k].get("tts_retry:en-IN") for k in sorted(t)] == [1, 1] and store is not None
@@ -553,7 +302,3 @@ async def test_the_english_flag_does_nothing_outside_a_gpu_engine_session_or_wit
     await p.stop()
 
 
-@pytest.mark.parametrize("lang", sorted(VOICE_BY_LANG))
-def test_every_language_has_a_stock_voice_for_either_speaker(lang):
-    for gender in ("male", "female", None):
-        assert warm.pick_stock(lang, gender)["voice"]

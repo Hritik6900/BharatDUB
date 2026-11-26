@@ -24,20 +24,21 @@ from app.providers.base import ProviderError
 from app.shared import audio_utils as au
 from app.shared import cache
 from app.studio.stages import fit
-from app.v1 import trace
+from app.v1 import lineguard, trace
 from app.v1.hq import glossary as hqgloss
 from app.v1.hq import normalise as hqnorm
 from app.v1.hq import review as hqreview
 from app.v1.hq import text as hqtext
 from app.v1.hq import voice as hqvoice
 from app.v1.stages import StageFailed, Stages
+from app.v1 import mode as v1mode
 
 log = logging.getLogger("studio.hq")
 STOCK_PACE_MS = 400.0     # ms a word assumed for a stock voice until it is measured in this job
 
 
 def is_hq(meta: dict[str, Any], settings: Any) -> bool:
-    return bool(settings.v1_studio_hq and meta.get("quality") == "hq")
+    return bool(v1mode.on("studio_hq", settings) and meta.get("quality") == "hq")
 
 
 def stages_for(job_id: str, engine: str | None) -> Stages:
@@ -118,7 +119,7 @@ async def phase_b(r: Any, ctx: Any, meta: dict[str, Any], st: Stages, langs: lis
     if not segs:
         return
     hq = meta.setdefault("hq", {})
-    if r.s.v1_hq_auto_glossary:
+    if v1mode.on("hq_auto_glossary", r.s):
         # Names, brands and repeated English terms of this video, found in its first hearing: this job's glossary.
         if "glossary_auto" not in hq:
             first = [s.get("src_text_raw") or s["src_text"] for s in segs]
@@ -162,7 +163,7 @@ async def phase_b(r: Any, ctx: Any, meta: dict[str, Any], st: Stages, langs: lis
             pace = float(r.s.gpu_voice_pace_ms or 450) if native else STOCK_PACE_MS
             src = [s["src_text"] for s, _ in todo]
             limits = [hqtext.word_limit(sl, s["end_s"] - s["start_s"], len(s["src_text"].split()), pace) for s, sl in todo]
-            extra = [f for f in ("v1_hq_normalise", "v1_hq_auto_glossary") if getattr(r.s, f)]
+            extra = [f"v1_{f}" for f in ("hq_normalise", "hq_auto_glossary") if v1mode.on(f, r.s)]
             if hqreview.required(r.s):   # HQ on means the review is on (hq/review.py)
                 extra.insert(0, "v1_hq_review")
             first = [s.get("src_text_raw") or s["src_text"] for s, _ in todo]
@@ -173,11 +174,19 @@ async def phase_b(r: Any, ctx: Any, meta: dict[str, Any], st: Stages, langs: lis
             if out is None or len(out) != len(src):
                 out = await translate_lines(r, ctx, st, src, limits, lang, glossary, native, hq, first=first)
                 cache.put_json("translate_hq", key, out)
-            for (s, _), line in zip(todo, out):
+
+            async def again(idx: list[int]) -> list[str]:
+                ctx.usage["llm_calls"] = ctx.usage.get("llm_calls", 0) + 1
+                return list(await st.llm("translate").translate_batch([src[i] for i in idx], lang, glossary))
+            # v1.2: the script guard and the content-shift check on the lines as they will be dubbed (after the
+            # review and the written-out numbers); app/v1/lineguard.py. None per line with both guards off.
+            out, verdicts = await r.guard_lines(ctx, lang, src, list(out), retranslate=again)
+            for (s, _), line, verdict in zip(todo, out, verdicts):
+                fields = {"text": line, **({"guard": lineguard.flag_fields(verdict)["guard"]} if verdict is not None else {})}
                 if s["id"] in existing:
-                    await r.store.update("translations", existing[s["id"]]["id"], {"text": line})
+                    await r.store.update("translations", existing[s["id"]]["id"], fields)
                 else:
-                    await r.store.insert("translations", {"segment_id": s["id"], "lang": lang, "text": line})
+                    await r.store.insert("translations", {"segment_id": s["id"], "lang": lang, **fields})
     r._write_meta(ctx.dir, meta)
 
 
@@ -187,7 +196,7 @@ async def translate_lines(r: Any, ctx: Any, st: Stages, src: list[str], limits: 
     s = r.s
     try:
         out = await hqtext.translate_timed(st, src, limits, lang, glossary, native,
-                                           terms=glossary if s.v1_hq_auto_glossary else None)
+                                           terms=glossary if v1mode.on("hq_auto_glossary", s) else None)
     except StageFailed:
         out = None
     ctx.usage["llm_calls"] = ctx.usage.get("llm_calls", 0) + 1
@@ -213,7 +222,7 @@ async def translate_lines(r: Any, ctx: Any, st: Stages, src: list[str], limits: 
                 r._warn(ctx, f"The {lang} translation was not reviewed ({stats['review']['error']})"[:300])
         else:
             out, stats["reviewed_changed"] = await hqtext.review(st, src, out, limits, lang, glossary, native)
-        if s.v1_hq_normalise and hqnorm.covered(lang):   # by rule first; the model only sees what the rules left
+        if v1mode.on("hq_normalise", s) and hqnorm.covered(lang):   # by rule first; the model only sees what the rules left
             out, stats["normalised_by_rule"] = hqnorm.spoken_lines(out, lang, native)
         out, stats["normalised"] = await hqtext.normalise(st, out, lang, native)
         ctx.usage["llm_calls"] = ctx.usage.get("llm_calls", 0) + 2
@@ -239,29 +248,63 @@ async def phase_c(r: Any, ctx: Any, meta: dict[str, Any], st: Stages, lang: str)
         tr = trs.get(seg["id"])
         if not tr:
             continue
+        chain = v1mode.on("voice_fallback", r.s)
+        no_voice: ProviderError | None = None
         async with r._stage(ctx, "voice", lang):
             try:
                 best, made, flag = await hqvoice.best_line(st, tr["text"], lang, vspec, slot_s, ref_wav, r.s,
                                                            ctx.usage, edited=bool(tr.get("edited")))
             except ProviderError as e:
-                if vspec["kind"] != "clone":
+                if vspec["kind"] != "clone" and not chain:
                     raise
-                # The copied voice failed for this line: the stock voice speaks it, as v0 does.
-                r._warn(ctx, f"Cloned voice failed for a {lang} line, used stock voice: {str(e)[:120]}")
-                from app.studio.stages.voice import stock_voice
-                best, made, flag = await hqvoice.best_line(st, tr["text"], lang, stock_voice(lang), slot_s, None,
-                                                           r.s, ctx.usage, edited=bool(tr.get("edited")))
+                # The voice failed for this line. As v0: a copied voice gives way to the stock voice. v1.2 auto
+                # mode: every voice that is left is asked, in the order of app/v1/voicechain.py; a line that none
+                # of them makes is marked and the job goes on.
+                from app.v1 import voicechain
+                tried = [{"voice": "copy" if vspec["kind"] == "clone" else "stock", "error": str(e)[:120]}]
+                others = [("stock", voicechain.stock(lang))] if vspec["kind"] == "clone" else []
+                if chain and voicechain.stock_alt(lang) is not None and voicechain.stock_alt(lang) != vspec:
+                    others.append(("stock_alt", voicechain.stock_alt(lang)))
+                for name, other in others:
+                    try:
+                        best, made, flag = await hqvoice.best_line(st, tr["text"], lang, other, slot_s, None,
+                                                                   r.s, ctx.usage, edited=bool(tr.get("edited")))
+                        r._warn(ctx, f"Cloned voice failed for a {lang} line, used stock voice: {str(e)[:120]}"
+                                if name == "stock" and vspec["kind"] == "clone" and not chain else
+                                f"A {lang} line was refused by the {tried[0]['voice']} voice ({tried[0]['error']}) "
+                                f"and is spoken by the {name} voice.")
+                        break
+                    except ProviderError as e2:
+                        if not chain:
+                            raise
+                        tried.append({"voice": name, "error": str(e2)[:120]})
+                else:
+                    from app.studio.stages.voice import NoVoice
+                    no_voice = NoVoice(tried)
+        if no_voice is not None:
+            await r._unspoken(ctx, lang, seg, tr, no_voice)
+            flagged += 1
+            continue
         async with r._stage(ctx, "fit", lang):
             out = lines_dir / f"{lang}_{seg['idx']:03}.wav"
             speed = await asyncio.to_thread(fit.fit_clip, Path(best.path), slot_s, out, max_speed)
+        # A line the guards flagged before the voice stays flagged, with both reasons.
+        gwhy = str((tr.get("guard") or {}).get("why") or "")
+        short = await r._shortened_checked(ctx, lang, seg.get("src_text") or "", best.text) \
+            if best.text != tr["text"] and not tr.get("edited") else {}
+        if short.get("flag_reason"):
+            gwhy = "; ".join(x for x in (gwhy, short["flag_reason"].removeprefix("guard: ")) if x)
+        why = "; ".join(x for x in ("; ".join(best.why) if flag else "", f"guard: {gwhy}" if gwhy else "") if x)
+        flag = bool(flag or gwhy)
         flagged += int(flag)
         fields = {"text": best.text, "audio_path": str(out.relative_to(ctx.dir)), "fit_speed": speed,
-                  "flagged": flag, "flag_reason": "; ".join(best.why) if flag else "",
+                  "flagged": flag, "flag_reason": why, "unspoken": False,
+                  **({"guard_shortened": short["guard_shortened"]} if short else {}),
                   "qa": {"backcheck": best.backcheck, "similarity": best.similarity, "by": best.scored_by,
                          "provider": best.provider, **({"passed_over": best.passed_over} if best.passed_over else {})},
-                  "alts": [v.public(heard=bool(r.s.v1_hq_judge or r.s.v1_hq_calibrate)) for v in made], "picked": best.idx}
+                  "alts": [v.public(heard=bool(v1mode.on("hq_judge", r.s) or v1mode.on("hq_calibrate", r.s))) for v in made], "picked": best.idx}
         await r.store.update("translations", tr["id"], fields)
-        if r.s.v1_trace:
+        if v1mode.on("trace", r.s):
             trace.studio_line(ctx.job_id, lang, seg["idx"], mode="studio_hq", words=len(best.text.split()),
                               slot_s=round(slot_s, 3), dur_s=round(best.dur_s, 3), speed=speed,
                               native_speed=best.engine_speed, tts=best.provider, clone=vspec["kind"] == "clone",

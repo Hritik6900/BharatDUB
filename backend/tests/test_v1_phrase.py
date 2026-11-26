@@ -1,4 +1,4 @@
-"""v1 Live phrase logic: dynamic phrase sizes, short lines joined to the next."""
+"""v1 Live phrase logic: short lines joined to the next (the dynamic phrase sizes went in v1.2)."""
 import asyncio
 
 import pytest
@@ -9,37 +9,7 @@ from app.live.pipeline import LivePipeline
 from app.live.session import LiveSession
 from app.providers.base import TranscriptEvent
 from app.providers.mock import MockTTS
-from app.v1.phrase import DynamicPhraser, ShortLineMerger, n_words, same_words
-
-WORDS = "aaj hum ek naya game khelne wale hain aur ye bahut mazedaar hoga doston kyunki isme naye map aaye hain".split()
-
-
-def grow(phraser: Phraser, words: list[str], uid: str = "u") -> list[str]:
-    """Feed the utterance one word at a time, as settled text, and collect the phrases that come out."""
-    out = []
-    for i in range(1, len(words) + 1):
-        text = " ".join(words[:i])
-        cut = phraser.partial(uid, text, text, now_ms=1000 + 300 * i)
-        if cut:
-            out.append(cut[0])
-    return out
-
-
-def test_first_phrase_is_short_and_later_ones_are_long():
-    got = grow(DynamicPhraser((4, 6), (8, 12)), WORDS)
-    assert 4 <= len(got[0].split()) <= 6                      # early first audio
-    assert all(8 <= len(p.split()) <= 12 for p in got[1:])    # then lines the voice speaks well
-    v0 = grow(Phraser(6, 12), WORDS)
-    assert len(got[0].split()) < len(v0[0].split())           # v0 waits for six words before its first phrase
-
-
-def test_first_phrase_is_only_the_first_of_the_session():
-    p = DynamicPhraser((4, 6), (8, 12))
-    first = grow(p, WORDS[:7], uid="a")
-    assert len(first) == 1 and p.given == 1
-    p.reset()                                                 # a reconnect of the recogniser: still not "first"
-    assert grow(p, WORDS[:7], uid="b") == []                  # seven words are not enough for a later phrase
-
+from app.v1.phrase import ShortLineMerger, n_words, same_words
 
 def chunk(seq: int, text: str, start: int = 0, end: int = 0) -> Chunk:
     return Chunk(seq, text, start, end or start + 500, end or start + 600)
@@ -120,22 +90,6 @@ async def captions(q: asyncio.Queue, wait: float = 0.1) -> list[str]:
     return out
 
 
-async def test_pipeline_joins_a_one_word_line_to_the_next(monkeypatch):
-    p, llm, q = pipeline(monkeypatch, v1_phrase_dynamic=True)
-    p._on_stt(TranscriptEvent(kind="final", text="Kaise?", utterance_id="a", audio_duration_ms=400))
-    assert await captions(q) == [] and llm.calls == []                   # held, nothing translated yet
-    p._on_stt(TranscriptEvent(kind="final", text="aaj hum naya game khelenge.", utterance_id="b", audio_duration_ms=2000))
-    assert await captions(q) == ["ta-IN:Kaise? aaj hum naya game khelenge."]
-    assert p._merger.merged == 1
-
-
-async def test_pipeline_without_the_flag_sends_the_short_line_alone(monkeypatch):
-    p, llm, q = pipeline(monkeypatch, v1_phrase_dynamic=False)
-    assert p._merger is None and type(p.phraser) is Phraser
-    p._on_stt(TranscriptEvent(kind="final", text="Kaise?", utterance_id="a", audio_duration_ms=400))
-    assert await captions(q) == ["ta-IN:Kaise?"]
-
-
 async def test_late_line_is_shortened_not_skipped(monkeypatch):
     p, llm, q = pipeline(monkeypatch, v1_live_late_shorten=True)
     text = "ஒன்று இரண்டு மூன்று நான்கு ஐந்து ஆறு ஏழு எட்டு ஒன்பது பத்து"
@@ -165,20 +119,38 @@ def test_stock_default_and_session_glossary(monkeypatch, tmp_path):
     assert c.post("/api/live/sessions", json={"target_langs": ["ta-IN"], "voice_from_stream": True}).status_code == 201
 
 
-@pytest.mark.parametrize("flag", ["v1_phrase_dynamic"])
-def test_flags_default_off(flag):
-    assert getattr(get_settings(), flag) is False
 
 
-def test_removed_flags_are_gone_and_an_env_file_that_still_sets_them_is_read(tmp_path):
-    """v1.1 WS6 took V1_SPEC_TRANSLATE and V1_LLM_PREFIX_CACHE out. An env file written before that must still load."""
+async def test_pipeline_in_manual_mode_never_joins_a_short_line(monkeypatch):
+    """Joining short lines belongs to dense speech in auto mode; in manual mode there is no merger at all."""
+    p, llm, q = pipeline(monkeypatch)
+    assert p._merger is None and type(p.phraser) is Phraser
+    p._on_stt(TranscriptEvent(kind="final", text="Kaise?", utterance_id="a", audio_duration_ms=400))
+    assert await captions(q) == ["ta-IN:Kaise?"]
+
+
+REMOVED = ("v1_spec_translate", "v1_spec_stable_ms", "v1_llm_prefix_cache", "v1_phrase_dynamic", "v1_live_ratectrl",
+           "v1_live_native_speed", "v1_live_warmstart", "v1_first_phrase_min_words", "v1_first_phrase_max_words",
+           "v1_phrase_min_words", "v1_phrase_max_words", "v1_merge_under_words", "v1_native_max", "v1_native_floor_ms",
+           "v1_warm_fade_ms", "v1_warm_level_lines")
+
+
+@pytest.mark.parametrize("v1_mode", ["manual", "auto"])
+def test_removed_flags_are_gone_and_an_env_file_that_still_sets_them_is_read(tmp_path, monkeypatch, v1_mode):
+    """v1.1 WS6 took V1_SPEC_TRANSLATE and V1_LLM_PREFIX_CACHE out, v1.2 took V1_PHRASE_DYNAMIC, V1_LIVE_RATECTRL,
+    V1_LIVE_NATIVE_SPEED and V1_LIVE_WARMSTART. An env file written before that must still load, in either mode,
+    and the old names switch nothing on."""
     from app.config import Settings
     from app.v1.flags import FLAGS, flags
+    monkeypatch.setenv("V1_MODE", v1_mode)
     env = tmp_path / ".env"
-    env.write_text("\n".join(["V1_SPEC_TRANSLATE=true", "V1_SPEC_STABLE_MS=250", "V1_LLM_PREFIX_CACHE=true",
-                              "V1_PHRASE_DYNAMIC=false", ""]))
+    env.write_text("\n".join([f"{name.upper()}=true" if "words" not in name and "_ms" not in name and "max" not in name
+                              else f"{name.upper()}=7" for name in REMOVED] + [""]))
     s = Settings(_env_file=env)
-    for name in ("v1_spec_translate", "v1_spec_stable_ms", "v1_llm_prefix_cache"):
-        assert not hasattr(s, name) and name not in FLAGS
-    assert "V1_SPEC_TRANSLATE" not in flags(s) and "V1_LLM_PREFIX_CACHE" not in flags(s)
-    assert not any(flags(s)[k] for k in flags(s) if k != "V1_STORE")      # the unknown names switch nothing on
+    assert s.v1_mode == v1_mode
+    for name in REMOVED:
+        assert not hasattr(s, name) and name not in FLAGS and name.upper() not in flags(s)
+    base = Settings(_env_file=None)
+    assert flags(s) == flags(base)                                        # exactly what it is without those lines
+    if v1_mode == "manual":
+        assert not any(v for k, v in flags(s).items() if k.startswith("V1_") and k not in ("V1_STORE", "V1_MODE", "V1_HQ_ADAPTIVE"))

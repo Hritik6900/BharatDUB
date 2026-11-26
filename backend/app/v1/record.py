@@ -33,6 +33,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from app.config import Settings, get_settings
+from app.v1 import mode as v1mode
 
 log = logging.getLogger("v1.record")
 router = APIRouter()
@@ -47,7 +48,7 @@ def folder(s: Settings | None = None) -> Path:
 
 def wanted(row: dict[str, Any], s: Settings | None = None) -> bool:
     """Both switches: the flag and the session's own ask."""
-    return bool((s or get_settings()).v1_live_record and row.get("record"))
+    return bool(v1mode.on("live_record", s or get_settings()) and row.get("record"))
 
 
 class Recorder:
@@ -220,7 +221,7 @@ def sweep_now() -> list[str]:
 @router.get("/api/v1/recordings")
 async def list_recordings() -> dict[str, Any]:
     s = get_settings()
-    return {"keep_days": int(s.v1_record_keep_days), "recording_allowed": bool(s.v1_live_record), "recordings": listing(s)}
+    return {"keep_days": int(s.v1_record_keep_days), "recording_allowed": bool(v1mode.on("live_record", s)), "recordings": listing(s)}
 
 
 @router.delete("/api/v1/recordings/{session_id}")

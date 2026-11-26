@@ -118,6 +118,9 @@ class MockLLM:
             return " ".join(text.split()[:max_words])
         return text[: max(8, int(max_seconds / SEC_PER_CHAR))]
 
+    async def judge_lines(self, pairs: list[tuple[str, str]], target: str) -> list[dict[str, bool]]:
+        return [{"shift": False, "lost": False} for _ in pairs]
+
 
 class MockTTS:
     def __init__(self, sample_rate: int = 44100) -> None:

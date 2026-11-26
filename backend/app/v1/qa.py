@@ -12,6 +12,7 @@ import httpx
 
 from app.config import Settings, get_settings
 from app.providers.base import ProviderError
+from app.v1 import mode as v1mode
 
 
 HEARD_RULE = "spaces-aside-1"   # which rule a stored score was worked out with (see heard_share)
@@ -32,7 +33,7 @@ def _words(text: str, nfc: bool = False) -> list[str]:
 
 
 def rule_now(settings: Settings | None = None) -> str:
-    return HEARD_RULE_NFC if (settings or get_settings()).v1_hq_judge else HEARD_RULE
+    return HEARD_RULE_NFC if v1mode.on("hq_judge", settings or get_settings()) else HEARD_RULE
 
 
 def heard_share(said: str, heard: str, rule: str = HEARD_RULE) -> float:

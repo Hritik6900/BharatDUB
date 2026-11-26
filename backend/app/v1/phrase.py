@@ -1,28 +1,15 @@
-"""Live phrase logic of v1, each part behind its own flag and free of I/O so it can be tested alone.
+"""Live phrase logic of v1, free of I/O so it can be tested alone.
 
-  DynamicPhraser   `V1_PHRASE_DYNAMIC`: the session's first phrase is short (4-6 words) so the first dubbed audio
-                   comes early; later phrases are longer (8-12 words), which the voice speaks better.
-  ShortLineMerger  `V1_PHRASE_DYNAMIC`: a line of fewer than 3 words waits for the next line and goes out as part
-                   of it (the voice engine swallows very short lines); it goes out alone when nothing follows.
+  ShortLineMerger  dense speech (auto budget): a line of fewer than 3 words waits for the next line and goes out
+                   as part of it (the voice engine swallows very short lines); alone when nothing follows.
+  same_words       two transcripts of the same speech (the HQ transcript step uses it).
+
+(`DynamicPhraser`, the short first phrase of `V1_PHRASE_DYNAMIC`, was removed in v1.2: five points fewer phrases
+on time on dense speech in its measurement.)
 """
 from dataclasses import dataclass
 
-from app.live.assembler import Chunk, Phraser, _bare
-
-
-class DynamicPhraser(Phraser):
-    def __init__(self, first: tuple[int, int] = (4, 6), later: tuple[int, int] = (8, 12)) -> None:
-        super().__init__(*first)
-        self.first_bounds, self.later_bounds = first, later
-        self.given = 0   # phrases cut so far in this session
-
-    def partial(self, uid: str | None, stable: str, full: str, now_ms: int,
-                t0: int | None = None) -> tuple[str, int, int] | None:
-        self.min_words, self.max_words = self.first_bounds if self.given == 0 else self.later_bounds
-        cut = super().partial(uid, stable, full, now_ms, t0)
-        if cut:
-            self.given += 1
-        return cut
+from app.live.assembler import Chunk, _bare
 
 
 def n_words(text: str) -> int:

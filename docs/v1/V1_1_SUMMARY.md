@@ -1,5 +1,9 @@
 # v1.1 summary (24-25 Nov 2026)
 
+> **After this summary, v1.2 Part 2 (26 Nov 2026):** v1 runs in auto mode (`V1_MODE=auto`); the flags of section 3
+> are read in manual mode only. `V1_LIVE_RATECTRL`, `V1_LIVE_NATIVE_SPEED`, `V1_LIVE_WARMSTART` and
+> `V1_PHRASE_DYNAMIC` were removed. See `RUNBOOK.md` section 3 and `PROGRESS.md` "v1.2 Part 2".
+
 What v1.1 added to v1, what each part measured, which flags to switch on, what waits for you, and the commands.
 Every number here is quoted from the report named beside it; nothing was measured for this page. Where a target
 was not reached it says so. Detail per workstream: `PROGRESS.md`. Code defaults: every flag off, except
@@ -116,9 +120,9 @@ of `backend/.env.example`.
 |---|---|---|
 | `V1_BREAKER` + `V1_LIVE_DEGRADE` | on (your call) | 4 of 22 phrases dubbed through a stall without them, all with them |
 | `V1_LIVE_BUDGET` | on for Punjabi-like languages; your call for Tamil | within 1 s 86.5% to 92.3%; Tamil lost meaning in 7 of 20 lines read |
-| `V1_LIVE_RATECTRL` | off | no gain over the budget alone; nobody has heard 1.4x |
-| `V1_LIVE_NATIVE_SPEED` | off | no timing number moved |
-| `V1_LIVE_WARMSTART` | off | no proven gain |
+| `V1_LIVE_RATECTRL` | removed in v1.2 (was: off) | no gain over the budget alone; nobody has heard 1.4x |
+| `V1_LIVE_NATIVE_SPEED` | removed in v1.2 (was: off) | no timing number moved |
+| `V1_LIVE_WARMSTART` | removed in v1.2 (was: off) | no proven gain |
 | `V1_EN_SINGLE_VOICE` | on once you chose `V1_EN_VOICE` (checklist item 22) | removes the second voice; `copy` costs timing, `stock` is not your voice |
 | `V1_HQ_JUDGE` | on whenever `V1_STUDIO_HQ` is on | corrected count |
 | `V1_HQ_REVIEW` | nothing to set: since 26 Nov 2026 an HQ job is always reviewed, whatever this flag says (enforced in code, tested) | review is what keeps the transcript intact: 25 of 38 lines damaged without it, 0 with it |

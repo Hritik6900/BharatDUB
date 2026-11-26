@@ -13,6 +13,7 @@ from typing import Any, TypeVar
 from app.providers.base import ProviderError, STTResult, VoiceSpec
 from app.v1 import trace
 from app.v1.router import Router, get_router
+from app.v1 import mode as v1mode
 
 log = logging.getLogger("bharatdub.stages")
 T = TypeVar("T")
@@ -66,7 +67,7 @@ class Stages:
 
     def judges(self, lang: str) -> list[str]:
         """Who hears a dubbed line of this language back, in order (the `score` list unless `V1_HQ_JUDGE` is on)."""
-        if self.r.s.v1_hq_judge:
+        if v1mode.on("hq_judge", self.r.s):
             from app.v1.hq import judge
             return judge.chain(self, lang)
         return self.names("score")
@@ -194,7 +195,7 @@ class Stages:
     async def score(self, wav: Path, text: str, lang: str, ref_wav: Path | None = None) -> dict[str, Any]:
         """How good a dubbed line is: `backcheck` (share of its words heard back, 0-1), `similarity` (its voice
         against the speaker's, when a provider measures it, else None), `heard` and `by` (who scored)."""
-        if self.r.s.v1_hq_judge:   # the best speech-to-text per language, the next one when it fails (hq/judge.py)
+        if v1mode.on("hq_judge", self.r.s):   # the best speech-to-text per language, the next one when it fails (hq/judge.py)
             from app.v1.hq import judge
             return await judge.score(self, wav, text, lang, ref_wav)
         async def call(name: str) -> dict[str, Any]:

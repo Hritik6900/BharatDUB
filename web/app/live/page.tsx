@@ -137,8 +137,11 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
   const [voice, setVoice] = useState(STREAM);
   const [voiceConsent, setVoiceConsent] = useState(false);
   const [engine, setEngine] = useState<Engine>("cloud");
-  // v1.1: keeping a session's dub on the server. Offered only when the server has V1_LIVE_RECORD on; never ticked by itself.
+  // Keeping a session's dub on the server: offered only when the server allows it; never ticked by itself.
   const [canRecord, setCanRecord] = useState(false);
+  // The server dubs a stream without a streamer profile in stock voices only (always so in its automatic mode):
+  // then the choice "the voice on this stream" and its consent tick would do nothing, and are not shown.
+  const [stockOnly, setStockOnly] = useState(false);
   const [record, setRecord] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
@@ -149,7 +152,11 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
   }, []);
   useEffect(() => {
     api<Record<string, unknown>>("/api/v1/flags")
-      .then((f) => setCanRecord(f.V1_LIVE_RECORD === true))
+      .then((f) => {
+        setCanRecord(f.V1_LIVE_RECORD === true);
+        setStockOnly(f.V1_LIVE_STOCK_DEFAULT === true);
+        if (f.V1_LIVE_STOCK_DEFAULT === true) setVoice("");
+      })
       .catch(() => setCanRecord(false));
     loadKept();
   }, [loadKept]);
@@ -199,6 +206,15 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
               {TARGET_LANGS.map((l) => <LanguageChip key={l.code} code={l.code} selected={langs.includes(l.code)} onClick={() => toggle(l.code)} />)}
             </div>
           </fieldset>
+          {stockOnly ? (
+            <section aria-labelledby="voice-h">
+              <h2 id="voice-h" className="text-lg font-medium tracking-[-0.01em]">Voice</h2>
+              <p className="mt-2 text-[0.95rem] text-muted">
+                This stream is dubbed in a ready-made voice for each language. A copied voice is only for a streamer who recorded
+                their own: <a href="/streamer" className="underline">Streamer</a> records your voice once, with your consent, and uses it from the first sentence.
+              </p>
+            </section>
+          ) : (
           <fieldset>
             <legend className="text-lg font-medium tracking-[-0.01em]">Voice</legend>
             <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
@@ -214,7 +230,8 @@ function CreateForm({ onCreated }: { onCreated: (s: Saved) => void }) {
               ))}
             </div>
           </fieldset>
-          {voice === STREAM && (
+          )}
+          {!stockOnly && voice === STREAM && (
             <div className="tex-tint rounded-[14px] border border-line p-4">
               <label className="flex cursor-pointer items-start gap-3">
                 <input type="checkbox" checked={voiceConsent} onChange={(e) => setVoiceConsent(e.target.checked)} className="mt-1 size-4" />

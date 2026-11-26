@@ -35,6 +35,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.config import get_settings
+from app.v1 import mode as v1mode
 
 router = APIRouter()
 ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -149,7 +150,7 @@ def summary() -> dict[str, Any]:
 
 # ---------- routes ----------
 def _on() -> None:
-    if not get_settings().v1_listen_test:
+    if not v1mode.on("listen_test", get_settings()):
         raise HTTPException(404, "The listening test is switched off (V1_LISTEN_TEST).")
 
 

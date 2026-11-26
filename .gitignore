@@ -35,3 +35,7 @@ data-v1/
 # v1 deploy kit: environments, pid files and logs it makes beside the servers
 gpu_engine_v1/run/
 gpu_engine_v1/.venvs/
+
+# v1.2: the per-request, per-phrase and trace records stay on this machine; only the index tables (CSV) and the
+# stream watcher's files are tracked. (logs/README.md)
+logs/**/*.jsonl

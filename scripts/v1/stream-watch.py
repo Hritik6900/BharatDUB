@@ -17,7 +17,7 @@ Lines about the link to the GPU machine (from a backend with V1_BREAKER on, aske
 
 A session's summary also has, per language, the dub's length against its slot (dur_ratio p50 / p90), the backlog
 (how far the dub queue was behind the video, p50 / p95) and what the budget controller did, when the backend
-stores them (v1.1: with the trace or V1_LIVE_BUDGET / V1_LIVE_RATECTRL on).
+stores them (always in auto mode; in manual mode with the trace or V1_LIVE_BUDGET on).
 """
 from __future__ import annotations
 

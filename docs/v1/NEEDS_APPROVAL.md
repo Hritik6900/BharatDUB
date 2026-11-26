@@ -574,6 +574,8 @@ curl.exe -s http://127.0.0.1:9020/v1/models      # answers again after a minute 
 
 ## 19. What the session-start measurement could not cover (LAPTOP + YOU) (was item 21)
 
+- **v1.2 note:** `V1_LIVE_WARMSTART` was removed with its code in v1.2 Part 2 (ADR-0037), so part (a) of this item
+  and its off/on steps no longer apply; the male-speaker and stock-voice parts stand without the flag.
 - **What:** (a) Streamer Mode with a recorded voice: `V1_LIVE_WARMSTART` sends the stored voice to the engines when
   the session is created and speaks one short line per language on every engine process; tested with a fake
   engine only. (b) A male speaker: the eight male stock voices answer on the hosted service, but no session with
@@ -599,7 +601,7 @@ curl.exe -s http://127.0.0.1:9020/v1/models      # answers again after a minute 
 - **Card:** nothing new is loaded (the engines that already run).
 - **Verify:** `first.md` in each folder: first audio p50 / p95 of the first 10 phrases, lines in a stock voice
   (with a recorded voice: 0 expected in both).
-- **Roll back:** nothing to undo; `V1_LIVE_WARMSTART=false`.
+- **Roll back:** nothing to undo.
 
 ---
 
@@ -618,7 +620,8 @@ curl.exe -s http://127.0.0.1:9020/v1/models      # answers again after a minute 
   ```powershell
   # two comparison backends, each in its own window (they stop with Ctrl+C)
   powershell -File scripts\v1\ab-server.ps1 -Port 8111 -Name m-off    -Flags "LIVE_SYNC_ADAPT=false"
-  powershell -File scripts\v1\ab-server.ps1 -Port 8113 -Name m-ctl    -Flags "LIVE_SYNC_ADAPT=false,V1_LIVE_BUDGET=true,V1_LIVE_RATECTRL=true"
+  # v1.2: V1_LIVE_RATECTRL no longer exists; the controller runs in auto mode only: -Mode auto instead of the flags
+  powershell -File scripts\v1\ab-server.ps1 -Port 8113 -Name m-ctl    -Mode auto -Flags "LIVE_SYNC_ADAPT=false" -Overrides "live_stock_default=off"
   cd backend
   .venv\Scripts\python.exe -m eval.live_replay ..\data-v1\eval\dense\<file> --out ..\data-v1\eval\ws1\<name> `
       --target off=http://127.0.0.1:8111 --target ctl=http://127.0.0.1:8113 --runs 3 --langs pa-IN,ta-IN
@@ -657,8 +660,8 @@ curl.exe -s http://127.0.0.1:9020/v1/models      # answers again after a minute 
   mid-session, which is what the flag exists to stop; it needs your yes.
 - **Commands (laptop only, no VM; costs hosted calls for the minutes spoken):**
   ```powershell
-  powershell -File scripts\v1\ab-server.ps1 -Port 8112 -Name en-copy  -Flags "V1_LIVE_WARMSTART=true,V1_EN_SINGLE_VOICE=true,V1_EN_VOICE=copy"
-  powershell -File scripts\v1\ab-server.ps1 -Port 8113 -Name en-stock -Flags "V1_LIVE_WARMSTART=true,V1_EN_SINGLE_VOICE=true,V1_EN_VOICE=stock"
+  powershell -File scripts\v1\ab-server.ps1 -Port 8112 -Name en-copy  -Flags "V1_EN_SINGLE_VOICE=true,V1_EN_VOICE=copy"
+  powershell -File scripts\v1\ab-server.ps1 -Port 8113 -Name en-stock -Flags "V1_EN_SINGLE_VOICE=true,V1_EN_VOICE=stock"
   cd backend
   .venv\Scripts\python.exe -m eval.live_replay ..\data-v1\eval\reel25.mp4 --out ..\data-v1\eval\ws2\hear `
       --target copy=http://127.0.0.1:8112 --target stock=http://127.0.0.1:8113 --runs 1 --loops 8 --langs en-IN,pa-IN --keep-audio

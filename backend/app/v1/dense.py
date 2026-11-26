@@ -8,9 +8,14 @@ is longer than its source slot, so every line starts later than the one before. 
   ExpansionModel    per language and kind of voice: ms of dubbed speech per target letter, per target word and
                     per source word, as a running average over the lines spoken (seeded from stored history).
                     It turns a slot (ms) into a length (words and letters), and a text into an expected duration.
-  RateController    `V1_LIVE_RATECTRL`: a PI controller on the backlog (how far the dub queue is behind the video)
-                    that scales the budget of the next phrases (1.0 down to `min_scale`) and lets go again.
+  RateController    a PI controller on the backlog (how far the dub queue is behind the video) that scales the
+                    budget of the next phrases (1.0 down to `min_scale`) and lets go again. Since v1.2 it has no
+                    switch of its own: it runs only inside the auto budget.
   SpeakingShare     share of the last 30 s the speaker was talking; over 70% is "dense" (until it falls under 60%).
+  WordRate          v1.2: source words a second over the last 30 s, the second sign of dense speech.
+  AutoGate          v1.2 auto mode: per language, whether the budget applies now (behind, long lines, or dense).
+  MeaningRate       v1.2 auto mode: per language, the share of judged lines that lost meaning and the budget
+                    steps that follow from it (the judging itself is app/v1/meaning.py).
 
 Where v0 already had a word limit (`live_length_budget`: words = source words x speaker pace x 1.15 / dub pace per
 word), `V1_LIVE_BUDGET` replaces it for the phrases it can plan: the slot is the phrase's own measured span, the
@@ -190,3 +195,158 @@ def shorter_words(words: int, est_ms: float, target_ms: float) -> int:
 
 def dur_ratio(dub_ms: float, slot_ms: float) -> float:
     return round(dub_ms / max(300.0, slot_ms), 3)
+
+
+# ---------- v1.2 auto budget ----------
+class WordRate:
+    """Source words a second over the last `window_ms`, pauses included; "fast" over `on`, until under `off`."""
+
+    def __init__(self, window_ms: int = 30000, on: float = 4.0, off: float = 3.2, min_ms: int = 15000) -> None:
+        self.window_ms, self.on, self.off, self.min_ms = window_ms, on, off, min_ms
+        self._lines: deque[tuple[int, int]] = deque()   # (end of the phrase, its words)
+        self._first: int | None = None
+        self._fast = False
+
+    def add(self, start_ms: int, end_ms: int, words: int) -> None:
+        self._lines.append((end_ms, words))
+        self._first = start_ms if self._first is None else min(self._first, start_ms)
+
+    def rate(self, now_ms: int) -> float | None:
+        if self._first is None or now_ms - self._first < self.min_ms:
+            return None
+        lo = max(self._first, now_ms - self.window_ms)
+        while self._lines and self._lines[0][0] <= lo:
+            self._lines.popleft()
+        return sum(w for _, w in self._lines) / max(1.0, (now_ms - lo) / 1000)
+
+    def fast(self, now_ms: int) -> bool:
+        r = self.rate(now_ms)
+        if r is None:
+            return False
+        if r > self.on:
+            self._fast = True
+        elif r < self.off:
+            self._fast = False
+        return self._fast
+
+
+@dataclass
+class AutoGate:
+    """One language's answer to "does the budget apply now?" (v1.2 auto mode).
+
+    On when the dub is behind (running mean of the backlog at its last lines over `behind_on_ms`), when its lines
+    come out longer than their slots (running mean of dur_ratio over `ratio_on`), or when speech is dense (the
+    session's speaking share or word rate, each with its own two thresholds). Off again only when none of the
+    three holds any more, by the lower thresholds, for `calm_lines` lines in a row, and not before `min_on_ms`:
+    two thresholds, a count and a minimum time, so it does not flap. While off the translator is asked for the
+    full line."""
+
+    behind_on_ms: float = 500.0
+    behind_off_ms: float = 200.0
+    ratio_on: float = 1.15
+    ratio_off: float = 1.05
+    min_on_ms: int = 15000
+    calm_lines: int = 4
+    alpha: float = 0.4
+    on: bool = False
+    why: str = ""
+    backlog: float | None = None     # running means
+    ratio: float | None = None
+    since_ms: int = 0
+    _calm: int = field(default=0, repr=False)
+
+    def update(self, now_ms: int, *, backlog_ms: float | None = None, dur_ratio: float | None = None,
+               dense: bool = False) -> tuple[bool, str] | None:
+        """Called after every line of the language (with its backlog and, when it was spoken, its dur_ratio) and
+        with every phrase of the session (`dense` only). Returns (on, why) when the answer changed."""
+        if backlog_ms is not None:
+            self.backlog = backlog_ms if self.backlog is None else self.backlog + self.alpha * (backlog_ms - self.backlog)
+        if dur_ratio is not None:
+            self.ratio = dur_ratio if self.ratio is None else self.ratio + self.alpha * (dur_ratio - self.ratio)
+        want = ("behind" if self.backlog is not None and self.backlog >= self.behind_on_ms else
+                "long" if self.ratio is not None and self.ratio >= self.ratio_on else
+                "dense" if dense else "")
+        if not self.on:
+            if want:
+                self.on, self.why, self.since_ms, self._calm = True, want, now_ms, 0
+                return True, want
+            return None
+        still = bool(want or dense or (self.backlog is not None and self.backlog > self.behind_off_ms)
+                     or (self.ratio is not None and self.ratio > self.ratio_off))
+        if still:
+            self._calm = 0
+            return None
+        if backlog_ms is not None:      # only a line of this language counts towards "calm"
+            self._calm += 1
+        if self._calm >= self.calm_lines and now_ms - self.since_ms >= self.min_on_ms:
+            self.on, self.why, self._calm = False, "", 0
+            return False, "in step"
+        return None
+
+
+class MeaningRate:
+    """One language's share of judged lines that lost meaning, and the budget steps that follow from it.
+
+    Only lines that were translated under the budget count towards the rate (the others say nothing about it).
+    Over `max_rate` on at least `min_samples` judged lines: one step looser (`steps` + 1, each step gives the
+    budget more of the slot; at `max_steps` the language is translated in full). After a step the rate is
+    measured afresh. At or under `low_rate` on `min_samples` new lines, with the dub behind, and not sooner than
+    `tighten_after_s` after the last step: one step tighter. At `max_steps` nothing is budgeted, so nothing can be
+    judged: after `tighten_after_s` with the dub behind it goes back one step on trial."""
+
+    def __init__(self, window: int = 12, min_samples: int = 6, max_rate: float = 0.25, low_rate: float = 0.10,
+                 max_steps: int = 3, tighten_after_s: float = 120.0) -> None:
+        self.window, self.min_samples = max(1, window), max(1, min_samples)
+        self.max_rate, self.low_rate, self.max_steps, self.tighten_after_s = max_rate, low_rate, max_steps, tighten_after_s
+        self.steps = 0
+        self.judged = self.lost = self.shifted = 0          # the whole session, every judged line
+        self.judged_budgeted = self.lost_budgeted = 0
+        self._recent: deque[bool] = deque(maxlen=self.window)   # budgeted lines since the last step: lost?
+        self._last_step_s = 0.0
+
+    def rate(self) -> float | None:
+        """Share of the last judged budgeted lines that lost meaning; None before `min_samples`."""
+        return sum(self._recent) / len(self._recent) if len(self._recent) >= self.min_samples else None
+
+    def add(self, *, budgeted: bool, lost: bool, shift: bool, now_s: float, behind: bool) -> dict[str, Any] | None:
+        """One judged line. Returns the adjustment it caused, if any: {was, steps, why, rate, n}."""
+        self.judged += 1
+        self.lost += int(lost)
+        self.shifted += int(shift)
+        if budgeted:
+            self.judged_budgeted += 1
+            self.lost_budgeted += int(lost)
+            if self.steps < self.max_steps:   # at the last step nothing is budgeted: a late verdict is of an older line
+                self._recent.append(bool(lost))
+        return self._adjust(now_s, behind)
+
+    def tick(self, now_s: float, behind: bool) -> dict[str, Any] | None:
+        """Without a new judged line: the trial step back from "translated in full"."""
+        return self._adjust(now_s, behind) if self.steps >= self.max_steps else None
+
+    def _adjust(self, now_s: float, behind: bool) -> dict[str, Any] | None:
+        rate, n, was = self.rate(), len(self._recent), self.steps
+        why = ""
+        if rate is not None and rate > self.max_rate and self.steps < self.max_steps:
+            self.steps += 1
+            why = f"{rate:.0%} of {n} judged lines lost meaning (limit {self.max_rate:.0%}): looser"
+        elif self.steps > 0 and behind and now_s - self._last_step_s >= self.tighten_after_s:
+            if self.steps >= self.max_steps and not n:
+                self.steps -= 1
+                why = "translated in full and still behind: one step back on trial"
+            elif rate is not None and rate <= self.low_rate:
+                self.steps -= 1
+                why = f"{rate:.0%} of {n} judged lines lost meaning (low: {self.low_rate:.0%}) and the dub is behind: tighter"
+        if not why:
+            return None
+        self._recent.clear()
+        self._last_step_s = now_s
+        return {"was": was, "steps": self.steps, "why": why, "rate": round(rate, 3) if rate is not None else None, "n": n}
+
+    def state(self) -> dict[str, Any]:
+        rate = self.rate()
+        return {"steps": self.steps, "rate": round(rate, 3) if rate is not None else None, "recent": len(self._recent),
+                "judged": self.judged, "lost": self.lost, "shifted": self.shifted,
+                "judged_budgeted": self.judged_budgeted, "lost_budgeted": self.lost_budgeted,
+                "loss_rate_session": round(self.lost_budgeted / self.judged_budgeted, 3) if self.judged_budgeted else None,
+                "shift_rate_session": round(self.shifted / self.judged, 3) if self.judged else None}

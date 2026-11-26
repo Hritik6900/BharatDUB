@@ -14,7 +14,7 @@ import statistics
 from pathlib import Path
 from typing import Any
 
-SETUPS = ("std", "hq", "fixed", "adapt", "new")
+SETUPS = ("std", "hq", "fixed", "adapt", "new", "auto", "manual")
 NAMES: dict[str, str] = {}      # setup -> data folder of the comparison backend that ran it
 
 
@@ -113,6 +113,30 @@ def main() -> None:
                 result["rows"].append(row)
                 print(f"| {v} | {lang} | {s} | {pct(p['backcheck_mean'])} | {p['lines']} | {p['takes']} | {p['flagged']} | "
                       f"{', '.join(f'{k} {n}' for k, n in (p.get('judges') or {}).items())} ({p.get('rule')}) |")
+
+    # v1.2: the guards, each in its own column. Script: every translated line, letters only. Content shift: every
+    # translated line judged by a model beside its source (a line the judge did not answer for is "not checked").
+    # "wrong" counts the lines that failed at first; "flagged" those still wrong after one new translation.
+    if any(r["per_lang"][lang].get("guard", {}).get("checked") for r in runs.values() for lang in r["per_lang"]):
+        print("\n| Video | Language | Setup | Lines | Script guard: wrong / flagged | Content shift: checked / not checked | "
+              "Content shift: wrong / flagged | Shortened to fit and flagged | No sound |")
+        print("|---|---|---|---|---|---|---|---|---|")
+        result["guards"] = []
+        for v in videos:
+            for lang in langs:
+                for s in setups:
+                    r = runs.get((v, s))
+                    g = (r["per_lang"][lang].get("guard") or {}) if r else {}
+                    if not r:
+                        continue
+                    row = {"video": v, "lang": lang, "setup": s, **g}
+                    result["guards"].append(row)
+                    if not g.get("checked"):
+                        print(f"| {v} | {lang} | {s} | {r['per_lang'][lang]['lines']} | not run | not run | not run | not run | {g.get('unspoken', 0)} |")
+                        continue
+                    print(f"| {v} | {lang} | {s} | {g['lines']} | {g['script_failed']} / {g['script_flagged']} | "
+                          f"{g['shift_checked']} / {g['shift_not_checked']} | {g['shift_failed']} / {g['shift_flagged']} | "
+                          f"{g.get('shortened_flagged', 0)} | {g.get('unspoken', 0)} |")
 
     print("\n| Setup | " + " | ".join(videos) + " | Mean (lowest-highest) |")
     print("|---|" + "---|" * (len(videos) + 1))

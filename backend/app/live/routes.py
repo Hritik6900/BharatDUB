@@ -13,9 +13,10 @@ from app.config import LANG_NAMES, get_settings
 from app.db import get_store, now_iso
 from app.live.bus import ALL
 from app.live.chat import chat
-from app.live.pipeline import LivePipeline, prefetch_stored_voice
+from app.live.pipeline import LivePipeline
 from app.live.session import LiveSession, parse_youtube_id, sessions
 from app.shared.metrics import percentile
+from app.v1 import mode as v1mode
 
 router = APIRouter()
 # A streamer's own mic is real time while YouTube shows it 5-30 s later: the dub waits that long (the offset).
@@ -78,9 +79,10 @@ async def create_session(body: CreateSession) -> dict[str, Any]:
         body.voice_from_stream = False
         if body.voice_mode == "clone" and not body.voice_profile_id:
             raise HTTPException(403, "Record your voice with consent before going live in your own voice.")
-    if not streamer and get_settings().v1_live_stock_default:
-        # v1: a stream without a streamer profile (someone else's content) is dubbed in stock voices. A copied
-        # voice is only for a streamer who recorded their own with consent.
+    if not streamer and v1mode.on("live_stock_default", get_settings()):
+        # A stream without a streamer profile (someone else's content) is dubbed in stock voices. A copied voice
+        # is only for a streamer who recorded their own with consent. Always so in auto mode (v1.2): the consent
+        # tick for "the voice on this stream" then has no effect, and the session never learns a voice.
         body.voice_from_stream, body.voice_profile_id = False, None
     if not streamer and get_settings().live_clone_needs_streamer and (body.voice_from_stream or body.voice_profile_id):
         raise HTTPException(403, "A copied voice needs a streamer profile with the speaker's own recorded consent. "
@@ -103,9 +105,8 @@ async def create_session(body: CreateSession) -> dict[str, Any]:
     terms = list(dict.fromkeys(t.strip()[:60] for t in body.glossary if t.strip()))
     if terms:
         await sessions.update(sess, glossary=terms)
-    if body.record and get_settings().v1_live_record:   # both, or nothing is ever written (app/v1/record.py)
+    if body.record and v1mode.on("live_record", get_settings()):   # both, or nothing is ever written (app/v1/record.py)
         await sessions.update(sess, record=True)
-    prefetch_stored_voice(sess)   # v1.1 `V1_LIVE_WARMSTART`: a streamer's stored voice goes to the engines now; nothing with the flag off
     return {"session_id": sess.id, "ingest_token": token, **sess.public()}
 
 

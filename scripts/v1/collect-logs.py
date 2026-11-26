@@ -1,4 +1,5 @@
-"""Collect the records of every test into logs/, in a form that can be pushed: measurements only.
+"""Collect the records of every test into logs/: measurements only. Since v1.2 the `.jsonl` files stay on this
+machine (git ignores `logs/**/*.jsonl`); the index tables (CSV) and the stream watcher's files are what is pushed.
 
 Reads (never writes) each backend's store file, v1's trace folder and the stream watcher's folder, and writes
 
@@ -8,7 +9,8 @@ Reads (never writes) each backend's store file, v1's trace folder and the stream
   logs/trace/                                      v1's trace files (provider and fallback per phrase and line)
   logs/streams/                                    the stream watcher's files (events, rows every 20 s, summaries)
 
-logs/api/ is written by the v1 backend itself while it runs (V1_API_LOG) and is left alone here.
+logs/api/ is written by the v1 backend itself while it runs (always in auto mode; V1_API_LOG in manual mode) and
+is left alone here.
 
 Nothing that was said is copied: no source text, no translation, no voice sample, no voice or token id.
 
@@ -74,8 +76,15 @@ def phrase_rows(chunks: list[dict]) -> list[dict]:
             more = {"dub_ms": f"dub_ms:{lang}", "dub_raw_ms": f"dub_raw_ms:{lang}", "slot_ms": f"slot_ms:{lang}",
                     "dur_ratio": f"dur_ratio:{lang}", "backlog_ms": f"backlog:{lang}", "tgt_words": f"tgt_words:{lang}",
                     "tgt_chars": f"tgt_chars:{lang}", "budget_ms": f"budget_ms:{lang}", "budget_scale": f"ctl:{lang}",
-                    "reasked": f"reasked:{lang}"}
+                    "reasked": f"reasked:{lang}",
+                    # v1.2 auto mode: 1 = the budget applied to the line, 0 = translated in full; steps the meaning
+                    # check loosened the language by; the script guard (1 = translated again, 2 = flagged); the
+                    # voices asked when the first made nothing; why a line has no sound at all.
+                    "budget_auto": f"auto:{lang}", "loose_steps": f"loose:{lang}", "judged": f"judged:{lang}",
+                    "guard_script": f"script:{lang}", "voice_fallback": f"voice_fb:{lang}", "unspoken": f"unspoken:{lang}"}
             out[-1].update({name: t[key] for name, key in more.items() if t.get(key) is not None})
+            if t.get("src_script") == 0:
+                out[-1]["src_script_ok"] = 0
     return out
 
 
@@ -107,6 +116,14 @@ def session_index(version: str, s: dict, chunks: list[dict], rows: list[dict]) -
                     "dur_ratio_p50": pct(val("dur_ratio"), 50), "dur_ratio_p90": pct(val("dur_ratio"), 90),
                     "backlog_p95_ms": pct(val("backlog_ms"), 95),
                     "skipped_late": sum(1 for r in rows if r["lang"] == lang and r["skipped"] == "late")})
+        mine = [r for r in rows if r["lang"] == lang]
+        if any(r.get("budget_auto") is not None for r in mine):   # a session of v1.2 auto mode: its own columns
+            out[-1].update({"budget_applied_pct": share([r.get("budget_auto") for r in mine if r.get("budget_auto") is not None]),
+                            "script_guard_failed": sum(1 for r in mine if r.get("guard_script")),
+                            "script_guard_flagged": sum(1 for r in mine if r.get("guard_script") == 2),
+                            "judged_sample": sum(1 for r in mine if r.get("judged")),
+                            "spoken_by_another_voice": sum(1 for r in mine if r.get("voice_fallback")),
+                            "unspoken": sum(1 for r in mine if r.get("unspoken"))})
     return out
 
 

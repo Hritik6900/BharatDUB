@@ -173,10 +173,14 @@ class Settings(BaseSettings):
     # heard, and no phrase starts before the one before it ended.
     live_stamp_fix: bool = True
     # ---------- v1 (docs/v1/ARCHITECTURE.md) ----------
-    # Every new behaviour is behind a flag, default off: with all of them off this code runs as v0 does.
+    # v1.2: `auto` (the default) = the mode decides and nobody manages switches (app/v1/mode.py says what is on;
+    # the per-feature names below are NOT read; one behaviour is switched off in backend/config/overrides.yaml).
+    # `manual` = every feature follows its own setting below, as before v1.2 (measurements, comparison backends,
+    # the tests); with all of them off the code runs as v0 does. Read through `app.v1.mode.on(...)` only.
+    v1_mode: str = "auto"
+    v1_overrides_file: str = ""         # empty = backend/config/overrides.yaml
     v1_trace: bool = False              # a trace record per Live phrase and Studio line (JSONL + Prometheus)
     v1_router: bool = False             # providers are handed out from config/routing.yaml instead of the fixed table
-    v1_phrase_dynamic: bool = False     # first phrase 4-6 words, later ones 8-12, lines under 3 words join the next
     v1_tts_server: bool = False         # copied voice from the one batching server (V1_TTS_SERVER_URL) instead of 9001-9003
     v1_tts_maya: bool = False           # Maya 2 as a second candidate voice in Studio HQ
     v1_live_stock_default: bool = False  # a Live session without a streamer profile speaks in stock voices
@@ -188,9 +192,6 @@ class Settings(BaseSettings):
     v1_breaker: bool = False            # circuit breakers on our GPU endpoints + the link-stall detector (app/v1/breaker.py)
     v1_live_degrade: bool = False       # Live steps down (copied voice, stock voice, captions only, original sound) and back up
     v1_live_budget: bool = False        # v1.1: the translator gets the phrase's slot as words and letters; an answer over it is shortened once
-    v1_live_ratectrl: bool = False      # v1.1: a PI controller on the dub's backlog scales that budget; dense mode over 70% speaking share
-    v1_live_native_speed: bool = False  # v1.1: our voice engine is asked to speak a long line faster itself (pace floor), the rest by tempo
-    v1_live_warmstart: bool = False     # v1.1: a session's start: every language and engine warmed, a stock voice matched to the speaker's pitch until the copied voice is ready, a softened change
     v1_en_single_voice: bool = False    # v1.1: English in a GPU-engine session is spoken in one voice for the whole session (V1_EN_VOICE)
     v1_log_dir: str = ""                # empty = logs/ at the top of the repository
     v1_store: str = "json"              # json (as v0) | postgres
@@ -227,6 +228,7 @@ class Settings(BaseSettings):
     v1_budget_reask_timeout_s: float = 2.5
     v1_budget_behind_scale: float = 0.85    # without the controller: the budget while the dub is behind ...
     v1_budget_far_scale: float = 0.65       # ... and while it is more than 2 s behind
+    # The controller (auto budget only; there is no switch for it alone since v1.2).
     v1_ratectrl_kp: float = 0.15            # budget taken off per second of backlog
     v1_ratectrl_ki: float = 0.03            # ... and per second of backlog held for a second
     v1_ratectrl_setpoint_ms: int = 250      # a backlog this small is in step
@@ -236,24 +238,41 @@ class Settings(BaseSettings):
     v1_dense_off_share: float = 0.60        # ... and under which it is no longer
     v1_dense_window_ms: int = 30000
     v1_dense_scale: float = 0.9             # dense mode: the budget is at most this share of the slot
-    v1_dense_max_tempo: float = 1.4         # dense mode: a line may be sped up this far (else live_fit_max_tempo)
+    v1_dense_max_tempo: float = 1.3         # dense speech: a line may be sped up this far (1.4 was measured in v1.1 and never heard by anyone; 1.3 = live_fit_max_tempo, no change)
     v1_dense_merge_under_words: int = 3     # dense mode: a line shorter than this joins the next one
-    v1_native_max: float = 1.2              # native speed: the engine is asked for at most this much faster speech
-    v1_native_floor_ms: int = 320           # ... and never for speech under this many ms a word
-    # v1.1 session start and the one English voice (app/v1/warm.py)
-    v1_warm_fade_ms: int = 150              # warm start: fade at the end of the last stock lines and the start of the first copied one
-    v1_warm_level_lines: int = 2            # ... and this many copied lines are brought towards the stock voice's level
-    v1_en_voice: str = "auto"               # auto | copy | stock. auto = the measured choice, today stock (the copy was 13 points worse on time)
+    # The one English voice of a session (app/v1/warm.py)
+    v1_en_voice: str = "auto"               # manual mode: auto | copy | stock (auto = stock there). Auto mode measures at the session's start (below)
     v1_en_copy_lead_ms: int = 3500          # copy: a line waits for a copy that is still being made until this long before it is due
-    # Live phrase sizes with V1_PHRASE_DYNAMIC.
-    v1_first_phrase_min_words: int = 4
-    v1_first_phrase_max_words: int = 6
-    v1_phrase_min_words: int = 8
-    v1_phrase_max_words: int = 12
-    v1_merge_under_words: int = 3       # a line shorter than this waits for the next one
-    v1_merge_wait_ms: int = 1500        # ... this long at most, then it goes out alone
+    v1_merge_wait_ms: int = 1500        # dense speech: a short line waits for the next one this long at most, then it goes out alone
     v1_late_skip_factor: float = 2.0    # with late-shorten: skipped only when later than this times the limit
     v1_backcheck_min: float = 0.5       # live back-check: a line heard back under this share of words is made again
+    # v1.2 auto budget (app/v1/dense.py `AutoGate`): the budget applies to a language only while its dub is behind
+    # or speech is dense, with two thresholds each so that it does not flap. None of these was measured before
+    # v1.2 Part 3; they are first values.
+    v1_auto_behind_on_ms: int = 500         # the dub's backlog (running mean over its last lines) over this: budget on
+    v1_auto_behind_off_ms: int = 200        # ... and under this: no longer behind
+    v1_auto_ratio_on: float = 1.15          # dubbed length over the slot (running mean) over this: budget on
+    v1_auto_ratio_off: float = 1.05         # ... and under this: no longer long
+    v1_auto_wps_on: float = 4.0             # source words a second over the last `v1_dense_window_ms` over this: dense
+    v1_auto_wps_off: float = 3.2            # ... and under this: no longer
+    v1_auto_min_on_ms: int = 15000          # once on, the budget stays on at least this long
+    v1_auto_calm_lines: int = 4             # ... and until this many lines in a row gave no reason for it
+    # v1.2 meaning check (app/v1/meaning.py): a sample of spoken lines is judged against its source, off the path
+    # of a phrase; a language whose share of lines that lost meaning is too high gets a looser budget.
+    v1_meaning_sample_every: int = 3        # every n-th spoken line of a language while its budget is on
+    v1_meaning_idle_every: int = 8          # ... and every n-th while it is off (counts content shift, not the budget)
+    v1_meaning_window: int = 12             # the rate is over the last this many judged lines of a language
+    v1_meaning_min_samples: int = 6         # no adjustment on fewer judged lines than this
+    v1_meaning_max: float = 0.25            # share of judged budgeted lines that lost meaning over which the budget loosens a step
+    v1_meaning_low: float = 0.10            # ... and at or under which it may tighten a step again, while the dub is behind
+    v1_meaning_step: float = 0.1            # one step: this much more of the slot
+    v1_meaning_max_steps: int = 3           # at this many steps the language is translated in full (no budget)
+    v1_meaning_tighten_after_s: float = 120.0   # a step back at most this often
+    v1_meaning_timeout_s: float = 8.0       # one judging call
+    v1_meaning_queue: int = 6               # lines waiting to be judged; a line that finds it full is not judged
+    # v1.2 the English voice in auto mode: chosen once from a probe at the session's start (app/v1/warm.py `en_choice`).
+    v1_en_probe_timeout_s: float = 6.0      # the probe line in the copied voice; no answer in this time = not in time
+    v1_en_pipeline_ms: int = 3800           # of the viewers' hold, what is gone before the voice is asked: the phrase itself (about 2.2 s) and its text (about 1.6 s)
     # Studio HQ.
     v1_hq_nbest: int = 4                # voice versions of a line that failed its check (the first is always made)
     v1_hq_backcheck_min: float = 0.9    # share of words heard back for a version to pass

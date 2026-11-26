@@ -12,7 +12,7 @@ from typing import Any
 
 from app.config import DEFAULT_GLOSSARY, Settings, get_settings
 from app.db import Store, get_store, now_iso
-from app.providers import get_llm, get_stt, get_tts
+from app.providers import get_judge, get_llm, get_stt, get_tts
 from app.providers.base import LLM, STT, TTS, ProviderError, VoiceSpec
 from app.shared import audio_utils as au
 from app.shared import cache
@@ -21,8 +21,9 @@ from app.shared.storage import publish_output
 from app.studio.events import events
 from app.v1 import apilog
 from app.studio.stages import extract, fit, mix, render, segment, separate, transcribe, translate, voice
-from app.v1 import trace
+from app.v1 import guards, lineguard, trace
 from app.v1.hq import runner as hq
+from app.v1 import mode as v1mode
 
 log = logging.getLogger("studio")
 # The engine of the job being worked on in this task: None = the hosted services (as before), "gpu" = our own machine.
@@ -40,6 +41,7 @@ class Ctx:
     timer: StageTimer = field(default_factory=StageTimer)
     usage: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    guards: dict[str, dict[str, int]] = field(default_factory=dict)   # v1.2: per language, what the guards found
 
 
 class StudioRunner:
@@ -144,7 +146,7 @@ class StudioRunner:
         finally:
             self._drop_ahead(job_id)
             await self._save_stats(ctx)
-            if self.s.v1_trace:
+            if v1mode.on("trace", self.s):
                 gpu = ENGINE.get() == "gpu"
                 trace.studio_job(job_id, mode="studio", engine=ENGINE.get() or "cloud", duration_s=job.get("duration_s"),
                                  langs=job.get("target_langs"), total_s=round(sum(v for k, v in ctx.timer.timings.items() if ":" not in k), 3),
@@ -286,13 +288,15 @@ class StudioRunner:
                     if ahead:
                         ahead[1].cancel()
                     out = await translate.translate(self.llm, lines, lang, await self.glossary(), model, ctx.usage)
-                for s, text in zip(todo, out):
+                out, verdicts = await self.guard_lines(ctx, lang, lines, list(out))
+                for s, text, verdict in zip(todo, out, verdicts):
+                    fields = {"text": text, **(lineguard.flag_fields(verdict) if verdict is not None else {})}
                     if s["id"] in existing:
                         existing[s["id"]] = await self.store.update("translations", existing[s["id"]]["id"],
-                                                                    {"text": text}) or existing[s["id"]]
+                                                                    fields) or existing[s["id"]]
                     else:
                         existing[s["id"]] = await self.store.insert(
-                            "translations", {"segment_id": s["id"], "lang": lang, "text": text})
+                            "translations", {"segment_id": s["id"], "lang": lang, **fields})
 
         vspec = await self.voice_spec(ctx, lang)
         slot_list = fit.slots([s["start_s"] for s in segs], meta["duration"])
@@ -300,16 +304,92 @@ class StudioRunner:
             await self._voice_line(ctx, lang, s, existing[s["id"]], slot_list[i], vspec)
         await self._mix_render(ctx, meta, lang)
 
+    # ---------- v1.2: guards, and a line no voice made ----------
+    def _judge(self) -> Any:
+        """Who judges a dub line against its source: the injected translator in a test, else `get_judge`."""
+        return self._llm if self._llm is not None else get_judge(ENGINE.get() or None, mode=MODE.get())
+
+    async def guard_lines(self, ctx: Ctx, lang: str, src: list[str], out: list[str],
+                          retranslate: Any = None) -> tuple[list[str], list[dict[str, Any] | None]]:
+        """The script guard and the content-shift check on every translated line of a language, before the voice
+        (app/v1/lineguard.py). Returns the lines to dub and a verdict per line (None with both guards off)."""
+        script, shift = v1mode.on("script_guard", self.s), v1mode.on("shift_check", self.s)
+        if not (script or shift) or not src:
+            return out, [None] * len(out)
+        glossary = await self.glossary()
+
+        async def again(idx: list[int]) -> list[str]:
+            ctx.usage["llm_calls"] = ctx.usage.get("llm_calls", 0) + 1
+            return list(await self.llm.translate_batch([src[i] for i in idx], lang, glossary))
+        judge = self._judge()
+        key = au.cache_key("guard-1", src, out, lang, script, shift, trace.provider_name(judge))
+        got = cache.get_json("guard", key)
+        if got is None:
+            lines, verdicts = await lineguard.check(src, out, lang, judge=judge, retranslate=retranslate or again,
+                                                    script=script, shift=shift)
+            if not any(v.get("shift") == "not_checked" for v in verdicts):   # an unchecked answer is asked again next time
+                cache.put_json("guard", key, {"lines": lines, "verdicts": verdicts})
+        else:
+            lines, verdicts = got["lines"], got["verdicts"]
+        found = lineguard.summary(verdicts)
+        ctx.guards[lang] = {**ctx.guards.get(lang, {}), **found}
+        if found["script_flagged"] or found["shift_flagged"]:
+            self._warn(ctx, f"{found['script_flagged'] + found['shift_flagged']} {lang} lines did not pass a guard "
+                            "and are marked for your ear.")
+        if shift and found["shift_not_checked"]:
+            self._warn(ctx, f"{found['shift_not_checked']} {lang} lines could not be checked against their source "
+                            "(the judge did not answer).")
+        if v1mode.on("trace", self.s):
+            trace.event("studio_guard", job=ctx.job_id, lang=lang, judge=trace.provider_name(judge), **found)
+        return lines, list(verdicts)
+
+    async def _shortened_checked(self, ctx: Ctx, lang: str, src: str, text: str) -> dict[str, Any]:
+        """A line that was shortened to fit its slot is judged once more against its source: the check before the
+        voice saw the longer line. It is not made again (it was shortened for a reason): flagged, or passed."""
+        if not v1mode.on("shift_check", self.s):
+            return {}
+        got = await guards.judge(self._judge(), [(src, text)], lang, lineguard.JUDGE_TIMEOUT_S)
+        g = ctx.guards.setdefault(lang, {})
+        g["shortened_checked"] = g.get("shortened_checked", 0) + int(got is not None)
+        if got is None:
+            return {"guard_shortened": "not_checked"}
+        why = "says something different from its source" if got[0]["shift"] else \
+            "something that matters in its source is missing" if got[0]["lost"] else ""
+        if not why:
+            return {"guard_shortened": "ok"}
+        g["shortened_flagged"] = g.get("shortened_flagged", 0) + 1
+        return {"guard_shortened": "flagged", "flagged": True, "flag_reason": f"guard: shortened to fit its slot, and now {why}"}
+
+    async def _unspoken(self, ctx: Ctx, lang: str, seg: dict[str, Any], tr: dict[str, Any], e: Exception) -> dict[str, Any]:
+        """No voice made this line. It is never dropped without a trace: the line is marked, the job says so, the
+        trace has the event; the video is finished without it."""
+        g = ctx.guards.setdefault(lang, {})
+        g["unspoken"] = g.get("unspoken", 0) + 1
+        self._warn(ctx, f"A {lang} line (line {seg['idx'] + 1}) has no sound: {str(e)[:200]}")
+        log.error("job %s %s line %s has NO SOUND: %s", ctx.job_id, lang, seg["idx"], e)
+        if v1mode.on("trace", self.s):
+            trace.event("studio_unspoken", job=ctx.job_id, lang=lang, idx=seg["idx"],
+                        tried=getattr(e, "tried", None) or [{"voice": "?", "error": str(e)[:160]}])
+        fields = {"audio_path": None, "unspoken": True, "flagged": True,
+                  "flag_reason": f"no voice could say this line ({str(e)[:160]})"}
+        return await self.store.update("translations", tr["id"], fields) or {**tr, **fields}
+
     async def _voice_line(self, ctx: Ctx, lang: str, seg: dict[str, Any], tr: dict[str, Any],
                           slot_s: float, vspec: VoiceSpec) -> dict[str, Any]:
         text = tr["text"]
-        async with self._stage(ctx, "voice", lang):
-            raw = await voice.synth_line(self.tts, text, lang, vspec, self.s.tts_model, self.s.tts_sample_rate,
-                                         ctx.usage, ctx.warnings)
+        chain = v1mode.on("voice_fallback", self.s)
+        try:
+            async with self._stage(ctx, "voice", lang):
+                raw = await voice.synth_line(self.tts, text, lang, vspec, self.s.tts_model, self.s.tts_sample_rate,
+                                             ctx.usage, ctx.warnings, fallback=chain)
+        except ProviderError as e:
+            if not chain:
+                raise
+            return await self._unspoken(ctx, lang, seg, tr, e)
         async with self._stage(ctx, "fit", lang):
             native = 1.0
             # v1 (`V1_FIT_115`): a line is sped up by at most 1.15x; past that it is shortened.
-            max_speed = self.s.v1_fit_max_speed if self.s.v1_fit_115 else fit.MAX_SPEED
+            max_speed = self.s.v1_fit_max_speed if v1mode.on("fit_115", self.s) else fit.MAX_SPEED
             need = fit.needed_speed(au.duration_s(raw), slot_s)
             if need > 1.05 and getattr(self.tts, "native_speed", False) and self.tts.engine_speaks(lang, vspec):
                 # Our GPU voice copies the pace of its sample, and a recorded voice at a natural pace can run far
@@ -318,8 +398,14 @@ class StudioRunner:
                 per_word = au.duration_s(raw) * 1000 / max(1, len(text.split()))
                 native = min(need, self.s.gpu_voice_pace_max, per_word / 300)
                 if native > 1.05:
-                    raw = await voice.synth_line(self.tts, text, lang, vspec, self.s.tts_model,
-                                                 self.s.tts_sample_rate, ctx.usage, ctx.warnings, speed=native)
+                    try:
+                        raw = await voice.synth_line(self.tts, text, lang, vspec, self.s.tts_model,
+                                                     self.s.tts_sample_rate, ctx.usage, ctx.warnings, speed=native,
+                                                     fallback=chain)
+                    except ProviderError:
+                        if not chain:
+                            raise
+                        native = 1.0     # the faster take could not be made: the first one stays
                 else:
                     native = 1.0
             if fit.needed_speed(au.duration_s(raw), slot_s) > max_speed and not tr.get("edited"):
@@ -332,16 +418,17 @@ class StudioRunner:
                     else:
                         shorter = await self.llm.shorten(text, lang, slot_s * 1.25)
                     if shorter and len(shorter) < len(text):
-                        text = shorter
-                        raw = await voice.synth_line(self.tts, text, lang, vspec, self.s.tts_model,
-                                                     self.s.tts_sample_rate, ctx.usage, ctx.warnings, speed=native)
+                        shorter_raw = await voice.synth_line(self.tts, shorter, lang, vspec, self.s.tts_model,
+                                                             self.s.tts_sample_rate, ctx.usage, ctx.warnings,
+                                                             speed=native, fallback=chain)
+                        text, raw = shorter, shorter_raw
                 except ProviderError as e:
                     self._warn(ctx, f"Could not shorten a {lang} line; sped up to 1.35x ({e})"[:200])
             lines_dir = ctx.dir / "lines"
             lines_dir.mkdir(exist_ok=True)
             out = lines_dir / f"{lang}_{seg['idx']:03}.wav"
             speed = await asyncio.to_thread(fit.fit_clip, raw, slot_s, out, max_speed)
-        if self.s.v1_trace:
+        if v1mode.on("trace", self.s):
             on_gpu = bool(getattr(self.tts, "native_speed", False) and self.tts.engine_speaks(lang, vspec))
             trace.studio_line(ctx.job_id, lang, seg["idx"], mode="studio", engine=ENGINE.get() or "cloud",
                               words=len(text.split()), slot_s=round(slot_s, 3), dur_s=round(au.duration_s(out), 3),
@@ -349,7 +436,11 @@ class StudioRunner:
                               clone=vspec["kind"] == "clone", edited=bool(tr.get("edited")),
                               gpu_s=round(float(getattr(getattr(self.tts, "gpu", None), "last_synth_ms", 0) or 0) / 1000, 3)
                               if on_gpu and not ctx.usage.get("tts_cache_hits") else None)
-        fields = {"text": text, "audio_path": str(out.relative_to(ctx.dir)), "fit_speed": speed}
+        fields: dict[str, Any] = {"text": text, "audio_path": str(out.relative_to(ctx.dir)), "fit_speed": speed}
+        if chain and tr.get("unspoken"):
+            fields["unspoken"] = False
+        if text != tr["text"] and not tr.get("edited"):
+            fields |= await self._shortened_checked(ctx, lang, seg.get("src_text") or "", text)
         return await self.store.update("translations", tr["id"], fields) or {**tr, **fields}
 
     async def _mix_render(self, ctx: Ctx, meta: dict[str, Any], lang: str) -> None:
@@ -550,6 +641,8 @@ class StudioRunner:
         timings["_usage"] = usage
         warnings = (list(old.get("_warnings") or []) if merge else []) + ctx.warnings
         timings["_warnings"] = list(dict.fromkeys(warnings))[-20:]
+        if ctx.guards or (merge and old.get("_guards")):
+            timings["_guards"] = {**(old.get("_guards") or {} if merge else {}), **ctx.guards}
         timings["_updated_at"] = now_iso()
         await self.store.update("jobs", ctx.job_id, {"stage_timings": timings})
 

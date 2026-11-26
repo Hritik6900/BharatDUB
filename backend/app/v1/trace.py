@@ -1,4 +1,5 @@
-"""Trace (`V1_TRACE`): one record per Live phrase and language, and one per Studio line.
+"""Trace (always on in auto mode; `V1_TRACE` in manual mode): one record per Live phrase and language, and one
+per Studio line.
 
 Records are appended to `<DATA_DIR>/trace/trace-YYYYMMDD.jsonl` and counted in Prometheus metrics. A record says
 when each step happened (session clock, ms), which provider did it, whether a fallback answered, and the seconds
@@ -10,9 +11,17 @@ Live record (kind `live_phrase`), times in ms on the session clock:
   and the differences that matter: first_audio_ms, heard_ms, late_ms (sync mode: start after its video moment).
   v1.1: dub_ms (audio sent), dub_raw_ms (the same line at the voice's own pace), slot_ms (the span of the source
   phrase, or of the phrases spoken in one call), dur_ratio = dub_ms / slot_ms, backlog_ms (how far the dub queue
-  was behind the video when the phrase's turn came), tgt_words, tgt_chars, and with `V1_LIVE_BUDGET` /
-  `V1_LIVE_RATECTRL`: budget_words, budget_chars, budget_ms, est0_ms (the first answer), est_ms (the line spoken), reasked (1 asked, 2 the shorter line was
-  used), ctl_scale, ctl_integral, dense, speaking_pct, native (speed asked of the engine).
+  was behind the video when the phrase's turn came), tgt_words, tgt_chars, and with the budget: budget_words,
+  budget_chars, budget_ms, est0_ms (the first answer), est_ms (the line spoken), reasked (1 asked, 2 the shorter
+  line was used), ctl_scale, ctl_integral, dense, speaking_pct, words_per_s.
+  v1.2 (auto mode): budget_auto (True = the budget applied to this line, False = it was translated in full),
+  loose_steps (how far the meaning check has loosened this language), judged (the line was put in the meaning
+  sample; its verdict comes as kind `live_meaning`), guard_script (None = passed, "regenerated", "flagged"),
+  src_script_ok (False = the transcript is not in the session's source script), voice_fallback (the voices
+  asked, in order, when the first made nothing; the last one spoke), unspoken (why a line has no sound at all).
+Other kinds of v1.2: `live_auto_budget` (a language's budget went on or off, with the reason), `live_meaning`,
+`live_budget_adjust` (a step looser or tighter, with the rate), `live_en_voice` (the session's one English voice
+and how it was chosen), `live_voice_fallback`, `live_guard_script`.
 A viewer's own report arrives later as kind `live_played` with the same `trace_id`.
 """
 import json
@@ -25,6 +34,7 @@ from typing import Any
 from prometheus_client import Counter, Histogram
 
 from app.config import get_settings
+from app.v1 import mode as v1mode
 
 _lock = threading.Lock()
 SECONDS = (0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 7.5, 10.0)
@@ -47,7 +57,7 @@ VENDOR = Counter("bd_v1_vendor_units_total", "Hosted usage: stt seconds, tts cha
 
 
 def enabled() -> bool:
-    return bool(get_settings().v1_trace)
+    return bool(v1mode.on("trace", get_settings()))
 
 
 def trace_dir() -> Path:
@@ -115,11 +125,16 @@ def live_phrase(sid: str, row: dict[str, Any], seq: int, p: dict[str, Any], prov
             "dub_ms": g("dub_ms"), "dub_raw_ms": g("dub_raw_ms"), "slot_ms": g("slot_ms"), "dur_ratio": g("dur_ratio"),
             "backlog_ms": g("backlog"), "tgt_words": g("tgt_words"), "tgt_chars": g("tgt_chars"),
             "budget_chars": g("budget_chars"), "budget_ms": g("budget_ms"), "est_ms": g("est_ms"), "est0_ms": g("est0_ms"),
-            "reasked": g("reasked"), "ctl_scale": g("ctl"), "ctl_integral": g("ctl_i"), "native": g("native"),
-            "dense": bool(t.get("dense")), "speaking_pct": t.get("share"),
+            "reasked": g("reasked"), "ctl_scale": g("ctl"), "ctl_integral": g("ctl_i"),
+            "dense": bool(t.get("dense")), "speaking_pct": t.get("share"), "words_per_s": t.get("wps"),
+            "budget_auto": bool(g("auto")) if g("auto") is not None else None, "loose_steps": g("loose"),
+            "judged": bool(g("judged")) or None,
+            "guard_script": {1: "regenerated", 2: "flagged"}.get(g("script")),
+            "src_script_ok": False if t.get("src_script") == 0 else None,
+            "voice_fallback": g("voice_fb"), "unspoken": g("unspoken"),
         }
         write(rec)
-        outcome = "skipped" if skipped else "spoken" if first is not None else "silent"
+        outcome = "skipped" if skipped else "spoken" if first is not None else "unspoken" if g("unspoken") else "silent"
         LIVE_PHRASES.labels(lang, engine, outcome).inc()
         if rec["first_audio_ms"] is not None:
             LIVE_FIRST_AUDIO.labels(lang, engine).observe(max(0, rec["first_audio_ms"]) / 1000)

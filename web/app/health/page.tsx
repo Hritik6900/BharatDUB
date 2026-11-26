@@ -19,7 +19,8 @@ interface Check {
 interface V1Health {
   ok: boolean;
   checks: Check[];
-  flags: Record<string, boolean | string>;
+  // A diagnostic for the people who run the server. The page shows the mode and the store, never a list of switches.
+  flags: Record<string, unknown>;
   // The model servers' card, as the GPU machine itself reports it. null = unknown (never this PC's own card).
   gpu: { name?: string; used_gb: number; free_gb: number; total_gb: number; util_pct?: number; temp_c?: number; power_w?: number; processes?: { name: string; used_gb: number | null }[] } | null;
   gpu_name?: string;
@@ -66,7 +67,8 @@ export default function HealthPage() {
     const t = setInterval(load, 10000);
     return () => clearInterval(t);
   }, [load]);
-  const on = h ? Object.entries(h.flags).filter(([, v]) => v === true).map(([k]) => k) : [];
+  const manual = h ? h.flags.V1_MODE === "manual" : false;
+  const pinned = h && h.flags.overrides && typeof h.flags.overrides === "object" ? Object.keys(h.flags.overrides as object).length : 0;
   return (
     <Shell>
       <div className="mx-auto max-w-4xl px-5 pb-24 pt-12 sm:px-8 sm:pt-16">
@@ -152,10 +154,11 @@ export default function HealthPage() {
               </section>
             )}
 
-            <section className="card mt-5 p-6" aria-label="Flags">
-              <h2 className="eyebrow">New behaviour switched on</h2>
+            <section className="card mt-5 p-6" aria-label="How this server runs">
+              <h2 className="eyebrow">How this server runs</h2>
               <p className="mt-3 text-sm">
-                {on.length ? <span className="font-mono">{on.join(" · ")}</span> : <span className="text-muted">None. This version behaves like the other one.</span>}
+                {manual ? "Set up by hand for a measurement: its behaviour is not what the product normally does." : "Automatic: the server decides by itself what each stream and video needs."}
+                {!manual && pinned > 0 && <span className="ml-1">{pinned === 1 ? "One behaviour is" : `${pinned} behaviours are`} held back by the operator.</span>}
                 <span className="ml-3 text-muted">Store: {String(h.flags.V1_STORE)}</span>
               </p>
             </section>

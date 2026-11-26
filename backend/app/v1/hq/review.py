@@ -23,6 +23,7 @@ from app.config import LANG_NAMES, get_settings
 from app.providers.llm_openai import strip_thinking
 from app.v1 import trace
 from app.v1.hq import text as hqtext
+from app.v1 import mode as v1mode
 
 REASONS = ("meaning", "numbers_names", "register", "length")
 
@@ -32,7 +33,7 @@ def required(settings: Any) -> bool:
     says (decided 26 Nov 2026). Without the review HQ's merge and clean steps dubbed two of three test videos from
     a damaged transcript (25 of 38 lines no longer the line heard, 0 with it), and heard-back cannot see that.
     Every place that used to read the flag asks here; the flag alone still answers for code outside an HQ job."""
-    return bool(settings.v1_studio_hq or settings.v1_hq_review)
+    return v1mode.on("hq_review", settings)
 RUBRIC = """Check every line against these four rules, in this order. A line passes only when all four hold.
 
 1. MEANING KEPT. The dub says what the source says: nothing added, nothing left out, nothing changed. A statement

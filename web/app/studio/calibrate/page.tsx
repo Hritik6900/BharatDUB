@@ -147,7 +147,7 @@ export default function CalibratePage() {
         />
         {off && (
           <div className="mt-8">
-            <Notice tone="warn">This page is switched off. Set V1_HQ_CALIBRATE=true in the backend&apos;s settings and restart it.</Notice>
+            <Notice tone="warn">This page is not available on this server.</Notice>
           </div>
         )}
         {err && <div className="mt-8"><Notice tone="error" role="alert">{err}</Notice></div>}
@@ -225,7 +225,7 @@ export default function CalibratePage() {
                     <p className="mt-3">
                       <span className="tnum h-display text-4xl">{pct(rec.threshold)}</span>
                       <span className="ml-3 text-sm text-muted">
-                        of words heard back; agreement with your labels there: {rec.agreement_pct}%. Set V1_HQ_BACKCHECK_MIN={rec.threshold} to use it.
+                        of words heard back; agreement with your labels there: {rec.agreement_pct}%. Whoever runs the server can put the line there.
                       </span>
                     </p>
                     <Counts a={rec as Agreement} />

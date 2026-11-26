@@ -133,8 +133,9 @@ sequenceDiagram
   voices until then (SPEC section 16).
 - Streamer Mode: the recorded voice is sent to the engines at session start; a mic session uses `offset_ms`
   (0-40 s) instead of the video clock.
-- v1.1 additions, each behind a flag: duration budget and rate control (WS1), warm start and English single voice
-  (WS2), breaker and ladder (WS0), opt-in recording (WS4).
+- v1.1 additions: duration budget and its controller (WS1), English single voice (WS2), breaker and ladder (WS0),
+  opt-in recording (WS4). In auto mode (v1.2) they are in force without a switch; the budget applies only while the
+  dub is behind or speech is dense.
 
 Decided in [ADR-0006](adr/0006-prisma-realtime-partials.md), [ADR-0007](adr/0007-hosted-llm-translation.md),
 [ADR-0008](adr/0008-heard-delay-pacing.md), [ADR-0009](adr/0009-sync-mode-hold.md),
@@ -250,24 +251,31 @@ Decided in [ADR-0010](adr/0010-indicf5-own-gpu-voice.md), [ADR-0011](adr/0011-bo
 
 Decided in [ADR-0004](adr/0004-local-json-store.md), [ADR-0018](adr/0018-v1-beside-v0.md).
 
-## Flags
+## Mode and flags
 
-All in v1's `backend/.env`, all off by default; tests force them off; restart the backend after a change. The full
-list (26 in `backend/app/v1/flags.py` plus `V1_STORE`) with what each does: `../v1/RUNBOOK.md` section 3. The
-recommended set: [RUNBOOK.md](RUNBOOK.md#flags-and-the-recommended-v1-env).
+`V1_MODE=auto` is v1's default since v1.2: `backend/app/v1/mode.py` (`on(feature)`) is the one place that says what
+is in force, and one behaviour is switched off in `backend/config/overrides.yaml`. `V1_MODE=manual`: the flags
+below, all off by default except `V1_HQ_ADAPTIVE`; tests and comparison backends run that way. What auto mode does
+and every override: [RUNBOOK.md](RUNBOOK.md#mode-overrides-flags), `../v1/RUNBOOK.md` section 3.
 
-| Group | Flags |
+| Group | Flags (manual mode) |
 |---|---|
 | Observability and routing | `V1_TRACE`, `V1_ROUTER`, `V1_API_LOG` |
-| Live | `V1_PHRASE_DYNAMIC`, `V1_LIVE_LATE_SHORTEN`, `V1_LIVE_BACKCHECK`, `V1_LIVE_STOCK_DEFAULT`, `V1_BREAKER`, `V1_LIVE_DEGRADE`, `V1_LIVE_BUDGET`, `V1_LIVE_RATECTRL`, `V1_LIVE_NATIVE_SPEED`, `V1_LIVE_WARMSTART`, `V1_EN_SINGLE_VOICE`, `V1_LIVE_RECORD` |
+| Live | `V1_LIVE_LATE_SHORTEN`, `V1_LIVE_BACKCHECK`, `V1_LIVE_STOCK_DEFAULT`, `V1_BREAKER`, `V1_LIVE_DEGRADE`, `V1_LIVE_BUDGET`, `V1_EN_SINGLE_VOICE`, `V1_LIVE_RECORD` |
 | Studio | `V1_STUDIO_HQ`, `V1_FIT_115`, `V1_HQ_JUDGE`, `V1_HQ_CALIBRATE`, `V1_HQ_ADAPTIVE`, `V1_HQ_NORMALISE`, `V1_HQ_AUTO_GLOSSARY`, `V1_HQ_REVIEW`, `V1_TTS_MAYA` |
 | Model servers | `V1_TTS_SERVER` |
 | Pages | `V1_LISTEN_TEST` (and `V1_HQ_CALIBRATE`) |
-| Store | `V1_STORE` (`json` or `postgres`) |
+| Store | `V1_STORE` (`json` or `postgres`; a setting in both modes) |
 
-`V1_SPEC_TRANSLATE` and `V1_LLM_PREFIX_CACHE` were removed in v1.1 WS6 (`e3128ef`); a leftover line is ignored.
+Only in auto mode (no flag): the auto budget and its meaning check, the measured English choice, the fallback to
+another voice, the script guard and the content-shift check.
 
-Decided in [ADR-0020](adr/0020-flags-default-off.md), [ADR-0029](adr/0029-drop-spec-translate-prefix-cache.md).
+Removed: `V1_SPEC_TRANSLATE` and `V1_LLM_PREFIX_CACHE` (v1.1 WS6, `e3128ef`); the dynamic first phrase, the
+engine-speed flag, the session warm start and the controller's own switch (v1.2,
+[ADR-0037](adr/0037-removed-dead-features.md)). A leftover line is ignored.
+
+Decided in [ADR-0020](adr/0020-flags-default-off.md), [ADR-0029](adr/0029-drop-spec-translate-prefix-cache.md),
+[ADR-0036](adr/0036-auto-mode.md), [ADR-0037](adr/0037-removed-dead-features.md).
 
 ## Trace and logs
 

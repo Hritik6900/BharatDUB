@@ -24,7 +24,7 @@ speech it replaces. Stored per phrase from v1.1 (`logs/README.md`; `docs/v1/LIVE
 
 ### backlog
 How far the dub queue of a language was behind the video when a phrase's turn came (`backlog_ms`, v1.1). The rate
-controller (`V1_LIVE_RATECTRL`) acts on it (`logs/README.md`).
+controller acts on it, and the auto budget's gate reads its running mean (`logs/README.md`).
 
 ### slot
 The time a dubbed line may take. Studio: from a line's start to the next line's start (last line: to the end of the
@@ -48,8 +48,8 @@ Streamer Mode with a streamer's own mic: speech is real time and YouTube shows i
 `offset_ms` after it was spoken (console slider 0-40 s); set by ear, never grows by itself (SPEC section 16).
 
 ### tempo
-Speed-up applied to fit a dubbed line (ffmpeg `atempo`). Limits: Live 1.3x (`LIVE_FIT_MAX_TEMPO`; 1.4x in dense
-mode with `V1_LIVE_RATECTRL`); Studio 1.35x, 1.15x with `V1_FIT_115`. A phrase "at the speed limit" needed the
+Speed-up applied to fit a dubbed line (ffmpeg `atempo`). Limits: Live 1.3x (`LIVE_FIT_MAX_TEMPO`; while speech is
+dense `V1_DENSE_MAX_TEMPO`, 1.3 since v1.2, 1.4 in the v1.1 measurements); Studio 1.35x, 1.15x with `V1_FIT_115`. A phrase "at the speed limit" needed the
 full limit (SPEC sections 8, 16; `docs/v1/RUNBOOK.md`).
 
 ### budget
@@ -74,8 +74,8 @@ The unit Live translates and dubs: 6-12 words cut at a clause boundary from the 
 the tail of an utterance. Each has `seq` and `t_speech_ms` (SPEC sections 9, 16).
 
 ### phraser
-The code that cuts phrases (`Phraser` in `backend/app/live/assembler.py`). `V1_PHRASE_DYNAMIC`: first phrase 4-6
-words, later 8-12, lines under 3 words join the next.
+The code that cuts phrases (`Phraser` in `backend/app/live/assembler.py`): 6-12 words, at a clause boundary. While
+speech is dense (auto budget) a line under 3 words joins the next one.
 
 ### partial
 An interim transcript from realtime speech-to-text (`partial_transcript`, about every 0.5 s on the hosted service;
@@ -176,7 +176,24 @@ v1's record per Live phrase and Studio line (`V1_TRACE`): which provider did eac
 JSONL and Prometheus; read by `/metrics-ui`.
 
 ### flags
-`V1_*` settings in v1's `backend/.env`, all off by default; every new v1 behaviour is behind one ([ARCHITECTURE.md](ARCHITECTURE.md#flags)).
+`V1_*` settings in v1's `backend/.env`, read in manual mode only, all off by default ([ARCHITECTURE.md](ARCHITECTURE.md#mode-and-flags)).
+
+### auto mode
+`V1_MODE=auto`, v1's default since v1.2: the backend decides what is in force (`backend/app/v1/mode.py`) and nobody
+manages switches. Manual mode (`V1_MODE=manual`) is the flags as before, for baselines and tests ([ADR-0036](adr/0036-auto-mode.md)).
+
+### overrides file
+`backend/config/overrides.yaml`: emergency off-switches for single behaviours of auto mode, all commented out as shipped.
+
+### auto budget
+The Live duration budget applied to a language only while its dub is behind, its lines run long, or speech is dense.
+
+### meaning check
+A sample of spoken Live lines judged by a model against their source after the fact; a language that loses meaning
+too often gets a looser budget. Not a native speaker's judgement.
+
+### unspoken
+A line no voice could say after every voice was asked (`unspoken` on the phrase or the Studio line); logged, never silent.
 
 ## Versions and process
 

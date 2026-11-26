@@ -18,6 +18,7 @@ from typing import Any
 import yaml
 
 from app.config import BACKEND_DIR, Settings, get_settings
+from app.v1 import mode as v1mode
 
 log = logging.getLogger("bharatdub.router")
 
@@ -98,7 +99,7 @@ class Router:
             "gemini": bool(s.llm_base_url and s.llm_model), "gemma": bool(s.gpu_llm_url),
             "big_llm": bool(s.v1_big_llm_url),
             "indicf5": bool(s.gpu_voice_url), "indicf5_v1": bool(s.v1_tts_server_url),
-            "maya": bool(s.v1_maya_url and s.v1_tts_maya),
+            "maya": bool(s.v1_maya_url and v1mode.on("tts_maya", s)),
             "demucs_gpu": bool(s.gpu_separate_url), "demucs_cpu": bool(s.studio_separate),
             "qa_server": bool(s.v1_qa_url), "none": True,
         }.get(name, False)
@@ -109,7 +110,7 @@ class Router:
             names = list(self.cfg["modes"][mode][engine].get(stage) or [])
         except KeyError:
             names = []
-        if self.s.v1_tts_server and self.s.v1_tts_server_url and stage in ("copied_voice", "candidates"):
+        if v1mode.on("tts_server", self.s) and self.s.v1_tts_server_url and stage in ("copied_voice", "candidates"):
             names = list(dict.fromkeys("indicf5_v1" if n == "indicf5" else n for n in names))
         return names
 
@@ -273,7 +274,7 @@ def get_router() -> Router:
 def active() -> Router | None:
     """The router when it is switched on (and the providers are not mocked), else None: v0's fixed table is used."""
     s = get_settings()
-    if not s.v1_router or s.mock_providers:
+    if not v1mode.on("router", s) or s.mock_providers:
         return None
     try:
         return get_router()

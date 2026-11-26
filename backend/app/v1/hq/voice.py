@@ -27,6 +27,7 @@ from app.studio.stages.voice import voice_id
 from app.v1.qa import _words as _qa_words
 from app.v1.qa import heard_share, rule_now
 from app.v1.stages import StageFailed, Stages
+from app.v1 import mode as v1mode
 
 CACHE_VERSION = "hq-voice-1"
 
@@ -80,7 +81,7 @@ def _judges(st: Any, lang: str) -> list[str]:
 
 def limits(s: Settings) -> tuple[float, float, float]:
     """(largest speed-up, least share of words heard back, least speaker similarity) for a version to pass."""
-    return (s.v1_fit_max_speed if s.v1_fit_115 else fit.MAX_SPEED), s.v1_hq_backcheck_min, s.v1_hq_similarity_min
+    return (s.v1_fit_max_speed if v1mode.on("fit_115", s) else fit.MAX_SPEED), s.v1_hq_backcheck_min, s.v1_hq_similarity_min
 
 
 async def make(st: Stages, text: str, lang: str, vspec: VoiceSpec, *, idx: int, speed: float = 1.0,
@@ -177,7 +178,7 @@ def take_plan(s: Settings) -> tuple[int, float | None, bool]:
     """
     if s.v1_hq_takes_fixed > 0:
         return int(s.v1_hq_takes_fixed), None, True
-    if s.v1_hq_adaptive:
+    if v1mode.on("hq_adaptive", s):
         return max(1, int(s.v1_hq_adaptive_max)), float(s.v1_hq_adaptive_min or s.v1_hq_backcheck_min), False
     return max(1, int(s.v1_hq_nbest)), None, False
 

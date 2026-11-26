@@ -147,6 +147,18 @@ class OpenAILLM:
         )
         return clean_line(await self._chat(system, text, max_tokens=300))
 
+    async def judge_lines(self, pairs: list[tuple[str, str]], target: str) -> list[dict[str, bool]]:
+        """v1.2 guards: each (source line, dub line) judged for content shift and lost meaning (app/v1/guards.py
+        has the question and reads the answer). One retry on an answer that cannot be read."""
+        from app.v1 import guards
+        system, user = guards.judge_system(target), guards.judge_user(pairs)
+        for _ in range(2):
+            got = guards.parse_verdicts(await self._chat(system, user, temperature=0.0, max_tokens=40 * len(pairs) + 200,
+                                                         timeout=20.0), len(pairs))
+            if got is not None:
+                return got
+        raise ProviderError("llm.judge: no usable answer")
+
 
 def batch_system_prompt(target: str, glossary: list[str]) -> str:
     lang = LANG_NAMES.get(target, target)

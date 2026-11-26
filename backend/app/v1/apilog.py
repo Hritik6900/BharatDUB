@@ -31,13 +31,14 @@ from pathlib import Path
 from typing import Any
 
 from app.config import BACKEND_DIR, get_settings
+from app.v1 import mode as v1mode
 
 TEST: ContextVar[str] = ContextVar("v1_api_test", default="other")
 _lock = threading.Lock()
 
 
 def enabled() -> bool:
-    return bool(get_settings().v1_api_log)
+    return bool(v1mode.on("api_log", get_settings()))
 
 
 def log_dir() -> Path:

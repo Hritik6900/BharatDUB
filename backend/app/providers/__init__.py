@@ -11,6 +11,7 @@ from functools import lru_cache
 from typing import Any
 
 from app.config import get_settings
+from app.v1 import mode as v1mode
 
 
 def engine_of(engine: str | None = None) -> str:
@@ -21,7 +22,7 @@ def engine_of(engine: str | None = None) -> str:
 
 def _guard(provider: str, obj: Any) -> Any:
     """v1 (`V1_BREAKER`): a GPU provider gets its circuit breaker. Flag off = the object as it is."""
-    if not get_settings().v1_breaker:
+    if not v1mode.on("breaker", get_settings()):
         return obj
     from app.v1 import breaker
     return breaker.attach(provider, obj)
@@ -29,7 +30,7 @@ def _guard(provider: str, obj: Any) -> Any:
 
 def _router() -> Any:
     """v1: the config-driven router when `V1_ROUTER` is on, else None and the fixed table below is used."""
-    if not get_settings().v1_router:
+    if not v1mode.on("router", get_settings()):
         return None
     from app.v1.router import active
     return active()
@@ -53,6 +54,23 @@ def get_gpu_voice(engine: str | None = None, mode: str = "live") -> Any:
 def get_llm(engine: str | None = None, mode: str = "live") -> Any:
     r = _router()
     return r.llm(mode, engine_of(engine)) if r else _llm(engine_of(engine))
+
+
+def get_judge(engine: str | None = None, mode: str = "live") -> Any:
+    """v1.2: the model that judges a dub line against its source (app/v1/guards.py). The hosted model when one is
+    configured: in a GPU-engine session that is another model than the translator, and it leaves our GPU to the
+    stream. Else the engine's own translator. It is a language-model call: it never goes through the hosted voice
+    account's one-request gate."""
+    s = get_settings()
+    if s.llm_base_url and s.llm_model and not s.mock_providers:
+        return _hosted_llm()
+    return get_llm(engine, mode)
+
+
+@lru_cache
+def _hosted_llm() -> Any:
+    from app.providers.llm_openai import OpenAILLM
+    return OpenAILLM()
 
 
 @lru_cache

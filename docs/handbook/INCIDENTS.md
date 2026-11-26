@@ -137,6 +137,11 @@ each time). Numbers are **measured** unless labelled. Sources: SPEC sections 17,
   refused line is silently without audio (flags off, v0 behaviour).
 - **Fix:** with `V1_EN_SINGLE_VOICE` a refused English line is asked once more (brought back 16 of 55 refused lines
   a run, 29%). `V1_EN_VOICE=copy` keeps English audible on such a night.
+- **Fix in v1.2 Part 2 (26 Nov 2026, auto mode; [ADR-0036](adr/0036-auto-mode.md)):** a stock line refused before any
+  sound is asked once more in every language, then every other voice the line can have is asked in one order
+  (`backend/app/v1/voicechain.py`); a line that no voice makes is marked `unspoken` on the phrase, in the trace,
+  the session's metrics and the log. Tested with fake providers that refuse; not seen on a real refusal yet. In
+  manual mode a refused line is still silent, as before.
 - **Follow-ups:** item 22 (b): should a session in the stock voice move once to the copy when the stock voice stops
   answering (founder's decision). The stock column's timing that night is flattered; a healthy night was not
   measured (item 19 c). See [ADR-0031](adr/0031-english-single-voice.md),

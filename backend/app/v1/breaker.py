@@ -35,6 +35,7 @@ import httpx
 
 from app.config import Settings, get_settings
 from app.providers.base import ProviderError
+from app.v1 import mode as v1mode
 
 log = logging.getLogger("bharatdub.breaker")
 T = TypeVar("T")
@@ -160,7 +161,7 @@ class Breaker:
 
 # ---------- the registry ----------
 def enabled(settings: Settings | None = None) -> bool:
-    return bool((settings or get_settings()).v1_breaker)
+    return bool(v1mode.on("breaker", settings or get_settings()))
 
 
 def name_for(provider: str, url: str) -> str:
@@ -256,7 +257,7 @@ def targets(s: Settings | None = None) -> list[tuple[str, str]]:
         out.append((name_for("indicf5", u), u + "/health"))
     for provider, url, path in (("whisper_gpu", s.gpu_stt_url, "/health"), ("gemma", s.gpu_llm_url, "/models"),
                                 ("mio", s.gpu_mio_url, "/health"),
-                                ("indicf5_v1", s.v1_tts_server_url if s.v1_tts_server else "", "/health")):
+                                ("indicf5_v1", s.v1_tts_server_url if v1mode.on("tts_server", s) else "", "/health")):
         if url:
             out.append((name_for(provider, url), url.rstrip("/") + path))
     return out

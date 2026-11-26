@@ -20,7 +20,10 @@ from typing import Any
 import httpx
 
 KEYS = [("turnaround_s", "s"), ("backcheck_pct", "%"), ("backcheck_by_words_pct", "%"), ("speed_max", "x"),
-        ("lines", ""), ("flagged", ""), ("takes", ""), ("warnings", "")]
+        ("lines", ""), ("flagged", ""), ("takes", ""), ("warnings", ""),
+        ("guard_script_failed", ""), ("guard_script_flagged", ""), ("guard_shift_checked", ""),
+        ("guard_shift_not_checked", ""), ("guard_shift_failed", ""), ("guard_shift_flagged", ""),
+        ("guard_shortened_flagged", ""), ("unspoken", "")]
 
 
 async def one_job(a: argparse.Namespace, name: str, api: str, hq: bool, k: int) -> dict[str, Any]:
@@ -64,6 +67,7 @@ async def one_job(a: argparse.Namespace, name: str, api: str, hq: bool, k: int) 
             b = (await c.get(f"/api/v1/jobs/{jid}/backcheck", params={"lang": lang}, timeout=600)).json()
             per_lang[lang] = {key: b.get(key) for key in ("scored", "backcheck_mean", "backcheck_by_words", "speed_max", "flagged", "takes", "judges", "rule")}
             per_lang[lang]["lines"] = len(b.get("lines") or [])
+            per_lang[lang]["guard"] = b.get("guard") or {}
         res["per_lang"] = per_lang
         means = [v["backcheck_mean"] for v in per_lang.values() if v["backcheck_mean"] is not None]
         byw = [v["backcheck_by_words"] for v in per_lang.values() if v["backcheck_by_words"] is not None]
@@ -73,6 +77,13 @@ async def one_job(a: argparse.Namespace, name: str, api: str, hq: bool, k: int) 
         res["lines"] = sum(v["lines"] for v in per_lang.values())
         res["flagged"] = sum(v["flagged"] or 0 for v in per_lang.values())
         res["takes"] = sum(v["takes"] or 0 for v in per_lang.values())
+        # v1.2 guards, each its own number (None = that backend did not run the guard): the script guard and the
+        # content-shift check look at every line before the voice; `unspoken` = lines no voice could say.
+        checked = [v["guard"] for v in per_lang.values() if v["guard"].get("checked")]
+        for key in ("script_failed", "script_flagged", "shift_checked", "shift_not_checked", "shift_failed", "shift_flagged",
+                    "shortened_flagged"):
+            res[f"guard_{key}"] = sum(g.get(key) or 0 for g in checked) if checked else None
+        res["unspoken"] = sum(v["guard"].get("unspoken") or 0 for v in per_lang.values())
     return res
 
 

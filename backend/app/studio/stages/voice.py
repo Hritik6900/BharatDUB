@@ -20,10 +20,18 @@ def voice_id(voice: VoiceSpec) -> str:
     return "clone:" + hashlib.sha256(voice["embedding"]["embedding"].encode()).hexdigest()[:16]
 
 
+def _has_sound(audio: bytes) -> bool:
+    """A WAV with speech in it: more than a header and a few samples."""
+    return len(audio) > 2000
+
+
 async def synth_line(tts: TTS, text: str, lang: str, voice: VoiceSpec, tts_model: str, sr: int,
-                     usage: dict, warnings: list[str], speed: float = 1.0) -> Path:
+                     usage: dict, warnings: list[str], speed: float = 1.0, fallback: bool = False) -> Path:
     """Return a cached WAV path. A failing clone falls back to the stock voice for this line.
-    `speed` > 1: only for a provider that can speak faster by itself (`native_speed`, our GPU voice)."""
+    `speed` > 1: only for a provider that can speak faster by itself (`native_speed`, our GPU voice).
+    `fallback` (v1.2 auto mode): a voice that refuses, fails or makes nothing is followed by every other voice
+    the line can have, in the one order of app/v1/voicechain.py; only when none of them makes it does this raise
+    (`NoVoice`, with what each one answered)."""
     speed = round(speed, 2) if getattr(tts, "native_speed", False) else 1.0
     key = au.cache_key(text, lang, voice_id(voice), tts_model, sr, *([f"speed{speed}"] if speed != 1.0 else []))
     hit = cache.get_file("voice", key, "wav")
@@ -32,7 +40,11 @@ async def synth_line(tts: TTS, text: str, lang: str, voice: VoiceSpec, tts_model
         return hit
     try:
         audio = await (tts.synth(text, lang, voice, speed=speed) if speed != 1.0 else tts.synth(text, lang, voice))
+        if fallback and not _has_sound(audio):
+            raise ProviderError("the voice made no sound")
     except ProviderError as e:
+        if fallback:
+            return await _another_voice(tts, text, lang, voice, tts_model, sr, usage, warnings, e)
         if voice["kind"] != "clone":
             raise
         warnings.append(f"Cloned voice failed for a {lang} line, used stock voice: {str(e)[:120]}")
@@ -40,6 +52,56 @@ async def synth_line(tts: TTS, text: str, lang: str, voice: VoiceSpec, tts_model
     usage["tts_calls"] = usage.get("tts_calls", 0) + 1
     usage["tts_chars"] = usage.get("tts_chars", 0) + len(text)
     return cache.put_file("voice", key, "wav", audio)
+
+
+class NoVoice(ProviderError):
+    """Every voice a line could have was asked and none made it. `tried`: [{voice, error}]."""
+
+    def __init__(self, tried: list[dict[str, str]]) -> None:
+        super().__init__("no voice made this line: " + "; ".join(f"{t['voice']}: {t['error']}" for t in tried))
+        self.tried = tried
+
+
+async def _another_voice(tts: TTS, text: str, lang: str, voice: VoiceSpec, tts_model: str, sr: int,
+                         usage: dict, warnings: list[str], first_error: Exception) -> Path:
+    """The voices after the one that failed, in the order of app/v1/voicechain.py."""
+    from app.v1 import voicechain
+    emb = dict(voice["embedding"]) if voice["kind"] == "clone" else {}
+    on_engine = bool(voice["kind"] == "clone" and getattr(tts, "engine_speaks", None) and tts.engine_speaks(lang, voice))
+    first = "gpu" if on_engine else "copy" if voice["kind"] == "clone" else "stock"
+    tried = [{"voice": first, "error": str(first_error)[:120]}]
+    can = {"stock"}
+    backup = getattr(tts, "backup", None)
+    if on_engine and backup is not None and emb.get("dtype") != "gpu-ref":
+        can.add("copy")         # the hosted copy of the same voice
+    alt = voicechain.stock_alt(lang)
+    if alt is not None and voice != alt:
+        can.add("stock_alt")
+    if voice["kind"] == "stock" and voice.get("voice") != voicechain.stock(lang)["voice"]:
+        first = "stock_alt"
+        tried[0]["voice"] = first
+    for k in voicechain.rest([first], can):
+        try:
+            if k == "copy":
+                audio = await backup.synth(text, lang, voice)
+                if not _has_sound(audio):
+                    raise ProviderError("the voice made no sound")
+                usage["tts_calls"] = usage.get("tts_calls", 0) + 1
+                usage["tts_chars"] = usage.get("tts_chars", 0) + len(text)
+                path = cache.put_file("voice", au.cache_key(text, lang, voice_id(voice), tts_model, sr, "hosted-copy"), "wav", audio)
+            else:
+                v = alt if k == "stock_alt" and alt is not None else voicechain.stock(lang)
+                audio_path = await synth_line(tts, text, lang, v, tts_model, sr, usage, warnings)
+                if not _has_sound(audio_path.read_bytes()):
+                    raise ProviderError("the voice made no sound")
+                path = audio_path
+        except ProviderError as e:
+            tried.append({"voice": k, "error": str(e)[:120]})
+            continue
+        usage["voice_fallbacks"] = usage.get("voice_fallbacks", 0) + 1
+        warnings.append(f"A {lang} line was refused by the {first} voice ({tried[0]['error']}) and is spoken by the {k} voice.")
+        return path
+    raise NoVoice(tried)
 
 
 SAMPLE_MIN_S, SAMPLE_MAX_S = 5.0, 28.0  # the clone endpoint takes 5-30 s of clean speech

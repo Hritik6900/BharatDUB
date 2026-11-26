@@ -2,7 +2,7 @@
 
 Operations summary, dated 2026-11-25. This page points to the detailed sources and does not repeat them:
 
-- [`../v1/RUNBOOK.md`](../v1/RUNBOOK.md): start, stop, check, flags, routing, GPU modes, rollback, backup, deploy kit.
+- [`../v1/RUNBOOK.md`](../v1/RUNBOOK.md): start, stop, check, auto mode and its overrides, the flags of manual mode, routing, GPU modes, rollback, backup, deploy kit.
 - [`../v1/NEEDS_APPROVAL.md`](../v1/NEEDS_APPROVAL.md): the 26-item checklist with exact commands. **It holds the
   GPU VM's address and the SSH command lines. Never copy them into another file, a log, a chat or a commit.**
 - v0's GPU engine notes (read-only reference): `gpu_engine/README.md` in the v0 folder.
@@ -39,7 +39,7 @@ powershell -File scripts\v1\run-local.ps1          # backend 8110 (own window), 
 Then in Git Bash, from the v1 folder:
 
 ```bash
-scripts/v1/demo-check.sh      # READY / NOT READY: backend, website, model servers, hosted services, GPU, flags, nobody else live
+scripts/v1/demo-check.sh      # READY / NOT READY: backend, website, model servers, hosted services, GPU, the mode and what is in force, nobody else live
 scripts/v1/warmup.sh          # one small request through each service; prints each time
 scripts/v1/v0-check.sh        # v0 still answers (read-only)
 scripts/v1/gpu-mode.sh status # which model servers answer, free GPU memory, who is live (read-only)
@@ -48,26 +48,49 @@ scripts/v1/gpu-mode.sh status # which model servers answer, free GPU memory, who
 Pages: `http://localhost:3100/health`, `/metrics-ui`. Stop: `scripts/v1/stop-local.sh` (or close the windows).
 Details: `../v1/RUNBOOK.md` sections 1-2.
 
-## Flags and the recommended v1 env
+## Mode, overrides, flags
 
-All flags default off except `V1_HQ_ADAPTIVE` (on since 26 Nov 2026, HQ jobs only); with `V1_STUDIO_HQ` and the rest off v1 behaves as v0. Restart the backend after a change. Every flag with its
-effect and measured reason: `../v1/RUNBOOK.md` section 3; a ready block is at the end of `backend/.env.example`.
-Summary from `docs/v1/V1_1_SUMMARY.md` section 3 (nothing new measured for this list):
+**v1 runs in auto mode (v1.2, [ADR-0036](adr/0036-auto-mode.md)): nobody manages switches.** `V1_MODE=auto` is the
+default; `backend/app/v1/mode.py` is the one place that says what is in force; the per-feature `V1_*` lines in
+`backend/.env` are not read. Details, thresholds and where to look: `../v1/RUNBOOK.md` section 3.
 
-| Set | Flags | Reason (source) |
+| In auto mode | What |
+|---|---|
+| Always on | trace, router, API log, breakers and ladder, stock voices for a `/live` session without a streamer profile, Studio HQ with its review, 1.15x fit limit, adaptive takes, normaliser, a job's glossary, the HQ judge |
+| Auto budget | the Live duration budget applies to a language only while its dub is behind or speech is dense; else the full translation. A sample of lines is judged for lost meaning; a language over 25% gets a looser budget |
+| English | one voice per session, chosen once at the start from a timed probe of the copied voice |
+| A refused line | asked again, then spoken by another voice; only when every voice fails is it marked `unspoken`, and logged |
+| Guards | script guard on every translated line; content shift on every Studio line and on a sample of Live lines |
+
+**None of the auto thresholds is measured yet** (v1.2 Part 3 does that).
+
+**To switch ONE behaviour off:** `backend/config/overrides.yaml` (every entry is commented out as shipped; read
+once at start; a bad file is logged and ignored). Remove the `# ` in front of the line, restart the backend.
+
+| Entry | Effect |
+|---|---|
+| `trace`, `router`, `api_log`, `breaker`, `live_degrade`, `fit_115`, `hq_adaptive`, `hq_normalise`, `hq_auto_glossary`, `hq_judge`: `off` | that behaviour as before it existed |
+| `live_stock_default: off` | `/live` may copy the voice on the stream again (consent tick) |
+| `studio_hq: off` | HQ is not offered (`hq_review: off` has no effect while HQ is on) |
+| `live_budget: off` / `auto_budget: off` / `meaning_check: off` | no budget at all / the budget on every phrase as in v1.1 / no budget is loosened |
+| `en_single_voice: off` / `en_auto: off` / `en_voice: stock` or `copy` | English line by line again / no probe / the voice pinned |
+| `voice_fallback: off`, `script_guard: off`, `shift_check: off` | that part of v1.2 off |
+| `live_record: off`, `hq_calibrate: off`, `listen_test: off` | no recordings / that page answers 404 |
+| `tts_server`, `tts_maya`, `live_late_shorten`, `live_backcheck`: `on` | not part of auto mode; for a trial only |
+
+**Manual mode** (`V1_MODE=manual`, restart): every feature follows its own `V1_*` flag as before v1.2, all off by
+default except `V1_HQ_ADAPTIVE`; with everything off v1 behaves as v0; what v1.2 added is off; the overrides file is
+not read. It is the mode of comparison backends, baselines and the tests. The measured reason behind each flag:
+`../v1/RUNBOOK.md` section 3.4. Removed in v1.2 ([ADR-0037](adr/0037-removed-dead-features.md)): the dynamic first
+phrase, the engine-speed flag, the session warm start and the controller's own switch; an env line that still sets
+one is ignored.
+
+| Set | Value | Reason |
 |---|---|---|
-| **On** | `V1_TRACE`, `V1_ROUTER`, `V1_API_LOG`, `V1_STUDIO_HQ`, `V1_FIT_115`, `V1_LIVE_STOCK_DEFAULT` | the list that was asked for |
-| **On with HQ** | `V1_HQ_JUDGE`; `V1_HQ_REVIEW` needs no setting: since 26 Nov 2026 the code reviews every HQ job whatever the flag says | HQ without the review dubbed 2 of 3 test videos from a damaged transcript (25 of 38 lines vs 0), [INC-07](INCIDENTS.md#inc-07-hq-transcript-damage-found) |
-| **On (founder, 26 Nov 2026)** | `V1_HQ_ADAPTIVE` (also the code's default) | against five takes of every line 61% less voice time (206 s against 524 s over three videos) with the same take kept on 76 of 76 lines; against v1's earlier rule (up to 4 takes until one passes) the same number of takes (143), so it costs nothing (**measured** 25 Nov, [EXP-027](experiments/EXP-027-hq-judge-rerun.md)) |
-| **Founder's call, recommended on** | `V1_BREAKER` + `V1_LIVE_DEGRADE` (together) | 50 s stall: 4 of 22 phrases dubbed with them off (1 run), all with them on (3 runs) (**measured**, relay, 24 Nov) |
-| **Founder's call** | `V1_LIVE_BUDGET` (one switch for all languages) | within 1 s 86.5% -> 92.3% (dense reel, 5 runs); Tamil lost meaning in 7 of 20 lines read |
-| **On once a voice is chosen** | `V1_EN_SINGLE_VOICE` with `V1_EN_VOICE` | NEEDS_APPROVAL item 22 |
-| **On when used** | `V1_HQ_CALIBRATE`, `V1_LISTEN_TEST` | pages only; no labels, no pairs yet |
-| **Off** | `V1_LIVE_RATECTRL`, `V1_LIVE_NATIVE_SPEED`, `V1_LIVE_WARMSTART`, `V1_PHRASE_DYNAMIC`, `V1_LIVE_LATE_SHORTEN`, `V1_LIVE_BACKCHECK`, `V1_TTS_SERVER`, `V1_TTS_MAYA`, `V1_HQ_NORMALISE`, `V1_HQ_AUTO_GLOSSARY`, `V1_LIVE_RECORD` | no proven gain, not measurable yet, or server not loaded |
 | Store | `V1_STORE=json` | Postgres never run |
 
-Watch out: with `V1_LIVE_STOCK_DEFAULT` on, a `/live` session without a streamer profile never learns a voice;
-every v1.1 Live number was measured with a learned voice. The only v1 stock-voice runs: first audio p50 5.1 s and
+Watch out: in auto mode stock voices are always on for a `/live` session without a streamer profile, so it never
+learns a voice and its consent tick has no effect; every v1.1 Live number was measured with a learned voice. The only v1 stock-voice runs: first audio p50 5.1 s and
 58.3% within 1 s, against 2.34 s and 83.3% with the learned voice (V1_1_SUMMARY section 3, **measured**, 3 runs).
 `V1_HQ_ADAPTIVE` was the one flag the sources disagreed on (on in one, off in three). The founder decided on
 26 Nov 2026: **on**. [V1_1_SUMMARY](../v1/V1_1_SUMMARY.md) section 3, [the v1 runbook](../v1/RUNBOOK.md) section 3,
@@ -102,7 +125,7 @@ v0 was never changed, so rollback is using v0's ports again.
 
 | Problem | Action |
 |---|---|
-| One v1 behaviour misbehaves | switch its flag off, restart the v1 backend |
+| One v1 behaviour misbehaves | its line in `backend/config/overrides.yaml` (manual mode: its flag), restart the v1 backend |
 | v1 as a whole | `scripts/v1/stop-local.sh`; use 3000/8010 |
 | Code | tag `v0-baseline` = `80c36d8` |
 | Card stuck in an HQ window | `scripts/v1/gpu-mode.sh normal --run`, else v0's `start_llm.sh`; meanwhile translation goes to Gemini |
@@ -129,7 +152,7 @@ v0 was never changed, so rollback is using v0's ports again.
 | 5 | `scripts/v1/demo-check.sh` says READY, 15 minutes ahead | same |
 | 6 | `scripts/v1/warmup.sh` run | same |
 | 7 | Stream watcher open: `powershell -File scripts\v1\stream-watch.ps1 -Window` (restart it after an update) | shows ENGINE/LINK/CIRCUIT/RUNG lines |
-| 8 | Flags as recommended above; backend restarted after the last change | section above |
+| 8 | `GET /api/v1/flags` says `V1_MODE: auto` and shows no override you did not mean; backend restarted after the last change | section above |
 | 9 | No comparison backends left on 8111-8115 (`Get-NetTCPConnection -LocalPort 8111,8112,8113,8114,8115 -State Listen`) | NEEDS_APPROVAL item 18 |
 | 10 | Nobody else live on v0 or v1; no replay or A/B run in progress | one GPU through one tunnel is one stream; the hosted account takes one request at a time |
 | 11 | Hosted services healthy (the health panel shows "key set", not whether the service answers: try one line) | [INC-02](INCIDENTS.md#inc-02-hosted-stt-outage), [INC-06](INCIDENTS.md#inc-06-hosted-stock-voice-refusing-lines-http-502) |

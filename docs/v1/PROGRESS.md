@@ -1465,3 +1465,179 @@ on that stream). Old rows 1 and 2 are rows 2 and 3 ("as row 1" became "as row 2"
 - **Roll back:** `V1_HQ_ADAPTIVE=false`; `LIVE_SYNC_EASE=false`; `V1_RECORD_KEEP_DAYS=0` (never by itself). The
   review of HQ jobs has no switch by decision: do not offer HQ (`V1_STUDIO_HQ=false`).
 
+## v1.2 Part 2: auto mode (26 Nov 2026)
+
+What was asked: one setting, `V1_MODE=auto`, v1's default; in it nobody manages switches. Built and tested here;
+**nothing in this part is a measurement**: two short sessions on one comparison backend were a smoke check
+(below), and the comparison of auto against "budget on" is Part 3. The backend on 8110 and the website on 3100
+were not restarted and the website was not rebuilt: both run the old code until they are. ADR-0036 (auto mode),
+ADR-0037 (removed features), both drafts until Part 3's numbers are in.
+
+### The resolver and the overrides file
+
+- **`backend/app/v1/mode.py`** (new): `on(feature, settings)` is the single answer to "is this in force". `auto`
+  (the default; anything but `manual`): the table `AUTO` in that file decides, the per-feature `V1_*` settings are
+  not read, and `backend/config/overrides.yaml` may switch one behaviour off or pin a value. `manual`: every
+  feature follows its own setting as before v1.2 and what v1.2 added is off. "HQ never runs without the review"
+  lives in the same function. Every read of a flag in `backend/app/` now goes through it (the Live pipeline asks
+  once, when a session's pipeline is built); `app/v1/flags.py` only reports.
+- **`backend/config/overrides.yaml`** (new, every entry commented out) and `V1_OVERRIDES_FILE`. Read once. Missing:
+  no overrides. Not readable, not a list of `name: value`, an unknown name or value: logged, that part ignored,
+  the backend starts. Read in auto mode only. Entries: `RUNBOOK.md` section 3.2.
+- **Always on in auto:** trace, router, API log, breaker, ladder, stock default, Studio HQ, HQ review, fit 1.15,
+  adaptive takes, normaliser, job glossary (the founder's list). **Decided here, not on that list:** the HQ judge is
+  on (the v1.1 reports recommend it with HQ); recordings are allowed (a session still has to ask); the two tool
+  pages answer; the batching voice server, Maya, the late-line shortener and the live back-check are **not** part
+  of auto (never measured alone, or not deployed) and can only be pinned on in the overrides file for a trial.
+- `/api/v1/flags` is still there (mode, overrides in force, what is on). `tests/conftest.py` pins
+  `V1_MODE=manual` with every flag off, so the suite of v1 and v1.1 means what it meant.
+
+### Auto budget and the meaning check
+
+- **`app/v1/dense.py`:** `AutoGate` (per language: budget on while the running mean of the backlog is over 500 ms
+  [off under 200], the running mean of dub length over slot is over 1.15 [off under 1.05], or speech is dense; off
+  only after 4 calm lines and not before 15 s), `WordRate` (source words a second over 30 s: dense over 4.0, until
+  under 3.2; beside the speaking share's 70% / 60%), `MeaningRate` (below). For the gate "behind" is also a phrase
+  whose turn comes after its own moment (sound made late: a slow voice, a stall); the controller keeps the backlog
+  alone, as it was measured in v1.1.
+- **`live/pipeline.py` `_translate`:** budget off for a language = the full prompt: no word limit, no "be brief",
+  and v0's own word limit is not used either. Budget on = v1.1's budget, its scale from the controller (which now
+  exists only here), at most 0.9 while dense, short lines joined to the next, speed-up at most **1.3x**
+  (`V1_DENSE_MAX_TEMPO`; v1.1 measured 1.4x, which nobody has heard: decided here).
+- **`app/v1/meaning.py`** (new) and `app/v1/guards.py` (new): every 3rd spoken line of a language while its budget
+  is on (every 8th while off) goes into a queue of 6; one worker has up to 4 lines of a language judged in one
+  model call, after they were spoken: `lost` (something that matters is missing) and `shift` (it says something
+  different). A full queue or no answer is counted, never taken as a pass. The judge comes from
+  `providers.get_judge`: the hosted model when one is configured (in a GPU-engine session that is another model
+  than the translator), else the session's translator; a model call, so it never waits for or holds the hosted
+  voice account's one request.
+- **Loosening:** over 25% lost on at least 6 (of the last 12) judged budgeted lines: one step, 0.1 more of the slot
+  (on top of the line's own room); the rate is then measured afresh; at 3 steps the language is translated in
+  full. At or under 10% on 6 new lines, with the dub behind, 120 s after the last step: one step back; from "in
+  full" one step back on trial after 120 s behind.
+- **Logged:** trace `live_auto_budget` (on/off, why, backlog, dur_ratio, dense), `live_meaning` (per judged line:
+  lost, shift, the rate, steps; no text), `live_budget_adjust`; a session's `/metrics`: `auto_budget`,
+  `auto_budget_log`, `ratectrl`, `meaning`; per phrase `auto:<lang>`, `loose:<lang>`, `judged:<lang>`.
+
+### The English voice
+
+- `app/v1/warm.py` is now only this (`en_mode` for manual mode, `en_choice`, the probe line).
+  `LivePipeline._en_start`, `_en_probe`, `_en_set`. Auto mode, every session with English (v1.1: GPU-engine
+  sessions only): a voice pinned in the overrides file; else the stock voice when the session has no copied voice
+  at its start (also when one is still to be learned from the stream); else **one probe line (11 words) in the
+  hosted copy, timed**. Time a line has = the viewers' hold (6 s; 8.5 s for a hosted copy without our engine; a
+  streamer's own offset) less `V1_EN_PIPELINE_MS` 3800 (the phrase, about 2.2 s, and its text, about 1.6 s: v1.1's
+  figures). In time: the copy for the whole session. Longer, failed, or no answer in 6 s: the stock voice.
+- Chosen once (`_en_set` refuses a second choice), stored on the session row (`en_voice`), in `/metrics`
+  (`en_voice_choice`) and the trace (`live_en_voice`, with the probe's ms). The first English lines wait for the
+  choice. A later change only by the ladder, per failing line, logged as `live_voice_fallback`.
+
+### A refused line
+
+- **`app/v1/voicechain.py`** (new): the one order, `gpu, copy, stock, stock_alt` (our engine's copy, the hosted
+  copy, the language's stock voice, its other stock voice where it has two). Live: a hosted stock line refused
+  before any sound is asked once more (v1.1 did that for English only); then the ladder's own step (copy to
+  stock); then every voice of the order that was not asked. Only when all made nothing: `unspoken:<lang>` on the
+  phrase, `unspoken` in the trace's phrase record and `/metrics`, a `live_voice_fallback` event with what each voice
+  answered, an error line in the log and on the console. A line whose translation failed, or that fell to an
+  error in the pipeline, is marked the same way (`untranslated`, `error: ...`).
+- Studio: `stages/voice.py` `synth_line(..., fallback=True)` walks the same order; `NoVoice` when all fail; the
+  runner then marks the line (`unspoken`, flagged, no audio), warns, traces `studio_unspoken` and **finishes the
+  job** (manual mode: the job fails, as before). HQ the same around `best_line`.
+- Auto mode only. In manual mode a refused line is still silent and unrecorded, as in v1.1 (kept so that a
+  baseline is what it was).
+
+### Guards
+
+- **Script** (`guards.script_ok` = the translators' own `wrong_script`): every translated Live line; a failing
+  line is translated once more (4 s at most), then spoken and flagged (`script:<lang>` 1 = put right, 2 =
+  flagged). The transcript, when the session's source language has a script of its own: marked `src_script` 0
+  (a transcript cannot be made again). It sees letters, not words.
+- **Content shift, Studio** (`app/v1/lineguard.py`, new): every translated line is judged before the voice, in
+  batches of 20; a failing line (`shift` or `lost`) is translated once more and judged again; passes: the new line
+  is dubbed; fails again: the first line is dubbed and flagged ("needs your ear", with the reason). A line that was
+  shortened to fit its slot afterwards is judged once more and only flagged. A line the judge did not answer for is
+  `not_checked`. Standard and HQ jobs (HQ: after its review). Per job: `stage_timings._guards[<lang>]`.
+- **Content shift, Live:** the `shift` answer of the same judged sample; counted, nothing made again.
+- **In the eval outputs, each its own column:** `eval/live_replay.py` (script guard failed / flagged, transcript,
+  content shift judged / found, meaning judged / lost / rate, spoken by another voice, no sound marked, no sound
+  without a mark; per language too), `eval/v1/studio.py` and `studio_table.py` (script wrong / flagged, shift
+  checked / not checked, wrong / flagged, shortened and flagged, no sound), `logs/sessions/index.csv` for sessions
+  of auto mode. The tables say "every line" or "a sample" in the row's name.
+
+### Removed (ADR-0037)
+
+`V1_PHRASE_DYNAMIC` (`DynamicPhraser`, five settings), `V1_LIVE_NATIVE_SPEED` (its branch, two settings, the
+`native` field), `V1_LIVE_WARMSTART` (the warm-up for every language and engine, the stored voice sent at session
+creation, the pitch tracker and matched stock voice, the softened change of voice, two settings, the `open` /
+`handover` marks, the `warm` block, two trace events), `V1_LIVE_RATECTRL` as a switch. Their tests went;
+dense mode and the controller are tested again in auto mode. `V1_SPEC_TRANSLATE` and `V1_LLM_PREFIX_CACHE` had no
+trace left in code. An env file that still sets any of them loads, in either mode (test). The last commit with the
+code: `339589c`. Reports of measurements were not edited; `RUNBOOK.md`, `SUMMARY.md`, `V1_1_SUMMARY.md` (a note
+and the rows), `docs/v1/ARCHITECTURE.md`, `NEEDS_APPROVAL.md` (the items that named the flags) and the handbook's
+current-state pages were.
+
+### What a user sees differently
+
+- `/live`: with stock voices always on, the choice "the voice on this stream" and its consent tick are gone (they
+  would do nothing); a paragraph says where a copied voice comes from. The recording tick stays (consent).
+- `/health`: "How this server runs: automatic" instead of a list of switches. `/listen-test`,
+  `/studio/calibrate`, `/metrics-ui`: their notices no longer name settings.
+- Studio editor: a standard job's line can now be marked "needs your ear" (a guard, or no voice).
+- The Engine choice and the HQ choice are untouched.
+- Type-checked (`npx tsc --noEmit` passes); not looked at in a browser; **not live until the website is rebuilt**.
+
+### `LIVE_STOCK_DEFAULT` always on: what it does to `/live`
+
+Built as asked. In auto mode `POST /api/live/sessions` without a streamer profile drops `voice_from_stream` and
+`voice_profile_id`: such a session **never learns the voice on the stream, with or without the consent tick**, and
+every language is spoken by the hosted stock voices, which share the hosted account's one request at a time.
+A streamer's own session (`/streamer`, recorded voice) is not touched. `live_stock_default: off` in the overrides
+file is the way back. The replay harness creates exactly such a session (`--voice stream`, no streamer), so in
+pure auto mode it measures stock voices; see the smoke check.
+
+### Smoke check (n = 1 each; not a result)
+
+One comparison backend, port 8120, `-Mode auto`, no overrides, GPU engine, dense reel, sync mode; nobody live on
+8010 or 8110; 26 Nov 2026 about 13:05-13:20 UTC. Started twice (once more after one line of the gate was changed).
+
+- **Punjabi + Tamil, 3 loops (85 s fed, 32 phrases, 64 lines):** mode `auto` in the session's end record. Budget
+  went on for Punjabi at phrase 1 ("long": the first line's dub was 2.69 of its slot) and for Tamil at phrase 8
+  ("dense": share 85%, 6.2 words a second); it never went off (speech stayed dense). 52 lines under the budget, 12
+  in full. Meaning sample: 4 lines judged (2 Punjabi: both lost and shifted; 2 Tamil: neither); no adjustment (under
+  6 samples). Script guard: 64 lines checked, 3 Tamil lines failed, none put right by the second translation (all 3
+  flagged). No line unspoken, none silent without a mark, no fallback to another voice.
+  **Timing was very bad:** 0 of 38 spoken lines within 1 s, first audio p50 9.7 s, 26 lines skipped as too late,
+  the hold grew to 11 s, 0% copied voice. The session was stock voices only (the rule above). The hosted stock
+  voice was slow in that hour: two single lines asked outside a session took 4.5 s and 7.1 s for 5.6 s and 4.2 s of
+  audio (first chunk after 2.3 s and 1.8 s). One request at a time at that speed cannot follow two languages of
+  dense speech. Whether anything in auto mode adds to it was not separated.
+- **English + Punjabi, 1 loop (12 phrases):** `live_en_voice` once: stock, "the session has no copied voice for
+  English"; stored on the session row. Budget on for both ("behind"). No line judged (fewer than 3 budgeted spoken
+  lines a language). 10 lines spoken, 14 skipped as too late, none unspoken.
+- Also seen: the link-stall detector opened the circuits of two voice-engine processes once ("health: timeout";
+  their health answers took 1.4-1.6 s that hour against the probe's 2 s limit). Not used by these sessions.
+
+### Not verified
+
+- Every threshold of the auto budget, the meaning check and the English probe: first values, unmeasured.
+- The budget going **off** again in a real session; a loosening step in a real session; the probe of a real copied
+  voice (no session here had one at its start: that needs a streamer profile); a real refusal walking the order
+  of voices; a Studio job in auto mode on real services; the content-shift judge's answers against a reader.
+- Auto mode with a voice learned from the stream (`-Overrides "live_stock_default=off"`): not run.
+- What the trace and the API log cost now that they are always on.
+- The website's changes in a browser.
+
+### Hand-back
+
+- **Tests:** 347 pass, 1 skipped (was 336 + 1), exit code 0. New: `tests/test_v1_auto.py` (41: the resolver in both modes; the overrides file good, bad in four ways, missing, with unknown names, with a byte-order mark, and the shipped one; the gate on, off after calm lines and a minimum time, no flapping, long lines, dense speech; the word rate; the meaning rate loosening, measuring afresh, tightening, the trial step back; the sample and its queue; normal speech gets the full prompt and the budget comes on when behind; on and off in the trace; a phrase made late counts as behind; dense speech joins short lines and stays at 1.3x; a slow judge holds no phrase up and a lossy language is loosened; the overrides for the budget; the English voice measured, chosen once, stored; too slow, failed or silent copy; no copy, pinned, hosted engine, switched off; the ladder's step on failure; a refused stock line asked again and spoken by another voice; every voice failing; our engine to the hosted copy to stock and back; an untranslated line; the order in one place; the script guard; the transcript guard; the trace record and the summary; the Studio guard, an unjudged line, the order of voices for a Studio line, a whole Studio job in auto mode; stock voices on `/live`; manual mode builds nothing of auto). Changed: `test_v1_warm.py` (the English tests stay), `test_v1_dense.py`, `test_v1_phrase.py` (the removed names in an old env file, both modes).
+- **For Part 3:** `RUNBOOK.md` section 3.5 has the commands. Auto as v1 runs:
+  `powershell -File scripts\v1\ab-server.ps1 -Port 8120 -Name auto -Mode auto`; "budget on" as in v1.1:
+  `powershell -File scripts\v1\ab-server.ps1 -Port 8121 -Name budget -Flags "V1_LIVE_BUDGET=true"`. **The two differ
+  in the voice** (stock against learned from the stream) unless auto also gets
+  `-Overrides "live_stock_default=off"` on a third backend; without that a difference cannot be put down to the
+  budget.
+- **Roll back:** one behaviour: its line in `backend/config/overrides.yaml`. All of it: `V1_MODE=manual`. The removed
+  features: `339589c`.
+- **Comparison backends:** 8120 was started twice from PowerShell and stopped; nothing answers there. The five old
+  ones on 8111-8115 were not touched.

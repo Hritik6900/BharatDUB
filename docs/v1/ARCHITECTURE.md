@@ -68,7 +68,7 @@ full-transcript context; Gemini fallback. TTS: IndicF5 (+ Maya 2 candidate); Bul
 4. v1 ports: web :3100, backend :8110, new model servers :9041–9045. Docker Compose project `bharatdb-v1`.
    Never bind 3000, 8010 or 9001–9040.
 5. Every new behaviour goes behind a flag in v1's `.env`, default OFF:
-   `V1_TRACE, V1_PHRASE_DYNAMIC, V1_TTS_SERVER, V1_TTS_MAYA, V1_LIVE_STOCK_DEFAULT,
+   `V1_TRACE, V1_TTS_SERVER, V1_TTS_MAYA, V1_LIVE_STOCK_DEFAULT,
    V1_STUDIO_HQ, V1_FIT_115, V1_STORE=json|postgres`.
 6. GPU memory: v0 uses ~34 GB; ~6 GB free, and v0 needs headroom for spikes. Only load a new model on the
    GPU if `nvidia-smi` shows (free GB − model GB) ≥ 4 GB. Otherwise DEFER.

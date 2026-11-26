@@ -5,7 +5,11 @@ All notable changes to Bharat Dub are written here. The format follows
 closed them. Numbers quoted below come from the documents named beside them; see
 [docs/handbook/RESULTS.md](docs/handbook/RESULTS.md) for the measured results with their conditions.
 
-**Flags.** Every behaviour added in v1 and v1.1 sits behind a flag whose default is off; with every flag off v1
+**Mode (v1.2 Part 2, 26 Nov 2026).** v1 runs in auto mode: `V1_MODE=auto` is the default, `backend/app/v1/mode.py`
+says what is in force, and one behaviour is switched off in `backend/config/overrides.yaml` (ADR-0036). The
+paragraph below describes manual mode (`V1_MODE=manual`), which the tests and comparison backends use.
+
+**Flags (manual mode).** Every behaviour added in v1 and v1.1 sits behind a flag whose default is off; with every flag off v1
 builds the same providers and runs the same pipeline as v0. Since v1.2 Part 1 (26 Nov 2026) three things are on
 without a flag being set: `V1_HQ_ADAPTIVE` (HQ jobs only), the review of every HQ job, and the viewer hold's way
 back (`LIVE_SYNC_EASE`, a kill switch). Tests force every v1 flag off whatever the local env
@@ -28,8 +32,40 @@ file says. Recommended settings: `docs/v1/RUNBOOK.md`, "Recommended settings".
   and recorded with links in `docs/v1/MODELS.md` and `docs/handbook/MODELS.md`. IndicF5: legal confirmation
   needed (`docs/v1/NEEDS_APPROVAL.md` item 28). Demucs: code MIT, weights "not clear" by its maintainer.
 
+- **v1.2 Part 2, auto mode (ADR-0036).** `V1_MODE=auto` is v1's default: nobody manages switches. One function,
+  `app.v1.mode.on(feature)`, answers for every feature; in auto mode the per-feature `V1_*` names are not read.
+  Always on: trace, router, API log, breakers and ladder, stock voices for a `/live` session without a streamer
+  profile, Studio HQ with its review, the 1.15x fit limit, adaptive takes, the normaliser, a job's own glossary,
+  the HQ judge. `V1_MODE=manual` is the flags as before (tests, comparison backends, baselines).
+- **v1.2 Part 2, `backend/config/overrides.yaml`:** emergency off-switches for single behaviours of auto mode (and
+  one pinned value, the English voice). Every entry is commented out as shipped; read once at start; a missing,
+  unreadable or partly wrong file is logged and ignored and never stops the backend.
+- **v1.2 Part 2, auto budget:** the Live duration budget applies to a language only while its dub is behind, its
+  lines run longer than their slots, or speech is dense (two thresholds each, a minimum time on, calm lines before
+  off); otherwise the translator gets the full prompt. The controller of v1.1 runs inside it. Not measured yet.
+- **v1.2 Part 2, meaning check:** a sample of spoken Live lines is judged by a model against its source after the
+  line was spoken (it never holds a phrase up); a language over 25% lost meaning gets a looser budget, step by
+  step, and may tighten again slowly. The rate and every step are in the trace and the session's metrics.
+- **v1.2 Part 2, English voice by measurement:** one probe line in the copied voice at a session's start, timed
+  against the time a line has; the copy or the one stock voice for the whole session, chosen once and stored.
+- **v1.2 Part 2, guards:** a script guard on every translated line (Live and Studio) and on transcripts whose
+  source language is pinned; a content-shift check on every Studio line before the voice (translated once more,
+  then flagged "needs your ear") and on a sample of Live lines (counted). Separate columns in
+  `eval/live_replay.py`, `eval/v1/studio_table.py` and `logs/sessions/index.csv`.
+- **v1.2 Part 2:** `scripts/v1/ab-server.ps1` / `.sh` start a comparison backend in auto mode (`-Mode auto`,
+  `--auto`) with its own overrides (`-Overrides`), or in manual mode with flags as before.
+
 ### Changed
 
+- **v1.2 Part 2:** in auto mode a `/live` session without a streamer profile is dubbed in stock voices and never
+  learns the voice on the stream; the consent tick for it has no effect and the rebuilt `/live` page no longer
+  shows it. (`live_stock_default: off` in the overrides file brings the tick back.)
+- **v1.2 Part 2:** no page shows a switch any more: `/health` says which mode the server runs in instead of
+  listing flags; the notices on `/listen-test`, `/studio/calibrate` and `/metrics-ui` no longer name settings.
+- **v1.2 Part 2:** the speed-up limit while speech is dense is 1.3x (`V1_DENSE_MAX_TEMPO`; 1.4x in the v1.1
+  measurements, which nobody had heard).
+- **v1.2 Part 2:** `logs/**/*.jsonl` is no longer tracked by git (the files stay on disk and in the history); the
+  index tables and the stream watcher's files still are.
 - **v1.2 Part 1:** `V1_HQ_ADAPTIVE` is on: the default in code and in `backend/.env.example`, and the same
   recommendation with the same measured reason in `docs/v1/V1_1_SUMMARY.md`, `docs/v1/RUNBOOK.md` and
   `docs/v1/SUMMARY.md` (61% less voice time against five fixed takes, the same take kept on 76 of 76 lines; the
@@ -42,7 +78,19 @@ file says. Recommended settings: `docs/v1/RUNBOOK.md`, "Recommended settings".
 
 ### Removed
 
+- **v1.2 Part 2 (ADR-0037):** `V1_PHRASE_DYNAMIC`, `V1_LIVE_NATIVE_SPEED`, `V1_LIVE_WARMSTART` and the switch
+  `V1_LIVE_RATECTRL`, with their code, settings, tests and trace fields (`native`, `open`, `handover`, the `warm`
+  block of a session's metrics). An env file that still sets them is read and they are ignored. The last commit
+  with that code: `339589c`.
+- The ready block of recommended flags at the end of `backend/.env.example` (auto mode needs none).
+
 ### Fixed
+
+- **v1.2 Part 2, a refused line was silent and left no record.** A hosted stock line refused before any sound is
+  asked once more; then every other voice the line can have is asked in one order (our engine's copy, the hosted
+  copy, the stock voice, the language's other stock voice); only when all fail is the line marked `unspoken`, on
+  the phrase, in the trace, the session's metrics and the log. A Studio job finishes with such a line marked
+  instead of failing. Auto mode only; fake providers in the tests, not seen on a real refusal yet.
 
 - **v1.2 Part 1, the viewer hold never came back down (ADR-0035, EXP-030).** After the hold grew during a slow
   link it now eases back to its normal value (6 s) in steps of 250 ms once phrases are ready early again, never

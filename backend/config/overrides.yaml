@@ -1,0 +1,54 @@
+# Emergency overrides for auto mode (V1_MODE=auto, the default). Read once when the backend starts.
+#
+# In auto mode nobody manages switches: backend/app/v1/mode.py says what is on. This file is the only way to
+# change one behaviour without leaving auto mode. Every entry below is commented out: that is the normal state.
+# To use one, remove the "# " in front of it and restart the backend. To undo, put the "# " back and restart.
+#
+#   name: off      switches that behaviour off
+#   name: on       switches on something auto mode leaves off (the last four entries; for a trial only)
+#   en_voice: ...  pins a value
+#
+# A name or value that is not known is logged and ignored; a file that cannot be read is logged and ignored as a
+# whole. Neither stops the backend. In manual mode (V1_MODE=manual) this file is not read at all.
+# What each one does and what was measured: docs/v1/RUNBOOK.md, section 3.
+
+# ---- always on in auto mode: switch one off only when it misbehaves
+# trace: off                 # no trace records (the numbers page and the reports go empty)
+# router: off                # providers from the fixed table of v0 instead of config/routing.yaml
+# api_log: off               # no record per outbound provider request under logs/api/
+# breaker: off               # no circuit breakers on our GPU endpoints, no link-stall detector
+# live_degrade: off          # no ladder (copied voice, stock voice, captions only, original sound)
+# live_stock_default: off    # a /live session without a streamer profile may copy the voice on the stream again (with the consent tick)
+# studio_hq: off             # HQ is not offered; every Studio job is a standard job
+# hq_review: off             # has no effect while studio_hq is on: HQ never runs without the review
+# fit_115: off               # Studio speeds a line up by at most 1.35x (v0) instead of 1.15x
+# hq_adaptive: off           # HQ makes up to four takes of a line until one passes, instead of one take and more only when needed
+# hq_normalise: off          # numbers, dates and short forms are not written out by rule before the voice
+# hq_auto_glossary: off      # names and terms found in a job's transcript are not used as its glossary
+# hq_judge: off              # HQ's heard-back score from the routing file's list and the older counting rule
+
+# ---- Live: the budget
+# live_budget: off           # no duration budget at all: v0's word limit, as before v1.1
+# auto_budget: off           # the budget applies to every phrase (two steps by how far behind), no controller, no dense mode
+# meaning_check: off         # no line is judged for lost meaning, and no language's budget is loosened
+
+# ---- Live: the English voice
+# en_single_voice: off       # English is chosen line by line again (the copy when 2 s are spare, else a stock voice)
+# en_auto: off               # no measurement at the start: the setting V1_EN_VOICE decides (auto there = the stock voice)
+# en_voice: stock            # pin: the one English voice of every session, without measuring (stock | copy)
+
+# ---- a line a voice refused, and the guards
+# voice_fallback: off        # a refused line is left without sound, as before v1.2 (no second ask, no other voice, no record)
+# script_guard: off          # no check of the script of translated lines and transcripts
+# shift_check: off           # no line is judged against its source (Studio: every line; Live: a sample)
+
+# ---- need the session's own ask, or only add a page for us
+# live_record: off           # no session can keep a recording, whatever it asks for
+# hq_calibrate: off          # /studio/calibrate and its routes answer 404
+# listen_test: off           # /listen-test and its routes answer 404
+
+# ---- not part of auto mode (off). `on` is for a trial; none of these was measured alone or deployed
+# tts_server: on             # the copied voice from the one batching server (needs V1_TTS_SERVER_URL)
+# tts_maya: on               # Maya 2 as a second candidate voice in Studio HQ (needs V1_MAYA_URL)
+# live_late_shorten: on      # a late line is said in a shorter version instead of skipped
+# live_backcheck: on         # a dubbed live line is heard back and made again if wrong (needs the QA server)

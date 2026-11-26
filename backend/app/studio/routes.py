@@ -19,6 +19,7 @@ from app.studio.events import events
 from app.v1.queue import JobQueue
 from app.studio.runner import runner
 from app.studio.stages.extract import IngestError
+from app.v1 import mode as v1mode
 
 router = APIRouter()
 hq_queue = JobQueue("hq:held")   # v1: HQ jobs created with hold=true, waiting for a batch run
@@ -62,7 +63,7 @@ async def create_job(
         raise HTTPException(400, "The GPU engine is not set up on this server.")
     if quality not in ("standard", "hq"):
         raise HTTPException(400, "quality is standard or hq")
-    if quality == "hq" and not get_settings().v1_studio_hq:
+    if quality == "hq" and not v1mode.on("studio_hq", get_settings()):
         raise HTTPException(400, "The HQ path is not switched on on this server.")
     if not owns_video:
         raise HTTPException(400, "Confirm you own this video or have permission to dub it.")
@@ -179,9 +180,10 @@ async def get_segments(job_id: str, lang: str | None = None) -> list[dict[str, A
 def _hq_fields(t: dict[str, Any]) -> dict[str, Any]:
     """v1 HQ: what the editor shows for a line (present only on lines the HQ path voiced)."""
     if "alts" not in t:
-        return {}
+        # v1.2: a standard job's line that a guard flagged, or that no voice could say, is shown the same way.
+        return {"flagged": True, "flag_reason": t.get("flag_reason") or ""} if t.get("flagged") else {}
     keep = ("idx", "provider", "text", "dur_s", "speed", "backcheck", "similarity", "passed", "why")
-    if get_settings().v1_hq_judge:
+    if v1mode.on("hq_judge", get_settings()):
         keep += ("scored_by",)     # who judged each take; what was heard stays on the server
     return {"flagged": bool(t.get("flagged")), "flag_reason": t.get("flag_reason") or "", "qa": t.get("qa"),
             "picked": t.get("picked"), "alts": [{k: a.get(k) for k in keep} for a in t.get("alts") or []]}
@@ -244,7 +246,7 @@ class HQBatch(BaseModel):
 @router.post("/api/v1/hq/batch", status_code=202)
 async def hq_batch(body: HQBatch, bg: BackgroundTasks) -> dict[str, Any]:
     """v1 HQ: run the waiting HQ jobs phase by phase (audio for all, text for all, voice for all)."""
-    if not get_settings().v1_studio_hq:
+    if not v1mode.on("studio_hq", get_settings()):
         raise HTTPException(400, "The HQ path is not switched on on this server.")
     waiting = await hq_queue.take_all()
     ids = [j for j in (body.job_ids or waiting)]
@@ -320,6 +322,13 @@ async def job_backcheck(job_id: str, lang: str) -> dict[str, Any]:
     segs = await runner.store.select("segments", order="idx", job_id=job_id)
     trs = {t["segment_id"]: t for t in await runner.store.select_in("translations", "segment_id", [s["id"] for s in segs], lang=lang)}
     lines: list[dict[str, Any]] = []
+    # v1.2: what the guards found on this language's lines (app/v1/lineguard.py), each its own number, and the
+    # lines no voice could say (they have no audio, so they are not in `lines` and not in the heard-back mean).
+    verdicts = [dict(t.get("guard") or {}) for t in trs.values()]
+    from app.v1 import lineguard
+    guard = {**lineguard.summary(verdicts), "checked": any(verdicts),
+             "shortened_flagged": sum(1 for t in trs.values() if t.get("guard_shortened") == "flagged"),
+             "unspoken": sum(1 for t in trs.values() if t.get("unspoken"))}
     for s in segs:
         t = trs.get(s["id"])
         path = runner.job_dir(job_id) / str(t.get("audio_path")) if t and t.get("audio_path") else None
@@ -348,12 +357,13 @@ async def job_backcheck(job_id: str, lang: str) -> dict[str, Any]:
             "backcheck_mean": round(sum(x["backcheck"] for x in scored) / len(scored), 4) if scored else None,
             "backcheck_by_words": round(sum(x["backcheck"] * x["words"] for x in scored) / words, 4) if words else None,
             "speed_max": max((x["fit_speed"] or 1.0 for x in lines), default=None),
-            "flagged": sum(1 for x in lines if x["flagged"]), "takes": sum(x["takes"] for x in lines)}
+            "flagged": sum(1 for x in lines if x["flagged"]) + guard["unspoken"], "takes": sum(x["takes"] for x in lines),
+            "guard": guard}
 
 
 # ---------- v1.1: calibrating the heard-back judge (V1_HQ_CALIBRATE) ----------
 def _calibrate_on() -> None:
-    if not get_settings().v1_hq_calibrate:
+    if not v1mode.on("hq_calibrate", get_settings()):
         raise HTTPException(404, "The calibration page is switched off (V1_HQ_CALIBRATE).")
 
 
@@ -409,7 +419,7 @@ async def calibrate_summary() -> dict[str, Any]:
 @router.get("/api/v1/jobs/{job_id}/glossary-candidates")
 async def glossary_candidates(job_id: str) -> dict[str, Any]:
     """Names, brands and repeated English terms found in this job's transcript. Proposals: nothing is saved."""
-    if not get_settings().v1_hq_auto_glossary:
+    if not v1mode.on("hq_auto_glossary", get_settings()):
         raise HTTPException(404, "Glossary candidates are switched off (V1_HQ_AUTO_GLOSSARY).")
     await _job_or_404(job_id)
     from app.v1.hq import glossary as hqgloss

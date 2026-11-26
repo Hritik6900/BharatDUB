@@ -15,6 +15,7 @@ from fastapi import APIRouter
 
 from app.config import Settings, get_settings
 from app.v1.flags import flags
+from app.v1 import mode as v1mode
 
 router = APIRouter()
 TIMEOUT_S = 3.0
@@ -171,7 +172,7 @@ async def report() -> dict[str, Any]:
 
 def _circuits(s: Settings) -> dict[str, Any]:
     """`V1_BREAKER`: every breaker's state and the last opens and closes. Nothing with the flag off."""
-    if not s.v1_breaker:
+    if not v1mode.on("breaker", s):
         return {}
     from app.v1 import breaker
     return {"circuits": breaker.snapshot(), "circuit_events": breaker.events()[-20:]}
@@ -187,7 +188,7 @@ async def circuits(after: int = 0) -> dict[str, Any]:
     """The circuit breakers of this backend: their state now and what happened after event `after` (the stream
     watcher asks every 20 s). `on` is False with `V1_BREAKER` off."""
     from app.v1 import breaker
-    on = get_settings().v1_breaker
+    on = v1mode.on("breaker", get_settings())
     return {"on": on, "circuits": breaker.snapshot() if on else [], "events": breaker.events(after) if on else [],
             "last": breaker.last_id() if on else 0}
 
@@ -202,9 +203,9 @@ async def routing() -> dict[str, Any]:
     """Which provider does which step: what the routing file says and what is configured now."""
     from app.v1.router import RoutingError, get_router
     try:
-        return {"router_on": get_settings().v1_router, "ok": True, "steps": get_router().describe()}
+        return {"router_on": v1mode.on("router", get_settings()), "ok": True, "steps": get_router().describe()}
     except RoutingError as e:
-        return {"router_on": get_settings().v1_router, "ok": False, "error": str(e)}
+        return {"router_on": v1mode.on("router", get_settings()), "ok": False, "error": str(e)}
 
 
 @router.post("/api/v1/warmup")

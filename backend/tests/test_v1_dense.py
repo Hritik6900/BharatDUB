@@ -269,59 +269,6 @@ async def same(text, target, max_seconds, max_words=None):
     return text
 
 
-async def test_controller_scales_the_budget_and_its_state_is_in_the_metrics(monkeypatch, tmp_path):
-    p, llm, gpu, store, sess = make(monkeypatch, tmp_path, reply=LINE10, v1_live_budget=True, v1_live_ratectrl=True)
-    llm.shorten = same            # a translator that cannot say it shorter: the dub runs long
-    await run(p, sess, [chunk(p, 0, 1000), chunk(p, 1000, 2000), chunk(p, 2000, 3000)])
-    t = await timings(store)
-    assert t[1]["ctl:ta-IN"] == 1.0 and "ctl_i:ta-IN" in t[1]
-    st = p.dense_stats()
-    assert st["dense"] is False and st["ratectrl"][TA]["scale"] < 1.0 and st["ratectrl"][TA]["backlog_s"] > 0
-    c = chunk(p, 3000, 5400)
-    p._pending[c.seq] = {"timings": {}}
-    p.running = True
-    await p._translate(TA, c, [], None)
-    assert llm.seen[-1]["max_words"] < 8                                 # behind: less than the slot would hold
-
-
-async def test_dense_mode_joins_short_lines_and_allows_the_higher_speed(monkeypatch, tmp_path):
-    p, llm, gpu, store, sess = make(monkeypatch, tmp_path, reply=LINE10, v1_live_budget=True, v1_live_ratectrl=True)
-    llm.shorten = same
-    q = sess.bus.subscribe(TA)
-    await p.start()
-    p.set_media(0.0, True)
-    p._dispatch(chunk(p, 0, 400, 1))
-    assert p._merger.held is None and not p._dense                       # not dense: a one-word line goes out alone
-    p._dispatch(chunk(p, 400, 20000, 40))                                # 20 s of speech without a pause
-    assert p._dense
-    p._dispatch(chunk(p, 20000, 20300, 1))
-    assert p._merger.held is not None                                    # dense: the short line waits ...
-    p._dispatch(chunk(p, 20300, 21300, 8))
-    assert p._merger.merged == 1                                         # ... and goes out with the next one
-    p._dispatch(chunk(p, 21300, 22300, 8))
-    ended: set[int] = set()
-    while len(ended) < 4:
-        m = await asyncio.wait_for(q.get(), 10)
-        if m["type"] == "audio" and m["last"]:
-            ended.add(m["seq"])
-    await p.stop()
-    t = await timings(store)
-    assert sorted(t) == [1, 2, 4, 5] and t[4]["dense"] == 1 and t[4]["share"] >= 95
-    assert t[4]["tempo:ta-IN"] == 1.4 and t[4]["ctl:ta-IN"] <= 0.9       # dense: tighter budget, up to 1.4x
-
-
-async def test_native_speed_asks_the_engine_for_part_of_the_speed_up_with_a_pace_floor(monkeypatch, tmp_path):
-    p, llm, gpu, store, sess = make(monkeypatch, tmp_path, reply=LINE10, v1_live_native_speed=True)
-    await run(p, sess, [chunk(p, 0, 1000), chunk(p, 1000, 2000)])
-    t = await timings(store)
-    assert gpu.speeds[0] == pytest.approx(1.125)                          # 360 ms a word, never under 320: 1.125x
-    assert t[1]["native:ta-IN"] == 1.12 and t[1]["tempo:ta-IN"] == 1.3    # the rest by tempo, the limit as before
-    monkeypatch.setattr(p.s, "v1_native_floor_ms", 200)
-    p2, llm2, gpu2, store2, sess2 = make(monkeypatch, tmp_path / "b", reply=LINE10, v1_live_native_speed=True)
-    await run(p2, sess2, [chunk(p2, 0, 1000), chunk(p2, 1000, 2000)])
-    assert gpu2.speeds[0] == pytest.approx(1.2)                           # with a lower floor: the 1.2x cap
-
-
 # ---------- prompts, seed, watcher ----------
 async def test_translators_put_the_letter_cap_and_compact_style_in_the_prompt_only_when_asked(monkeypatch):
     from app.providers.llm_local import LocalLLM
@@ -381,7 +328,7 @@ def test_stream_watcher_sums_up_dub_length_and_backlog(tmp_path):
     assert "dub length" not in "\n".join(sw.session_summary(str(db), "s1"))
 
 
-@pytest.mark.parametrize("flag", ["v1_live_budget", "v1_live_ratectrl", "v1_live_native_speed"])
+@pytest.mark.parametrize("flag", ["v1_live_budget"])
 def test_dense_flags_default_off(flag):
     from app.config import Settings
     from app.v1.flags import FLAGS

@@ -55,12 +55,29 @@ KEYS = [
     ("translation p50", "trace.translate_p50_ms", "ms"), ("budgeted phrases", "trace.budgeted", ""),
     ("first answer / budget p50", "trace.first_answer_over_budget_p50", ""), ("asked to shorten", "trace.reasked", ""), ("shorter line used", "trace.reask_used", ""),
     ("budget scale mean", "trace.budget_scale_mean", ""), ("dense phrases", "trace.dense_phrases", ""),
-    ("native speed lines", "trace.native_speed", ""),
+    # v1.2 auto mode. The script guard looks at EVERY translated line; the two judged measures are on a SAMPLE
+    # of the spoken lines (see app/v1/guards.py for what the judge is and is not).
+    ("budget applied (auto)", "trace.budget_auto_on", ""), ("translated in full (auto)", "trace.budget_auto_off", ""),
+    ("budget went on or off", "trace.budget_switches", ""),
+    ("budget loosened by the meaning check", "trace.budget_looser", ""), ("budget tightened again", "trace.budget_tighter", ""),
+    ("script guard: lines that failed (every line checked)", "trace.guard_script_failed", ""),
+    ("script guard: still wrong after one new translation (flagged)", "trace.guard_script_flagged", ""),
+    ("transcript not in the source script", "trace.src_script_failed", ""),
+    ("content shift: lines judged (a sample)", "trace.meaning.judged", ""),
+    ("content shift: judged as shifted", "trace.meaning.shifted", ""),
+    ("meaning: budgeted lines judged (a sample)", "trace.meaning.judged_budgeted", ""),
+    ("meaning: judged as lost", "trace.meaning.lost_budgeted", ""), ("meaning loss rate", "trace.meaning.loss_pct", "%"),
+    ("spoken by another voice after a refusal", "trace.voice_fallback", ""),
+    ("no sound, marked and logged", "trace.unspoken", ""), ("no sound, no mark", "trace.silent_unmarked", ""),
 ]
 PER_LANG = [("within 0.25 s", "on_time_pct", "%"), ("within 1 s", "within_1s_pct", "%"),
             ("dur_ratio p50", "dur_ratio_p50", ""), ("dur_ratio p90", "dur_ratio_p90", ""),
             ("backlog p95", "backlog_p95_ms", "ms"), ("skipped as too late", "skipped_late", ""),
-            ("at 1.3x", "at_1_3x", ""), ("at 1.4x", "at_1_4x", ""), ("first audio p50", "first_audio_p50_ms", "ms")]
+            ("at 1.3x", "at_1_3x", ""), ("at 1.4x", "at_1_4x", ""), ("first audio p50", "first_audio_p50_ms", "ms"),
+            ("budget applied (auto)", "budget_auto_on", ""), ("script guard failed", "guard_script_failed", ""),
+            ("content shift judged (sample)", "meaning.judged", ""), ("content shift found", "meaning.shifted", ""),
+            ("meaning judged (sample, budgeted)", "meaning.judged_budgeted", ""), ("meaning lost", "meaning.lost_budgeted", ""),
+            ("no sound, marked", "unspoken", "")]
 
 
 def dig(d: Any, path: str) -> Any:
@@ -121,7 +138,7 @@ async def replay(api: str, feed: bytes, langs: list[str], out: Path, *, engine: 
         body["voice_profile_id"] = voice
     if engine == "gpu":
         body["engine"] = "gpu"
-    if record:   # kept by the backend only when its V1_LIVE_RECORD is on (app/v1/record.py); for scripts/v1/render-pitch.ps1
+    if record:   # kept only when the backend allows recordings (auto mode, or V1_LIVE_RECORD in manual mode; app/v1/record.py)
         body["record"] = True
     async with httpx.AsyncClient(base_url=api, timeout=60) as http:
         r = await http.post("/api/live/sessions", json=body)
@@ -129,7 +146,7 @@ async def replay(api: str, feed: bytes, langs: list[str], out: Path, *, engine: 
         sid, token = r.json()["session_id"], r.json()["ingest_token"]
         (out / "session.txt").write_text(sid, encoding="utf-8")
         if record and not r.json().get("recording"):
-            print("the backend is not keeping this session: V1_LIVE_RECORD is off there", flush=True)
+            print("the backend is not keeping this session: recordings are off there", flush=True)
         captions: dict[tuple[str, int], str] = {}
         done: set[tuple[str, int]] = set()
         audio: dict[tuple[str, int], bytearray] = {}

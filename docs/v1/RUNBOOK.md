@@ -46,7 +46,7 @@ scripts/v1/gpu-mode.sh status     # which model servers answer, free GPU memory,
 ```
 
 Pages: `/health` (green or red per service, the GPU machine's card when it reports it, else "A100 (VM): unknown",
-circuit breakers, flags that are on) and `/metrics-ui` (numbers from the
+circuit breakers, the mode the server runs in) and `/metrics-ui` (numbers from the
 trace). Endpoints: `GET /api/v1/health`, `/api/v1/flags`, `/api/v1/routing`, `/api/v1/metrics/summary?hours=24`,
 `/metrics` (Prometheus), `POST /api/v1/warmup`.
 
@@ -58,17 +58,90 @@ dead tunnel, a stuck ssh and a dead server on the GPU machine apart.
 **Before a demo:** 15 minutes ahead run `demo-check.sh` and `warmup.sh`; the card must be in normal mode (not an HQ
 window) and no other session live. One GPU through one address is one stream.
 
-## 3. Flags
+## 3. Mode, overrides, flags
 
-All in v1's `backend/.env`, all off by default except `V1_HQ_ADAPTIVE` (on since 26 Nov 2026; it acts on HQ jobs
-only, so with `V1_STUDIO_HQ` off v1 still behaves as v0). Restart the backend after a
-change. What each one does, and what was measured, is in `PROGRESS.md` and `EVAL_REPORT.md`.
+### 3.1 Auto mode (v1.2; the default)
+
+`V1_MODE=auto` in v1's `backend/.env`, and the default when the line is missing. Nobody manages switches:
+`backend/app/v1/mode.py` is the one place that says what is in force (ADR-0036). The per-feature `V1_*` lines of
+the table in 3.3 are **not read** in auto mode. `GET /api/v1/flags` shows the mode, the overrides in force and what
+is on (a diagnostic for us; no page for users lists a switch).
+
+| In auto mode | What happens | Not verified |
+|---|---|---|
+| Always on | the trace, the router, the API log, the breakers and the ladder, stock voices for a `/live` session without a streamer profile, Studio HQ on offer with its review, the 1.15x fit limit, adaptive takes, the normaliser, a job's own glossary, the HQ judge; a session that asks for it is recorded; `/studio/calibrate` and `/listen-test` answer | as each one's own entry in `PROGRESS.md` says |
+| Auto budget | the Live duration budget of v1.1 applies to a language only while its dub is behind (backlog, running mean, over 500 ms; off under 200 ms), its lines come out longer than their slots (running mean of dub length over slot over 1.15; off under 1.05), or speech is dense (speaking share over 70% / under 60%, or over 4.0 source words a second / under 3.2). Off again only after 4 calm lines and not before 15 s. Outside that the translator gets the full prompt (no word limit, no "be brief"). While on: the controller of v1.1 scales it, at most 0.9 of the slot while dense, short lines join the next, speed-up at most 1.3x | every threshold is a first value; nothing measured before v1.2 Part 3 |
+| Meaning check | every 3rd spoken line of a language while its budget is on (every 8th while off) is judged by a model against its source, after it was spoken. Over 25% lost on at least 6 judged budgeted lines: that language's budget gets 0.1 more of the slot (a step); at 3 steps it is translated in full. At or under 10%, with the dub behind, 120 s after the last step: one step back | a sample, a model's opinion; one hosted model call per batch of up to 4 lines |
+| English voice | sessions with English: a probe line in the copied voice at the start, timed against the hold less 3.8 s; in time: the copy for the whole session, else the one stock voice; no copy at the start: the stock voice. Chosen once, stored on the session (`en_voice`), in `/metrics` as `en_voice_choice` | one probe decides; the first English lines wait for it (6 s at most) |
+| A refused line | a stock line refused before any sound is asked once more, then every other voice is asked in the order our engine's copy, the hosted copy, the stock voice, the language's other stock voice. Only when all fail: `unspoken` on the phrase, in the trace, the metrics and the log. Studio the same per line; the job finishes with the line marked | fake providers only |
+| Guards | script: every translated line (and the transcript when the source language is pinned), translated once more, then flagged. Content shift: Studio every line before the voice (translated once more, then flagged "needs your ear"); Live on the judged sample only, counted | the script guard sees letters, not words; the judge is a model |
+
+**What changes for `/live`:** with stock voices always on for a session without a streamer profile, "the voice on
+this stream" is never learned and its consent tick has no effect (the rebuilt website no longer shows it). Every
+v1.1 Live timing was measured with the learned voice; the only stock-voice runs were much worse (3.3, point 2).
+To get the old behaviour: `live_stock_default: off` in the overrides file.
+
+**Settings of auto mode** (env names; first values, not measured): `V1_AUTO_BEHIND_ON_MS=500`,
+`V1_AUTO_BEHIND_OFF_MS=200`, `V1_AUTO_RATIO_ON=1.15`, `V1_AUTO_RATIO_OFF=1.05`, `V1_AUTO_WPS_ON=4.0`,
+`V1_AUTO_WPS_OFF=3.2`, `V1_AUTO_MIN_ON_MS=15000`, `V1_AUTO_CALM_LINES=4`, `V1_DENSE_MAX_TEMPO=1.3`,
+`V1_MEANING_SAMPLE_EVERY=3`, `V1_MEANING_IDLE_EVERY=8`, `V1_MEANING_WINDOW=12`, `V1_MEANING_MIN_SAMPLES=6`,
+`V1_MEANING_MAX=0.25`, `V1_MEANING_LOW=0.10`, `V1_MEANING_STEP=0.1`, `V1_MEANING_MAX_STEPS=3`,
+`V1_MEANING_TIGHTEN_AFTER_S=120`, `V1_MEANING_TIMEOUT_S=8`, `V1_MEANING_QUEUE=6`, `V1_EN_PROBE_TIMEOUT_S=6`,
+`V1_EN_PIPELINE_MS=3800`. The controller and budget settings of v1.1 (`V1_RATECTRL_*`, `V1_BUDGET_*`,
+`V1_DENSE_*`) are unchanged.
+
+**Where to look:** a session's `GET /api/live/sessions/<id>/metrics` has `auto_budget` (per language: on, why, the
+running backlog and dub length, steps loosened), `auto_budget_log` (every change), `ratectrl`, `meaning` (judge,
+sampled, per language judged / lost / shifted / rate / steps, every adjustment), `guard` (script guard counts),
+`unspoken`, `voice_events`, `en_voice_choice`. Trace kinds: `live_auto_budget`, `live_meaning`,
+`live_budget_adjust`, `live_en_voice`, `live_voice_fallback`, `live_guard_script`, `studio_guard`,
+`studio_unspoken`. A Studio job has `stage_timings._guards` per language; a flagged line shows in the editor.
+
+### 3.2 The overrides file: switching ONE behaviour off
+
+`backend/config/overrides.yaml` (or `V1_OVERRIDES_FILE`). Read once when the backend starts; every entry is
+commented out as shipped. Remove the `# ` in front of a line and restart; put it back and restart to undo. Read
+in auto mode only. A name or value that is not known is logged (`overrides: ... is not known and is ignored`) and
+skipped; a file that cannot be read is logged and ignored as a whole; neither stops the backend.
+
+| Entry | What it does |
+|---|---|
+| `trace: off` | no trace records; `/metrics-ui` and the reports go empty |
+| `router: off` | providers from v0's fixed table instead of `config/routing.yaml` |
+| `api_log: off` | no record per outbound request under `logs/api/` |
+| `breaker: off` | no circuit breakers, no link-stall detector: every call waits for its own timeout |
+| `live_degrade: off` | no ladder (copied voice, stock voice, captions only, original sound) |
+| `live_stock_default: off` | a `/live` session without a streamer profile may copy the voice on the stream again, with the consent tick |
+| `studio_hq: off` | HQ is not offered; every Studio job is standard |
+| `hq_review: off` | **no effect while HQ is on**: HQ never runs without the review |
+| `fit_115: off` | Studio speeds a line up by at most 1.35x (v0) |
+| `hq_adaptive: off` | HQ makes up to 4 takes until one passes |
+| `hq_normalise: off`, `hq_auto_glossary: off`, `hq_judge: off` | that HQ step as before v1.1 WS3 |
+| `live_budget: off` | no duration budget at all: v0's word limit |
+| `auto_budget: off` | the budget on every phrase, two steps by how far behind, no controller, no dense mode (v1.1's "budget") |
+| `meaning_check: off` | no budget is loosened (lines are still judged for content shift unless that is off too) |
+| `en_single_voice: off` | English chosen line by line again |
+| `en_auto: off` | no probe: `V1_EN_VOICE` decides (`auto` there = the stock voice) |
+| `en_voice: stock` or `copy` | pins the one English voice of every session; no probe |
+| `voice_fallback: off` | a refused line is left without sound and without a record, as before v1.2 |
+| `script_guard: off`, `shift_check: off` | that guard |
+| `live_record: off` | no session can keep a recording |
+| `hq_calibrate: off`, `listen_test: off` | that page and its routes answer 404 |
+| `tts_server: on`, `tts_maya: on`, `live_late_shorten: on`, `live_backcheck: on` | not part of auto mode (off); `on` is for a trial. None was measured alone; the two servers are not deployed |
+
+### 3.3 Manual mode: the flags as before v1.2
+
+`V1_MODE=manual` and a restart: every feature follows its own line in `backend/.env`, all off by default except
+`V1_HQ_ADAPTIVE`, and what v1.2 added (auto budget, meaning check, the measured English choice, the fallback to
+another voice, the guards) is off. With everything off v1 behaves as v0. The overrides file is not read. This is
+the mode of the comparison backends (`scripts\v1\ab-server.ps1`, `-Mode manual`, its default), of the test suite,
+and of any baseline measured beside auto. What each flag does, and what was measured, is in `PROGRESS.md` and
+`EVAL_REPORT.md`.
 
 | Flag | On | Roll back |
 |---|---|---|
 | `V1_TRACE` | a record per Live phrase and Studio line; `/metrics-ui` fills | off: only logging stops |
 | `V1_ROUTER` | providers from `backend/config/routing.yaml` | off: v0's fixed table |
-| `V1_PHRASE_DYNAMIC` | first phrase 4-6 words, later 8-12, lines under 3 words join the next | off: 6-12 words |
 | `V1_LIVE_LATE_SHORTEN` | a late line is said shorter instead of skipped | off: skipped as v0 |
 | `V1_LIVE_BACKCHECK` | a dubbed live line is heard back by the QA server, made again if wrong | off |
 | `V1_LIVE_STOCK_DEFAULT` | a Live session without a streamer profile speaks in stock voices | off: consent tick as v0 |
@@ -80,10 +153,7 @@ change. What each one does, and what was measured, is in `PROGRESS.md` and `EVAL
 | `V1_BREAKER` | circuit breakers on our GPU endpoints and the link-stall detector: a timeout, or 2 failures in 10 s, and the endpoint is not called for 30 s (the next provider answers at once); while a session is live every GPU endpoint is asked for its health every 5 s | off: every call waits for its own timeout, as v0 |
 | `V1_LIVE_DEGRADE` | Live's ladder: copied voice, stock voice, captions only ("audio returning shortly" on `/watch`), original sound; back up by itself | off: as v0 |
 | `V1_LIVE_BUDGET` | v1.1 dense speech: the live translator gets the phrase's own slot as words and letters (from the measured ms a word and a letter of this voice in this language), and an answer whose expected duration is over it by more than 15% is asked for once more, shorter | off: v0's word limit (`live_length_budget`) |
-| `V1_LIVE_RATECTRL` | v1.1: a PI controller on the dub's backlog scales that budget (1.0 down to 0.6, back within seconds); when the speaker talks more than 70% of the last 30 s ("dense"): budget at most 0.9 of the slot, lines under 3 words join the next, speed-up up to 1.4x. Needs `V1_LIVE_BUDGET` to have an effect on the translation | off |
-| `V1_LIVE_NATIVE_SPEED` | v1.1: our voice engine is asked to speak a line that must be shorter up to 1.2x faster itself, never under 320 ms a word; the rest by tempo as before | off: tempo only |
-| `V1_LIVE_WARMSTART` | v1.1 session start: one tiny translation per target language, our voice engines asked for their state (and one short line per language on every engine process when a streamer's stored voice is on them), one tiny hosted line per language the hosted voice will open in; a streamer's stored voice is sent to the engines when the session is created; a stock voice is chosen once per language by the speaker's pitch (male or female, where the language has both) and kept; the change to the copied voice is softened (fade out, fade in, level) | off: v0's warm-up (one translation, first language) and the usual stock voices |
-| `V1_EN_SINGLE_VOICE` | v1.1: English in a GPU-engine session is spoken in one voice for the whole session (`V1_EN_VOICE`), never chosen line by line | off: the hosted copy when 2 s are spare, else a stock voice |
+| `V1_EN_SINGLE_VOICE` | v1.1: English in a GPU-engine session is spoken in one voice for the whole session (`V1_EN_VOICE`: `copy`, `stock`, `auto` = stock), never chosen line by line. (Auto mode: every session with English, and the voice is measured, 3.1) | off: the hosted copy when 2 s are spare, else a stock voice |
 | `V1_HQ_JUDGE` | v1.1 Studio HQ: a dubbed line is heard back by the best speech-to-text for its language (hosted first, then our GPU Whisper where it hears the language, which is Hindi only, then the QA server's Whisper once it runs), the next one when the first fails; the comparison treats the two ways of storing one letter as one spelling; every take, line and trace record says who judged it | off: the `score` list of the routing file and v1's comparison |
 | `V1_HQ_CALIBRATE` | `/studio/calibrate` and its routes: label takes blind, agreement with the judge, a recommended flag line (`CALIBRATION.md`) | off: the routes answer 404, the page says it is off |
 | `V1_HQ_ADAPTIVE` (default **on**) | one take of a line first; more, up to `V1_HQ_ADAPTIVE_MAX` (5), only while the best score is under `V1_HQ_ADAPTIVE_MIN` (0 = the flag line) | `false`: up to `V1_HQ_NBEST` (4) until a take passes |
@@ -104,15 +174,18 @@ slow link) it comes back down to its normal value, 250 ms at a time, once phrase
 Measured: `docs/handbook/experiments/EXP-030-hold-ease-back.md`. The viewer page's part (it plays 1.1x until it has
 caught up) was not run in a browser, and needs the website rebuilt to be served at all.
 
-`V1_SPEC_TRANSLATE` and `V1_LLM_PREFIX_CACHE` no longer exist (removed in v1.1 WS6, `PROGRESS.md`). A line that
-still sets one of them in `backend/.env` is ignored: the backend starts as if it were not there.
+**Removed.** `V1_SPEC_TRANSLATE` and `V1_LLM_PREFIX_CACHE` (v1.1 WS6) and, in v1.2 (ADR-0037),
+`V1_PHRASE_DYNAMIC`, `V1_LIVE_NATIVE_SPEED`, `V1_LIVE_WARMSTART` and `V1_LIVE_RATECTRL` with their settings
+(`V1_FIRST_PHRASE_*`, `V1_PHRASE_MIN_WORDS`, `V1_PHRASE_MAX_WORDS`, `V1_MERGE_UNDER_WORDS`, `V1_NATIVE_*`,
+`V1_WARM_*`) no longer exist. A line that still sets one of them in `backend/.env` is ignored in either mode: the
+backend starts as if it were not there. The controller of `V1_LIVE_RATECTRL` runs only inside the auto budget.
 
-### Recommended settings for v1's `backend/.env` (v1.1 WS6)
+### 3.4 The measured reasons, flag by flag (written for v1.1 WS6)
 
-The code's defaults stay off (one exception since 26 Nov 2026: `V1_HQ_ADAPTIVE` is on by default). This is what
-to write into v1's own env file; a ready block is at the end of the v1
-part of `backend/.env.example`. Every number below is from `EVAL_REPORT.md`, `LIVE_DENSE_REPORT.md` or
-`PROGRESS.md`; nothing was measured for this list.
+**Since v1.2 nothing has to be set: auto mode is the default (3.1).** This list is kept because it holds the
+measured reason behind each choice auto mode makes, and for whoever runs manual mode. Every number below is from
+`EVAL_REPORT.md`, `LIVE_DENSE_REPORT.md` or `PROGRESS.md`; nothing was measured for this list. The ready block that
+used to stand at the end of `backend/.env.example` is gone.
 
 **On** (the list that was asked for):
 
@@ -133,11 +206,11 @@ part of `backend/.env.example`. Every number below is from `EVAL_REPORT.md`, `LI
 | `V1_HQ_JUDGE` | **on, with `V1_STUDIO_HQ`** | the counting rule no longer takes points off Bengali for a letter stored two ways: Bengali +5.6 to 6.3 points on the same output, Tamil unchanged, 25 flags become 15 |
 | `V1_BREAKER` and `V1_LIVE_DEGRADE` | **on, both together** (not on the list above: point 3) | all three GPU endpoints stalled for 50 s: flags off (1 run) 4 of 22 phrases translated and dubbed; on (3 runs) 23, 24, 23 of 23, 24, 23, in a stock voice, first audio median 3.1-3.5 s. Healthy calls stayed far under the limits (slowest voice line 1.36 s of 4 s, slowest translation 1.13 s of 3 s). The stall was made with a relay, not a real tunnel |
 | `V1_LIVE_BUDGET` | **on where Punjabi-like languages are the target; your call for Tamil** (point 4) | dense reel, Punjabi + Tamil, 5 runs: within 0.25 s 63.5% -> 80.6%, within 1 s 86.5% -> 92.3%, dub length over slot p90 1.42 -> 1.17, lines at 1.3x 46 -> 24 of 185; 15% fewer letters said; in Tamil 7 of 20 lines read had lost something that mattered |
-| `V1_LIVE_RATECTRL` | off | with the budget: 83.1% within 0.25 s against 80.6%, 91.8% within 1 s against 92.3%: inside the spread; it brings 1.4x on 15 lines a run, which nobody has heard |
-| `V1_LIVE_NATIVE_SPEED` | off | acted on 6.6 lines a run, all Tamil; no number moved |
-| `V1_LIVE_WARMSTART` | off (your call) | first audio p95 of the first 10 phrases 4.27 s -> 3.80 s over 5 runs each with the final build, 3.86 s -> 4.79 s with the first build, and "off" alone moved 0.41 s between batches: no proven gain. Its matched stock voice and softened change of voice need ears |
+| `V1_LIVE_RATECTRL` | removed in v1.2 as a switch (the controller runs inside the auto budget) | with the budget: 83.1% within 0.25 s against 80.6%, 91.8% within 1 s against 92.3%: inside the spread; it brings 1.4x on 15 lines a run, which nobody has heard |
+| `V1_LIVE_NATIVE_SPEED` | removed in v1.2 | acted on 6.6 lines a run, all Tamil; no number moved |
+| `V1_LIVE_WARMSTART` | removed in v1.2 | first audio p95 of the first 10 phrases 4.27 s -> 3.80 s over 5 runs each with the final build, 3.86 s -> 4.79 s with the first build, and "off" alone moved 0.41 s between batches: no proven gain. Its matched stock voice and softened change of voice need ears |
 | `V1_EN_SINGLE_VOICE` | on with `V1_EN_VOICE=auto` only if English is a target and one voice matters more than the copied one; else off | English + Punjabi, 3 runs each: stock lines between copied ones 4.7 a session and 9 changes of voice with it off, none with it on. Every English line in the hosted copy: within 1 s 86.6% -> 73.7% |
-| `V1_PHRASE_DYNAMIC` | off (your call: point 2) | a session's first audio 5.9 s -> 4.1 s when a voice is ready at the start (stock voices); 5 points fewer phrases on time on dense speech (69.6% -> 64.5%, voice learned from the stream) |
+| `V1_PHRASE_DYNAMIC` | removed in v1.2 | a session's first audio 5.9 s -> 4.1 s when a voice is ready at the start (stock voices); 5 points fewer phrases on time on dense speech (69.6% -> 64.5%, voice learned from the stream) |
 | `V1_LIVE_LATE_SHORTEN` | off | skips 4.7 -> 1.7 a run, measured only inside a bundle whose timing was worse (56.0% on time against 69.6%); its own effect was not separated |
 | `V1_LIVE_BACKCHECK` | off | not measurable: no scorer until the QA server runs (`NEEDS_APPROVAL.md` item 6); it does nothing without one |
 | `V1_TTS_SERVER`, `V1_TTS_MAYA` | off | as of v1.1 WS4 neither server was loaded; nothing measured |
@@ -180,12 +253,12 @@ GPU before the next provider is asked), `V1_BREAKER_OPEN_S=30`, `V1_BREAKER_FAIL
 `V1_LINK_PROBE_EVERY_S=5`. `GET /api/v1/circuits` and the status page show every circuit; the stream watcher prints
 `CIRCUIT OPEN / CLOSED / LINK STALL / LINK BACK` and `RUNG` lines.
 
-The session-start and English-voice flags (v1.1 WS2; measured in `PROGRESS.md`): `V1_EN_VOICE=auto` (`auto` is
-the measured choice, today the one stock voice; `copy` = the hosted copy for every English line once the session
-has it; `stock`), `V1_EN_COPY_LEAD_MS=3500`, `V1_WARM_FADE_MS=150`, `V1_WARM_LEVEL_LINES=2`. A session's
-`GET /api/live/sessions/<id>/metrics` shows `warm` (what each warm-up call took, the speaker's pitch, the stock
-voice chosen per language and why) and `en_voice`. On a night when the hosted stock voice refuses lines (HTTP 502,
-"technical difficulties"), `V1_EN_VOICE=copy` keeps English audible: the hosted copy answered every line then.
+The English-voice flag in manual mode (v1.1 WS2; measured in `PROGRESS.md`): `V1_EN_VOICE=auto` (the one stock
+voice; `copy` = the hosted copy for every English line once the session has it; `stock`), `V1_EN_COPY_LEAD_MS=3500`.
+A session's `GET /api/live/sessions/<id>/metrics` shows `en_voice` and `en_voice_choice`. On a night when the
+hosted stock voice refuses lines (HTTP 502, "technical difficulties"): in auto mode a refused line goes to the next
+voice by itself (3.1); to put every English line in the copy, `en_voice: copy` in the overrides file (manual mode:
+`V1_EN_VOICE=copy`).
 
 The Studio HQ flags of v1.1 WS3 all need `V1_STUDIO_HQ` and act on HQ jobs only. Settings beside them:
 `V1_HQ_JUDGE_ORDER=prisma,whisper_gpu,qa_server`, `V1_HQ_JUDGE_BY_LANG=` (e.g. `hi-IN=whisper_gpu,prisma`),
@@ -203,14 +276,15 @@ The dense-speech flags (v1.1 WS1; measured in `LIVE_DENSE_REPORT.md`) have their
 `V1_BUDGET_SHARE=1.0` (the dub may take this share of the slot), `V1_BUDGET_OVER=1.15`, `V1_BUDGET_REASK_TIMEOUT_S=2.5`,
 `V1_RATECTRL_KP=0.15`, `V1_RATECTRL_KI=0.03`, `V1_RATECTRL_SETPOINT_MS=250`, `V1_RATECTRL_MIN_SCALE=0.6`,
 `V1_RATECTRL_RELAX_S=4`, `V1_DENSE_SHARE=0.70`, `V1_DENSE_OFF_SHARE=0.60`, `V1_DENSE_SCALE=0.9`,
-`V1_DENSE_MAX_TEMPO=1.4`, `V1_DENSE_MERGE_UNDER_WORDS=3`, `V1_NATIVE_MAX=1.2`, `V1_NATIVE_FLOOR_MS=320`.
-With the trace or one of these flags on, every Live phrase stores `dur_ratio` (dubbed seconds over the seconds of
+`V1_DENSE_MAX_TEMPO=1.3` (1.4 in the v1.1 measurements; nobody has heard 1.4x), `V1_DENSE_MERGE_UNDER_WORDS=3`.
+The controller and dense mode act only inside the auto budget (3.1). With the trace or the budget on, every Live phrase stores `dur_ratio` (dubbed seconds over the seconds of
 its source slot) and `backlog` (how far the dub queue was behind the video); `/metrics-ui`, the session's
 `/metrics` and the stream watcher's summaries show them. The model behind the budget starts from
 `backend/config/live_expansion.json` (rebuild: `python -m eval.v1.expansion_seed`) and learns from every line.
 Replay a recording through Live without YouTube, several settings in turn:
-`python -m eval.live_replay <file> --out <dir> --target off=http://127.0.0.1:8111 --target on=http://127.0.0.1:8112 --runs 5`
-(on Windows start the comparison backends with `scripts\v1\ab-server.ps1`).
+`python -m eval.live_replay <file> --out <dir> --target budget=http://127.0.0.1:8121 --target auto=http://127.0.0.1:8120 --runs 5`
+(on Windows start the comparison backends with `scripts\v1\ab-server.ps1`; 3.5). Its table has the guards as rows
+of their own: the script guard counts every line, the content-shift and meaning rows a judged sample.
 
 The pitch kit (v1.1 WS4; `PROGRESS.md`). **A recorded session.** Live audio is never stored; the one exception
 needs two yeses: `V1_LIVE_RECORD=true` on the backend and `record: true` on that session (the console tick; the
@@ -244,13 +318,13 @@ picture are computed from `phrases.jsonl` of that recording and nothing else; a 
 out. Keep the output in the data folder: it is the speaker's voice and picture. To make one without YouTube:
 
 ```powershell
-powershell -File scripts\v1\ab-server.ps1 -Port 8120 -Name pitch -Flags "V1_LIVE_RECORD=true"    # its own window
+powershell -File scripts\v1\ab-server.ps1 -Port 8120 -Name pitch -Flags "V1_LIVE_RECORD=true"    # its own window (manual mode; in auto mode recordings are allowed without it)
 cd backend; .venv\Scripts\python.exe -m eval.live_replay ..\data-v1\eval\reel25.mp4 --out ..\data-v1\eval\pitch `
     --target rec=http://127.0.0.1:8120 --runs 1 --loops 3 --langs pa-IN --record
 # the recording is then in data-v1\ab\pitch\recordings\<session>
 ```
 
-**The blind listening test.** `V1_LISTEN_TEST=true`, then `/listen-test`. Pairs live in
+**The blind listening test.** `/listen-test` (auto mode: always there; manual mode: `V1_LISTEN_TEST=true`). Pairs live in
 `<DATA_DIR>/listen/pairs/` (or `V1_LISTEN_DIR`) with a `manifest.json`:
 
 ```json
@@ -278,9 +352,30 @@ later answer for the same pair replaces the earlier one. `/metrics-ui` shows per
 number of ratings and the share of stated preferences, or "No ratings yet". `GET /api/v1/listen/summary` is the
 same as JSON. To start a new test, move `results.jsonl` away and replace the pairs folder.
 
-To compare a flag on and off on the same machine, start a second backend on another port with only that flag:
-`scripts/v1/ab-server.sh 8112 dynamic V1_PHRASE_DYNAMIC=true`, then
-`python -m eval.v1.live <video> --out <dir> --target base=http://127.0.0.1:8111 --target dynamic=http://127.0.0.1:8112`.
+### 3.5 Comparison backends: auto beside manual
+
+A second backend on its own port (8120 or higher) and data folder (`data-v1\ab\<name>`), started from PowerShell
+as a background task so that it can be stopped cleanly:
+
+```powershell
+# auto mode, as v1 runs (its own empty overrides file: backend\config\overrides.yaml is not read)
+powershell -File scripts\v1\ab-server.ps1 -Port 8120 -Name auto -Mode auto
+# auto mode with one behaviour switched off, e.g. the voice learned from the stream as in the v1.1 measurements
+powershell -File scripts\v1\ab-server.ps1 -Port 8122 -Name auto-learned -Mode auto -Overrides "live_stock_default=off"
+# manual mode (the default): every flag off but the ones given; this one is v1.1's "budget on"
+powershell -File scripts\v1\ab-server.ps1 -Port 8121 -Name budget -Flags "V1_LIVE_BUDGET=true"
+```
+
+`scripts/v1/ab-server.sh <port> <name> [--auto] [KEY=VALUE ...]` is the same for Git Bash and Linux (`OVERRIDES=`
+in the environment for auto). Then, from `backend\`:
+`python -m eval.live_replay ..\data-v1\eval\reel25.mp4 --out <dir> --target budget=http://127.0.0.1:8121 --target auto=http://127.0.0.1:8120 --runs 5 --loops 8`.
+
+### 3.6 Going back
+
+- One behaviour of auto mode misbehaves: its line in `backend/config/overrides.yaml` (3.2), restart the backend.
+- Auto mode as a whole: `V1_MODE=manual` in `backend/.env` and the flags you want (3.3), restart. With no flag set
+  that is v0's behaviour.
+- The removed features: the last commit that has them is `339589c` (ADR-0037).
 
 ## 4. Routing
 
@@ -311,7 +406,8 @@ the audio work of every job, then the text work of every job (the big model is u
 
 v0 was never changed, so rolling back is using v0's address again: website 3000, backend 8010.
 
-- One behaviour misbehaves: switch its flag off and restart the v1 backend.
+- One behaviour misbehaves: switch it off in `backend/config/overrides.yaml` (section 3.2; in manual mode: its flag)
+  and restart the v1 backend.
 - v1 as a whole misbehaves: `scripts/v1/stop-local.sh` (or `docker compose ... down`). Nothing in v0 depends on v1.
 - The code: tag `v0-baseline` (commit `80c36d8`) is v0 as it was before v1.
 - The card is stuck in an HQ window: `scripts/v1/gpu-mode.sh normal --run`; if 9020 still does not answer, run

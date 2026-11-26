@@ -15,7 +15,7 @@ Studio use the hosted fallbacks).
    | Folder | Branch | What | Ports |
    |---|---|---|---|
    | `Desktop\BharatDUB` | `main` | v0, the product people use; frozen at tag `v0-baseline` (`80c36d8`) | 3000, 8010 |
-   | `Desktop\BharatDUB-v1` | `v1` | v1 / v1.1, all new work behind flags | 3100, 8110 |
+   | `Desktop\BharatDUB-v1` | `v1` | v1 / v1.1 / v1.2 (auto mode) | 3100, 8110 |
 
    Create the second with `git worktree add ..\BharatDUB-v1 v1` from the v0 folder (the setup used this layout;
    the exact command used is unconfirmed).
@@ -64,10 +64,12 @@ Studio use the hosted fallbacks).
 
 ## 3. Conventions
 
-- **Flags default off.** Every new behaviour goes behind a `V1_*` flag in v1's `backend/.env`; tests force flags
-  off; with every flag off v1 behaves as v0 ([ADR-0020](adr/0020-flags-default-off.md)). Since 26 Nov 2026 three
-  things are on without a flag being set: `V1_HQ_ADAPTIVE` (HQ jobs only), the review of every HQ job, and the
-  viewer hold's way back (kill switch `LIVE_SYNC_EASE`); tests still force `V1_HQ_ADAPTIVE` off.
+- **Auto mode is the product; manual mode is the baseline.** Since v1.2 v1 runs with `V1_MODE=auto`: one function,
+  `app.v1.mode.on(feature)`, says what is in force, and a behaviour is switched off only in
+  `backend/config/overrides.yaml` ([ADR-0036](adr/0036-auto-mode.md)). Never read a `settings.v1_<flag>` directly.
+  New behaviour gets an entry in `mode.AUTO`, a line in the overrides file and tests in both modes. `V1_MODE=manual`
+  is the flags as before v1.2 ([ADR-0020](adr/0020-flags-default-off.md)): the tests pin it (`tests/conftest.py`)
+  with every flag off, and with every flag off v1 behaves as v0.
 - **Never touch v0.** No start, stop, restart or reconfigure of 3000, 8010, 9001-9003, 9010, 9020, 9030, 9040. v1
   only calls the shared GPU servers. Never read or write v0's data (`backend/data`, `backend/data-mock`, its
   JSON, its voice folders) ([ADR-0018](adr/0018-v1-beside-v0.md)).
@@ -95,8 +97,8 @@ cd backend
 ```
 
 Offline, fake providers, no credits. At the end of v1.1: **311 pass, 1 skipped** (the Postgres store test, no
-database) (`docs/v1/V1_1_SUMMARY.md`, 25 Nov 2026). After v1.2 Part 1: **336 pass, 1 skipped** (26 Nov 2026,
-`docs/v1/PROGRESS.md`). Real provider checks: `python -m scripts.smoke` (costs
+database) (`docs/v1/V1_1_SUMMARY.md`, 25 Nov 2026). After v1.2 Part 1: **336 pass, 1 skipped**; after v1.2 Part 2 (auto mode): **347 pass, 1 skipped** (26 Nov 2026,
+`docs/v1/PROGRESS.md`). The suite runs in manual mode with every flag off; `tests/test_v1_auto.py` switches auto mode on. Real provider checks: `python -m scripts.smoke` (costs
 credits).
 
 ## 5. Eval

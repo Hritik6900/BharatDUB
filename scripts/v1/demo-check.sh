@@ -2,7 +2,7 @@
 # Before a demo: is v1 ready? Read-only. Exit 0 = everything needed answers.
 #   scripts/v1/demo-check.sh [v1 backend] [v1 website]
 # Checks: v1 backend and website, every model server the backend is configured to call, the hosted services,
-# free GPU memory, which GPU mode the card is in, that nobody else is live, and which flags are on.
+# free GPU memory, which GPU mode the card is in, that nobody else is live, the mode (auto or manual) and what is in force.
 set -uo pipefail
 API="${1:-${V1_API:-http://127.0.0.1:8110}}"; WEB="${2:-${V1_WEB:-http://127.0.0.1:3100}}"
 V0_API="${V0_API:-http://127.0.0.1:8010}"
@@ -39,8 +39,10 @@ for c in h["checks"]:
     else:
         print("FAIL  %-34s %s" % (c["name"], c.get("error", "down")))
         bad = 1
-on = [k for k, v in h["flags"].items() if v is True]
-print("flags on: " + (", ".join(on) if on else "none (behaves as v0)") + "; store: " + str(h["flags"].get("V1_STORE")))
+f = h["flags"]
+on = [k for k, v in f.items() if v is True]
+print("mode: " + str(f.get("V1_MODE", "manual")) + "; overrides: " + (", ".join(f"{k}={v}" for k, v in (f.get("overrides") or {}).items()) or "none")
+      + "; in force: " + (", ".join(on) if on else "nothing (behaves as v0)") + "; store: " + str(f.get("V1_STORE")))
 g = h.get("gpu")
 print("GPU %s: " % h.get("gpu_name", "A100 (VM)") + ("%.1f GB free of %.1f" % (g["free_gb"], g["total_gb"]) if g else "unknown (no /gpu endpoint on the VM yet)"))
 for c in h.get("circuits") or []:

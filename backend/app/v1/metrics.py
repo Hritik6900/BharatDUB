@@ -12,6 +12,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from app.config import Settings, get_settings
 from app.shared.metrics import percentile
 from app.v1 import trace
+from app.v1 import mode as v1mode
 
 router = APIRouter()
 
@@ -74,7 +75,17 @@ def live_summary(recs: list[dict[str, Any]], s: Settings) -> dict[str, Any]:
             "budgeted": len(planned), "reasked": sum(1 for r in rows if r.get("reasked")),
             "reask_used": sum(1 for r in rows if r.get("reasked") == 2),
             "dense_phrases": sum(1 for r in rows if r.get("dense")),
-            "native_speed": sum(1 for r in rows if r.get("native")),
+            # v1.2: the auto budget, the guards, and lines a voice refused
+            "budget_auto_on": sum(1 for r in rows if r.get("budget_auto") is True),
+            "budget_auto_off": sum(1 for r in rows if r.get("budget_auto") is False),
+            "guard_script_failed": sum(1 for r in rows if r.get("guard_script")),
+            "guard_script_flagged": sum(1 for r in rows if r.get("guard_script") == "flagged"),
+            "src_script_failed": sum(1 for r in rows if r.get("src_script_ok") is False),
+            "voice_fallback": sum(1 for r in rows if r.get("voice_fallback")),
+            "unspoken": sum(1 for r in rows if r.get("unspoken")),
+            "silent_unmarked": sum(1 for r in rows if r.get("first_audio_ms") is None and not r.get("skipped")
+                                   and not r.get("unspoken")),
+            "judged": sum(1 for r in rows if r.get("judged")),
             "budget_scale_mean": round(sum(r["ctl_scale"] for r in planned if r.get("ctl_scale")) / len(planned), 2) if planned else None,
             "phrases": len(rows), "spoken": len(spoken),
             "skipped_late": sum(1 for r in rows if r.get("skipped") == "late"),
@@ -126,7 +137,29 @@ def live_summary(recs: list[dict[str, Any]], s: Settings) -> dict[str, Any]:
         "hosted_stt_minutes": round(sum((max(v) - min(v)) / 60000 for sid, v in spans.items() if len(v) > 1 and any(
             str(r.get("stt") or "").startswith("GnaniSTT") for r in phrases if r["session"] == sid)), 2),
     }
-    return {**block(heard_langs), "per_lang": {k: block(v) for k, v in sorted(by_lang.items())},
+    # v1.2: the meaning check judges a SAMPLE of the spoken lines after the fact (kind `live_meaning`); `lost` is
+    # counted on the judged lines that were translated under the budget, `shifted` on every judged line.
+    verdicts = [r for r in recs if r["kind"] == "live_meaning"]
+
+    def judged(rows: list[dict[str, Any]]) -> dict[str, Any]:
+        tight = [r for r in rows if r.get("budgeted")]
+        return {"judged": len(rows), "shifted": sum(1 for r in rows if r.get("shift")),
+                "shift_pct": _share(sum(1 for r in rows if r.get("shift")), len(rows)),
+                "judged_budgeted": len(tight), "lost_budgeted": sum(1 for r in tight if r.get("lost")),
+                "loss_pct": _share(sum(1 for r in tight if r.get("lost")), len(tight)),
+                "lost_any": sum(1 for r in rows if r.get("lost"))}
+    per_lang = {k: block(v) for k, v in sorted(by_lang.items())}
+    for lg, b in per_lang.items():
+        b["meaning"] = judged([r for r in verdicts if r.get("lang") == lg])
+    steps = [r for r in recs if r["kind"] == "live_budget_adjust"]
+    return {**block(heard_langs), "per_lang": per_lang,
+            "meaning": judged(verdicts),
+            "budget_switches": sum(1 for r in recs if r["kind"] == "live_auto_budget"),
+            "budget_looser": sum(1 for r in steps if (r.get("steps") or 0) > (r.get("was") or 0)),
+            "budget_tighter": sum(1 for r in steps if (r.get("steps") or 0) < (r.get("was") or 0)),
+            "en_voice": [{"session": r.get("session"), "voice": r.get("mode"), "why": r.get("why"),
+                          "probe_ms": r.get("probe_ms"), "available_ms": r.get("available_ms")}
+                         for r in recs if r["kind"] == "live_en_voice"],
             "per_engine": {k: block(v) for k, v in sorted(by_engine.items())},
             "session_first_audio_ms": _pct(opening, 50),
             "short_lines_joined": total("merged"), "short_lines_alone": total("short_alone"),
@@ -183,8 +216,8 @@ async def prometheus() -> Response:
 @router.get("/api/v1/metrics/summary")
 async def summary(hours: float = Query(24.0, gt=0, le=24 * 30), session: str = "") -> dict[str, Any]:
     s = get_settings()
-    recs = trace.read(hours) if s.v1_trace or trace.trace_dir().exists() else []
+    recs = trace.read(hours) if v1mode.on("trace", s) or trace.trace_dir().exists() else []
     if session:
         recs = [r for r in recs if r.get("session", "").startswith(session) or r.get("job", "").startswith(session)]
-    return {"trace_on": s.v1_trace, "hours": hours, "records": len(recs),
+    return {"trace_on": v1mode.on("trace", s), "hours": hours, "records": len(recs),
             "live": live_summary(recs, s), "studio": studio_summary(recs, s)}
