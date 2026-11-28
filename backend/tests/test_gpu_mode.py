@@ -75,6 +75,19 @@ async def test_local_llm_asks_again_when_a_line_for_the_voice_engine_has_latin_l
     assert "at most 5 words" in seen[0]["messages"][0]["content"]
 
 
+async def test_a_long_studio_line_asked_for_on_its_own_gets_room_for_its_whole_translation():
+    # 28 Nov 2026: a 113-word line (a reel without a pause is one line) came back cut inside a word at 200 tokens.
+    seen: list[dict] = []
+    llm = local_llm(["ਗੇਮ"], seen)
+    long_line = " ".join(["shabd"] * 113)
+    await llm.translate_chunk(long_line, "pa-IN", [], [], native=True, max_words=147)
+    assert seen[0]["max_tokens"] >= 113 * 10
+    seen.clear()
+    llm = local_llm(["ਗੇਮ"], seen)
+    await llm.translate_chunk("aaj ham ek naya game khelenge", "pa-IN", [], [], native=True)
+    assert seen[0]["max_tokens"] == 200   # a live phrase is as before
+
+
 async def test_sample_text_goes_to_devanagari_and_a_bad_answer_is_not_used():
     llm = local_llm(["आज हम एक नया गेम खेलेंगे"], [])
     assert await llm.to_devanagari("aaj ham ek naya game khelenge") == "आज हम एक नया गेम खेलेंगे"

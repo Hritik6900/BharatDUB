@@ -94,6 +94,16 @@ file says. Recommended settings: `docs/v1/RUNBOOK.md`, "Recommended settings".
 
 ### Fixed
 
+- **A long Studio line was cut in the middle (28 Nov 2026).** A reel without a pause is one line; when the GPU
+  engine's batch translation of it carried Latin letters, the line was asked for again on its own with a reply
+  limit of 200 tokens. Job `e6611801`: 113 source words came back as 69 Punjabi words ending inside a word, and
+  the dub ended at 15.7 s of a 24.9 s video with no warning. The reply limit now follows the line's length
+  (`reply_room` in `providers/llm_openai.py`; a live phrase keeps its 200 tokens and 8 s), on the hosted model's
+  per-line calls and on `shorten` too, and a long line no longer names a time limit, which the breaker read as a
+  live line's 3 s. Checked once on the GPU model with the same stored line: 108 Punjabi words and 78 Tamil
+  words, both ending with the source's last sentence. Test
+  `test_a_long_studio_line_asked_for_on_its_own_gets_room_for_its_whole_translation`. v0 has the same limit and
+  is not changed.
 - **v1.2 Parts 3-4:** `scripts/v1/collect-logs.py` rewrote `logs/sessions/index.csv` and `logs/jobs/index.csv`
   from the stores named on its command line alone, dropping every other version's rows. It now writes the named
   versions afresh and keeps the rows (and the column order) of all others; test

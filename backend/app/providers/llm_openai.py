@@ -17,6 +17,13 @@ SCRIPTS = {
 }
 
 
+def reply_room(words: int, floor: int) -> int:
+    """Tokens a reply of about `words` words may take. A fixed limit cut a long Studio line in the middle: on
+    28 Nov 2026 a 113-word line asked for on its own came back as 69 Punjabi words (359 letters) at the 200-token
+    limit, ending inside a word, and the dub stopped at 15.7 s of a 24.9 s video. Short live lines keep `floor`."""
+    return max(floor, min(4000, 60 + 10 * words))
+
+
 def script_rule(target: str) -> str:
     """Hinglish input in Latin letters tempts models to answer in romanised Tamil/Bengali; the voice needs native script."""
     script = SCRIPTS.get(target)
@@ -126,14 +133,15 @@ class OpenAILLM:
             system += (f" Time limit: the speaker took the time of about {max_words} {lang} words. Use at most "
                        f"{max_words} words; if the full meaning does not fit, keep the main point.")
         fast = bool(self.s.llm_model_fast) and self.s.llm_model_fast != self.s.llm_model
-        out = clean_line(await self._chat(system, user, model=self.s.llm_fast, max_tokens=400, timeout=20.0,
+        room = reply_room(len(text.split()), 400)
+        out = clean_line(await self._chat(system, user, model=self.s.llm_fast, max_tokens=room, timeout=20.0,
                                           effort=(self.s.llm_reasoning_effort_fast or None) if fast else None))
         if wrong_script(out, target):
             # About 1 reply in 20 carries a word in the wrong script (measured, scripts/live_llm_bench.py): the
             # voice would misread it. The main model gets that line once more, with the rule spelled out.
             only = f" Write every word in {SCRIPTS[target]} letters (English words in Latin letters); no other script."\
                 if target in SCRIPTS else " Write in English only, in Latin letters."
-            again = clean_line(await self._chat(system + only, user, max_tokens=400, timeout=20.0))
+            again = clean_line(await self._chat(system + only, user, max_tokens=room, timeout=20.0))
             if not wrong_script(again, target):
                 out = again
         return out
@@ -145,7 +153,7 @@ class OpenAILLM:
             + (f"Use at most {max_words} words. " if max_words else "") +
             "Keep the meaning, the tone and any English words. " + script_rule(target) + "Reply with the rewritten line only."
         )
-        return clean_line(await self._chat(system, text, max_tokens=300))
+        return clean_line(await self._chat(system, text, max_tokens=reply_room(len(text.split()), 300)))
 
     async def judge_lines(self, pairs: list[tuple[str, str]], target: str) -> list[dict[str, bool]]:
         """v1.2 guards: each (source line, dub line) judged for content shift and lost meaning (app/v1/guards.py

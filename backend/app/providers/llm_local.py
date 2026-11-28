@@ -7,7 +7,7 @@ which the voice engine reads as noise. This prompt states each rule once, shows 
 like in the target script, and a line that still carries Latin letters is asked for once more.
 """
 from app.config import LANG_NAMES
-from app.providers.llm_openai import SCRIPTS, OpenAILLM, clean_line, wrong_script
+from app.providers.llm_openai import SCRIPTS, OpenAILLM, clean_line, reply_room, wrong_script
 
 # "game" and "chat" in each script: one look tells the model how English words are to be written.
 SPELLED = {
@@ -86,7 +86,8 @@ class LocalLLM(OpenAILLM):
                  "drop the rest." if max_words
                  else f"Rewrite this {lang} line so it can be spoken naturally in at most {max_seconds:.1f} seconds.")
         system = (f"This is a {lang} line of a dubbed video. " + limit + " Keep the meaning and the tone." + self._native(target) + " Reply with the rewritten line only.")
-        return clean_line(await self._chat(system, text, temperature=0.2, max_tokens=300))
+        return clean_line(await self._chat(system, text, temperature=0.2,
+                                           max_tokens=reply_room(len(text.split()), 300)))
 
     async def translate_chunk(self, text: str, target: str, glossary: list[str], context: list[str],
                               brief: bool = False, native: bool = False, max_words: int | None = None,
@@ -121,12 +122,17 @@ class LocalLLM(OpenAILLM):
         system = "\n".join(f"{i + 1}. {r}" for i, r in enumerate(rules))
         user = ("Previous lines (context only):\n" + "\n".join(context[-3:]) + "\n\n" if context else "") \
             + f"CURRENT: {text}"
-        out = clean_line(await self._chat(system, user, temperature=0.2, max_tokens=200, timeout=8.0))
+        # A live phrase keeps 200 tokens and 8 s; a long Studio line gets the room and the time its length needs.
+        room = reply_room(max(n, limit), 200)
+        # No named limit for the long one: a call that names one is treated as a live line by the breaker (3 s),
+        # and 300 and more tokens take longer than that.
+        wait = 8.0 if room <= 200 else None
+        out = clean_line(await self._chat(system, user, temperature=0.2, max_tokens=room, timeout=wait))
         if wrong_script(out, target) or (native and script and has_latin(out)):
             fix = (f"Rewrite this {lang} line with every word in {script} letters, spelled the way it sounds. "
                    "Change nothing else. Reply with the line only." if script
                    else "Rewrite this line in English only, in Latin letters. Reply with the line only.")
-            again = clean_line(await self._chat(fix, out, temperature=0.0, max_tokens=200, timeout=8.0))
+            again = clean_line(await self._chat(fix, out, temperature=0.0, max_tokens=room, timeout=wait))
             if again and not wrong_script(again, target) and not (native and script and has_latin(again)):
                 out = again
         return out
