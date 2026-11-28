@@ -94,6 +94,13 @@ file says. Recommended settings: `docs/v1/RUNBOOK.md`, "Recommended settings".
 
 ### Fixed
 
+- **No dubbed voice at the end of a video whose speaker never pauses (28 Nov 2026).** Such a reel is one line of
+  up to 25 s, and its dub was spoken once from the line's start: 16.7 s of Tamil (18.6 s on another run) in a
+  24.9 s video, the rest background only. A line longer than `STUDIO_SPLIT_LONG_S` (10 s; 0 = off) is now cut
+  into lines of about 6 s at its sentences (`studio/stages/split.py`), each with a time shared out by words and
+  moved to the quietest moment within 0.5 s, and each dubbed in its own slot. One job on the same reel, GPU
+  engine, voice from the video: 4 lines; the dubbed voice ends at 22.6 s in Punjabi (15.7 s before) and 24.9 s
+  in Tamil (16.7 s). The cut times are an estimate, not measured word times. Tests in `test_split_long.py`.
 - **A long Studio line was cut in the middle (28 Nov 2026).** A reel without a pause is one line; when the GPU
   engine's batch translation of it carried Latin letters, the line was asked for again on its own with a reply
   limit of 200 tokens. Job `e6611801`: 113 source words came back as 69 Punjabi words ending inside a word, and

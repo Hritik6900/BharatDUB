@@ -20,7 +20,7 @@ from app.shared.metrics import StageTimer
 from app.shared.storage import publish_output
 from app.studio.events import events
 from app.v1 import apilog
-from app.studio.stages import extract, fit, mix, render, segment, separate, transcribe, translate, voice
+from app.studio.stages import extract, fit, mix, render, segment, separate, split, transcribe, translate, voice
 from app.v1 import guards, lineguard, trace
 from app.v1.hq import runner as hq
 from app.v1 import mode as v1mode
@@ -200,6 +200,11 @@ class StudioRunner:
                 raise PipelineError(f"Could not transcribe any speech in this video.{why}")
             langs = Counter(r["lang"] for r in results if r["lang"])
             src_lang = langs.most_common(1)[0][0] if langs else "indic-auto"
+            n_heard = len(segs)
+            segs, results = split.split_long(segs, results, self.s.studio_split_long_s, audio16)
+            if len(segs) != n_heard:
+                # The clips on disk are named by line: cut them again so that each line has its own.
+                await asyncio.to_thread(transcribe.cut_clips, audio16, segs, d / "clips")
             await self.store.delete("segments", job_id=ctx.job_id)
             await self.store.insert_many("segments", [
                 {"job_id": ctx.job_id, "idx": i, "start_s": s, "end_s": e, "src_text": r["text"],

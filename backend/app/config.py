@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     tts_sample_rate: int = 44100
 
     studio_translate_ahead: bool = True  # translate all target languages at once instead of one by one
+    # A line longer than this many seconds is cut into lines of a few seconds at its sentences, so the dub of a
+    # speaker who never pauses follows the video to its end (stages/split.py). 0 = off.
+    studio_split_long_s: float = 10.0
     live_sample_rate: int = 24000      # Live TTS PCM rate sent to viewers
     live_clone_max_lag_ms: int = 5000  # a Live chunk already this late is spoken in the stock voice (catch-up)
     live_clone_langs: int = 0          # languages (in session order) dubbed in the cloned voice; 0 = GNANI_MAX_CONCURRENCY
